@@ -4,11 +4,19 @@
 
 #ifndef DUSK_CAMERA_H
 #define DUSK_CAMERA_H
-#include <SFML/Graphics.hpp>
+
+#include "math/Vec3.h++"
 
 struct Camera {
-    sf::Vector2f position;
-    const float speed = 500;
+    Vec3 position;
+
+    float yaw = 0.f;
+    float pitch = 0.f;
+    float roll = 0.f;
+
+    float speed = 200.f;
+
+    float fov = 90.f;
 };
 
 #endif //DUSK_CAMERA_H
