@@ -15,8 +15,11 @@ add_executable(dusk src/main.cpp
         include/objects/cube.h++
         include/objects/ship.h++
         include/objects/star.h++
+        include/systems/ship_physics.h++
         include/world/starfield.h++
+        include/world/world.h++
         include/rendering/cube_renderer.h++
+        include/rendering/hud_renderer.h++
         include/rendering/projector.h++
         include/rendering/ship_renderer.h++
         include/rendering/star_renderer.h++)

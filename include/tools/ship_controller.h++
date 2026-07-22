@@ -38,14 +38,20 @@ struct ShipCameraRig {
     float showcaseAngle = 0.f;
 };
 
-/** Applies keyboard input to the ship before the camera follows it. */
-inline void updateShipFromKeyboard(Ship& ship, float dt)
+/** Tracks edge-triggered ship input such as reverse-thrust toggling. */
+struct ShipInputState {
+    /** True while the reverse-toggle key was down on the previous frame. */
+    bool reverseToggleWasDown = false;
+};
+
+/** Applies keyboard input to the ship before physics and camera follow run. */
+inline void updateShipFromKeyboard(Ship& ship, float dt, ShipInputState& inputState)
 {
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::W))
-        ship.position += shipForward(ship) * ship.speed * dt;
+        ship.throttle += ship.throttleChangeSpeed * dt;
 
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::S))
-        ship.position -= shipForward(ship) * ship.speed * dt;
+        ship.throttle -= ship.throttleChangeSpeed * dt;
 
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::A))
         ship.yaw -= ship.yawSpeed * dt;
@@ -59,6 +65,16 @@ inline void updateShipFromKeyboard(Ship& ship, float dt)
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::E))
         ship.pitch -= ship.pitchSpeed * dt;
 
+    const bool reverseToggleDown = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Down);
+
+    if (reverseToggleDown && !inputState.reverseToggleWasDown)
+    {
+        ship.reverseThrust = !ship.reverseThrust;
+        ship.throttle = 0.f;
+    }
+
+    inputState.reverseToggleWasDown = reverseToggleDown;
+    ship.throttle = std::clamp(ship.throttle, 0.f, 1.f);
     clampShipPitch(ship);
 }
 

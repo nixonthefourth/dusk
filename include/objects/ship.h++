@@ -14,14 +14,26 @@ struct Ship {
     /** Ship origin in world space. */
     Vec3 position = {0.f, 0.f, 0.f};
 
+    /** Ship velocity in world units per second. */
+    Vec3 velocity;
+
     /** Horizontal heading in radians. */
     float yaw = 0.f;
 
     /** Nose pitch in radians. */
     float pitch = 0.f;
 
-    /** Movement speed along the ship's local forward axis. */
-    float speed = 400.f;
+    /** Current throttle amount in the range [0, 1]. */
+    float throttle = 0.f;
+
+    /** When true, thrust is applied opposite the ship's forward axis. */
+    bool reverseThrust = false;
+
+    /** Acceleration at full throttle in world units per second squared. */
+    float maxAcceleration = 360.f;
+
+    /** W/S throttle change speed per second. */
+    float throttleChangeSpeed = 0.8f;
 
     /** A/D turn speed in radians per second. */
     float yawSpeed = 1.f;
