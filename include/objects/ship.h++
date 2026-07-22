@@ -6,7 +6,6 @@
 #define DUSK_SHIP_H
 
 #include "math/Vec3.h++"
-#include <algorithm>
 #include <cmath>
 
 /** Player ship state and tuning values. */
@@ -70,11 +69,26 @@ inline Vec3 shipLocalToWorld(const Ship& ship, const Vec3& local)
         shipForward(ship) * local.z;
 }
 
-/** Clamps ship pitch to keep the third-person camera readable. */
-inline void clampShipPitch(Ship& ship)
+/** Wraps an angle so continuous pitch loops do not grow without bound. */
+inline float wrapAngle(float angle)
 {
-    constexpr float maxPitch = 1.25f;
-    ship.pitch = std::clamp(ship.pitch, -maxPitch, maxPitch);
+    constexpr float pi = 3.14159265358979323846f;
+    constexpr float tau = pi * 2.f;
+
+    while (angle > pi)
+        angle -= tau;
+
+    while (angle < -pi)
+        angle += tau;
+
+    return angle;
+}
+
+/** Keeps yaw and pitch in a stable circular range while still allowing full loops. */
+inline void wrapShipAngles(Ship& ship)
+{
+    ship.yaw = wrapAngle(ship.yaw);
+    ship.pitch = wrapAngle(ship.pitch);
 }
 
 #endif //DUSK_SHIP_H

@@ -33,20 +33,22 @@ struct ShipModel {
         {560.f, -70.f, -300.f},
         {0.f, 120.f, -130.f},
         {0.f, -130.f, -130.f},
-        {-200.f, 0.f, -460.f},
-        {200.f, 0.f, -460.f},
-        {0.f, 35.f, -500.f},
+        {-260.f, 45.f, -470.f},
+        {260.f, 45.f, -470.f},
+        {-260.f, -85.f, -470.f},
+        {260.f, -85.f, -470.f},
         {0.f, 85.f, 140.f}
     };
 
     std::vector<ShipLine> lines =
     {
         {0, 1, false}, {0, 2, false}, {1, 3, false}, {2, 4, false},
-        {3, 7, false}, {4, 8, false}, {7, 9, false}, {8, 9, false},
-        {1, 5, false}, {2, 5, false}, {5, 9, false}, {5, 10, false},
-        {0, 10, false}, {10, 1, false}, {10, 2, false},
-        {0, 6, true}, {1, 6, true}, {2, 6, true}, {3, 6, true},
-        {4, 6, true}, {6, 9, true}
+        {3, 7, false}, {4, 8, false}, {7, 8, false}, {5, 7, false},
+        {5, 8, false}, {1, 5, false}, {2, 5, false}, {5, 11, false},
+        {0, 11, false}, {11, 1, false}, {11, 2, false},
+        {0, 6, true}, {1, 6, true}, {2, 6, true}, {3, 9, true},
+        {4, 10, true}, {6, 9, true}, {6, 10, true}, {9, 10, true},
+        {7, 9, true}, {8, 10, true}
     };
 };
 

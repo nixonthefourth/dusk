@@ -28,12 +28,13 @@ int main() {
     Starfield starfield(starfieldConfig);
     Cube cube;
     Ship ship;
+    ShipCameraRig shipCameraRig;
 
     const ProjectionConfig projectionConfig = {1.f, starfieldConfig.radius};
     const StarRenderer starRenderer({starfieldConfig.radius, 1.f, 4.f}, projectionConfig);
     const CubeRenderer cubeRenderer(projectionConfig);
     const ShipRenderer shipRenderer(projectionConfig);
-    updateCameraToFollowShip(camera, ship);
+    updateShipCamera(camera, ship, 0.f, shipCameraRig);
 
     // Main update loop
     while (window.isOpen()) {
@@ -49,7 +50,7 @@ int main() {
             window.close();
 
         updateShipFromKeyboard(ship, dt);
-        updateCameraToFollowShip(camera, ship);
+        updateShipCamera(camera, ship, dt, shipCameraRig);
         starfield.update(camera.position);
         updateCube(cube, dt);
 
