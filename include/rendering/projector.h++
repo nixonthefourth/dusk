@@ -179,22 +179,45 @@ public:
         const float cosYaw = std::cos(camera.yaw);
         const float sinPitch = std::sin(camera.pitch);
         const float cosPitch = std::cos(camera.pitch);
-        const float sinRoll = std::sin(camera.roll);
-        const float cosRoll = std::cos(camera.roll);
+
+        const Vec3 forward = normalized(
+        {
+            sinYaw * cosPitch,
+            sinPitch,
+            cosYaw * cosPitch
+        });
+        const Vec3 worldUp = {0.f, 1.f, 0.f};
+        Vec3 right = normalized(cross(worldUp, forward));
+
+        if (length(right) == 0.f)
+            right = {1.f, 0.f, 0.f};
+
+        Vec3 up = normalized(cross(forward, right));
+
+        if (camera.roll != 0.f)
+        {
+            const float sinRoll = std::sin(camera.roll);
+            const float cosRoll = std::cos(camera.roll);
+            const Vec3 rolledRight = right * cosRoll + up * sinRoll;
+            const Vec3 rolledUp = up * cosRoll - right * sinRoll;
+
+            right = rolledRight;
+            up = rolledUp;
+        }
 
         Mat4 matrix;
 
-        matrix.m[0][0] = cosRoll * cosYaw + sinRoll * sinPitch * sinYaw;
-        matrix.m[0][1] = -sinRoll * cosPitch;
-        matrix.m[0][2] = -cosRoll * sinYaw + sinRoll * sinPitch * cosYaw;
+        matrix.m[0][0] = right.x;
+        matrix.m[0][1] = right.y;
+        matrix.m[0][2] = right.z;
 
-        matrix.m[1][0] = sinRoll * cosYaw - cosRoll * sinPitch * sinYaw;
-        matrix.m[1][1] = cosRoll * cosPitch;
-        matrix.m[1][2] = -sinRoll * sinYaw - cosRoll * sinPitch * cosYaw;
+        matrix.m[1][0] = up.x;
+        matrix.m[1][1] = up.y;
+        matrix.m[1][2] = up.z;
 
-        matrix.m[2][0] = cosPitch * sinYaw;
-        matrix.m[2][1] = sinPitch;
-        matrix.m[2][2] = cosPitch * cosYaw;
+        matrix.m[2][0] = forward.x;
+        matrix.m[2][1] = forward.y;
+        matrix.m[2][2] = forward.z;
 
         matrix.m[0][3] = -(
             matrix.m[0][0] * camera.position.x +

@@ -6,6 +6,7 @@
 #define DUSK_SHIP_H
 
 #include "math/Vec3.h++"
+#include <algorithm>
 #include <cmath>
 
 /** Player ship state and tuning values. */
@@ -84,11 +85,13 @@ inline float wrapAngle(float angle)
     return angle;
 }
 
-/** Keeps yaw and pitch in a stable circular range while still allowing full loops. */
-inline void wrapShipAngles(Ship& ship)
+/** Keeps ship pitch within a readable nose-up/nose-down range. */
+inline void clampShipPitch(Ship& ship)
 {
     ship.yaw = wrapAngle(ship.yaw);
-    ship.pitch = wrapAngle(ship.pitch);
+
+    constexpr float maxPitch = 1.25f;
+    ship.pitch = std::clamp(ship.pitch, -maxPitch, maxPitch);
 }
 
 #endif //DUSK_SHIP_H

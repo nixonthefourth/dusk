@@ -16,7 +16,7 @@ struct ShipCameraSettings {
     /** Distance behind the ship along its local forward axis. */
     float followDistance = 1000.f;
 
-    /** Height above the ship in world space, keeping the view upright through loops. */
+    /** Height above the ship in world space, keeping the view upright. */
     float followHeight = 800.f;
 
     /** Point ahead of the ship that the camera looks toward. */
@@ -59,15 +59,21 @@ inline void updateShipFromKeyboard(Ship& ship, float dt)
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::E))
         ship.pitch -= ship.pitchSpeed * dt;
 
-    wrapShipAngles(ship);
+    clampShipPitch(ship);
 }
 
 /** Points the camera at a world-space target without rolling the view. */
 inline void pointCameraAt(Camera& camera, const Vec3& target)
 {
     const Vec3 viewDirection = normalized(target - camera.position);
+    constexpr float maxCameraPitch = 1.4f;
+
     camera.yaw = std::atan2(viewDirection.x, viewDirection.z);
-    camera.pitch = std::asin(std::clamp(viewDirection.y, -1.f, 1.f));
+    camera.pitch = std::clamp(
+        std::asin(std::clamp(viewDirection.y, -1.f, 1.f)),
+        -maxCameraPitch,
+        maxCameraPitch
+    );
     camera.roll = 0.f;
 }
 
