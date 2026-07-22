@@ -13,50 +13,6 @@ struct Vec2
     float y = 0.f;
 };
 
-/* Standard operators */
-
-// Addition
-inline Vec2 operator+(Vec2 a, const Vec2& b)
-{
-    return a += b;
-}
-
-// Subtraction
-inline Vec2 operator-(Vec2 a, const Vec2& b)
-{
-    return a -= b;
-}
-
-// Component multiplication
-inline Vec2 operator*(Vec2 a, const Vec2& b)
-{
-    return a *= b;
-}
-
-// Scalar multiplication
-inline Vec2 operator*(Vec2 a, float s)
-{
-    return a *= s;
-}
-
-// Scalar multiplication (commutative)
-inline Vec2 operator*(float s, Vec2 a)
-{
-    return a *= s;
-}
-
-// Component division
-inline Vec2 operator/(Vec2 a, const Vec2& b)
-{
-    return a /= b;
-}
-
-// Scalar division
-inline Vec2 operator/(Vec2 a, float s)
-{
-    return a /= s;
-}
-
 /* Compound operators */
 
 // Addition
@@ -105,6 +61,50 @@ inline Vec2& operator/=(Vec2& a, float s)
     a.x /= s;
     a.y /= s;
     return a;
+}
+
+/* Standard operators */
+
+// Addition
+inline Vec2 operator+(Vec2 a, const Vec2& b)
+{
+    return a += b;
+}
+
+// Subtraction
+inline Vec2 operator-(Vec2 a, const Vec2& b)
+{
+    return a -= b;
+}
+
+// Component multiplication
+inline Vec2 operator*(Vec2 a, const Vec2& b)
+{
+    return a *= b;
+}
+
+// Scalar multiplication
+inline Vec2 operator*(Vec2 a, float s)
+{
+    return a *= s;
+}
+
+// Scalar multiplication (commutative)
+inline Vec2 operator*(float s, Vec2 a)
+{
+    return a *= s;
+}
+
+// Component division
+inline Vec2 operator/(Vec2 a, const Vec2& b)
+{
+    return a /= b;
+}
+
+// Scalar division
+inline Vec2 operator/(Vec2 a, float s)
+{
+    return a /= s;
 }
 
 /* Utility functions */

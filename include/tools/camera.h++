@@ -10,11 +10,12 @@
 struct Camera {
     Vec3 position;
 
+    // Orientation is stored in radians. Field-of-view is stored in degrees.
     float yaw = 0.f;
     float pitch = 0.f;
     float roll = 0.f;
 
-    float speed = 200.f;
+    float speed = 800.f;
 
     float fov = 90.f;
 };

@@ -11,69 +11,107 @@ struct Vec3 {
     float x = 0.f, y = 0.f, z = 0.f;
 };
 
-// Subtraction
-inline Vec3 operator-(const Vec3& a, const Vec3& b)
-{
-    return
-    {
-        a.x - b.x,
-        a.y - b.y,
-        a.z - b.z
-    };
-}
+/* Compound operators */
 
 // Addition
-inline Vec3 operator+(const Vec3& a, const Vec3& b)
+inline Vec3& operator+=(Vec3& a, const Vec3& b)
 {
-    return
-    {
-        a.x + b.x,
-        a.y + b.y,
-        a.z + b.z
-    };
+    a.x += b.x;
+    a.y += b.y;
+    a.z += b.z;
+    return a;
 }
 
-// Multiplication between objects
-inline Vec3 operator*(const Vec3& a, const Vec3& b)
+// Subtraction
+inline Vec3& operator-=(Vec3& a, const Vec3& b)
 {
-    return
-    {
-        a.x * b.x,
-        a.y * b.y,
-        a.z * b.z
-    };
+    a.x -= b.x;
+    a.y -= b.y;
+    a.z -= b.z;
+    return a;
 }
 
-// Constant multiplication
-inline Vec3 operator*(const Vec3& a, float b) {
-    return
-    {
-      a.x * b,
-        a.y * b,
-        a.z * b
-    };
-}
-
-// Division between objects
-inline Vec3 operator/(const Vec3& a, const Vec3& b)
+// Component multiplication
+inline Vec3& operator*=(Vec3& a, const Vec3& b)
 {
-    return
-    {
-        a.x / b.x,
-        a.y / b.y,
-        a.z / b.z
-    };
+    a.x *= b.x;
+    a.y *= b.y;
+    a.z *= b.z;
+    return a;
 }
 
-// Division by constant
-inline Vec3 operator/(const Vec3& a, float b) {
-    return
-    {
-        a.x / b,
-        a.y / b,
-        a.z / b
-    };
+// Scalar multiplication
+inline Vec3& operator*=(Vec3& a, float s)
+{
+    a.x *= s;
+    a.y *= s;
+    a.z *= s;
+    return a;
 }
+
+// Component division
+inline Vec3& operator/=(Vec3& a, const Vec3& b)
+{
+    a.x /= b.x;
+    a.y /= b.y;
+    a.z /= b.z;
+    return a;
+}
+
+// Scalar division
+inline Vec3& operator/=(Vec3& a, float s)
+{
+    a.x /= s;
+    a.y /= s;
+    a.z /= s;
+    return a;
+}
+
+/* Standard operators */
+
+// Addition
+inline Vec3 operator+(Vec3 a, const Vec3& b)
+{
+    return a += b;
+}
+
+// Subtraction
+inline Vec3 operator-(Vec3 a, const Vec3& b)
+{
+    return a -= b;
+}
+
+// Component multiplication
+inline Vec3 operator*(Vec3 a, const Vec3& b)
+{
+    return a *= b;
+}
+
+// Scalar multiplication
+inline Vec3 operator*(Vec3 a, float s)
+{
+    return a *= s;
+}
+
+// Scalar multiplication (commutative)
+inline Vec3 operator*(float s, Vec3 a)
+{
+    return a *= s;
+}
+
+// Component division
+inline Vec3 operator/(Vec3 a, const Vec3& b)
+{
+    return a /= b;
+}
+
+// Scalar division
+inline Vec3 operator/(Vec3 a, float s)
+{
+    return a /= s;
+}
+
+/* Utility functions */
 
 // Magnitude (Length)
 inline float length(const Vec3& v)
@@ -118,72 +156,6 @@ inline Vec3 cross(const Vec3& a, const Vec3& b)
         a.y * b.z - a.z * b.y,
         a.z * b.x - a.x * b.z,
         a.x * b.y - a.y * b.x
-    };
-}
-
-/* Compound operators */
-
-// Addition
-inline Vec3 operator+=(const Vec3& a, const Vec3& b)
-{
-    return
-    {
-        a.x + b.x,
-        a.y + b.y,
-        a.z + b.z
-    };
-}
-
-// Subtraction
-inline Vec3 operator-=(const Vec3& a, const Vec3& b)
-{
-    return
-    {
-        a.x - b.x,
-        a.y - b.y,
-        a.z - b.z
-    };
-}
-
-// Object Multiplication
-inline Vec3 operator*=(const Vec3& a, const Vec3& b)
-{
-    return
-    {
-        a.x * b.x,
-        a.y * b.y,
-        a.z * b.z
-    };
-}
-
-// Constant multiplication
-inline Vec3 operator*=(const Vec3& a, float b) {
-    return
-    {
-        a.x * b,
-          a.y * b,
-          a.z * b
-      };
-}
-
-// Object Division
-inline Vec3 operator/=(const Vec3& a, const Vec3& b)
-{
-    return
-    {
-        a.x / b.x,
-        a.y / b.y,
-        a.z / b.z
-    };
-}
-
-// Constant Division
-inline Vec3 operator/=(const Vec3& a, float b) {
-    return
-    {
-        a.x / b,
-        a.y / b,
-        a.z / b
     };
 }
 
