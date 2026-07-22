@@ -1,6 +1,8 @@
 #include <iostream>
 #include <SFML/Graphics.hpp>
-#include "camera.h++"
+#include "tools/camera.h++"
+#include "objects/star.h++"
+#include <random>
 
 int main() {
     sf::RenderWindow window(
@@ -8,12 +10,40 @@ int main() {
         "dusk"
     );
 
+    constexpr float SPACE_SIZE = 10000.f;
+    constexpr float MIN_DEPTH  = 100.f;
+    constexpr float MAX_DEPTH  = 20000.f;
+
     // Start clock
     sf::Clock clock;
     sf::Clock printClock;
 
     // Initialise Camera
     Camera camera;
+
+    // Generate stars
+    std::vector<Star> stars;
+    static std::mt19937 gen(std::random_device{}());
+    std::uniform_real_distribution<float> xDist(-SPACE_SIZE, SPACE_SIZE);
+    std::uniform_real_distribution<float> yDist(-SPACE_SIZE, SPACE_SIZE);
+    std::uniform_real_distribution<float> zDist(MIN_DEPTH, MAX_DEPTH);
+
+    constexpr int STAR_COUNT = 1000;
+
+    stars.reserve(STAR_COUNT);
+
+    for (int i = 0; i < STAR_COUNT; ++i)
+    {
+        stars.push_back(
+        {
+            {
+                xDist(gen),
+                yDist(gen),
+                zDist(gen)
+            }
+        });
+    }
+
     // Main update loop
     while (window.isOpen()) {
         float dt = clock.restart().asSeconds();
@@ -27,7 +57,7 @@ int main() {
         // WRITE GAMELOOP HERE
 
         // Move Camera
-        // z
+        // z (Forward/Back)
         if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::W)) {
             camera.position.z += camera.speed * dt;
         }
@@ -36,7 +66,7 @@ int main() {
             camera.position.z -= camera.speed * dt;
         }
 
-        // x
+        // x (Left/Right)
         if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::A)) {
             camera.position.x -= camera.speed * dt;
         }
@@ -45,7 +75,7 @@ int main() {
             camera.position.x += camera.speed * dt;
         }
 
-        // y
+        // y (Up/Down)
         if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Q)) {
             camera.position.y += camera.speed * dt;
         }
@@ -54,17 +84,25 @@ int main() {
             camera.position.y -= camera.speed * dt;
         }
 
-        // Output camera positions in the terminal
+        for (auto& star : stars) {
+            Vec3 relative = star.position - camera.position;
+        }
+
         if (printClock.getElapsedTime().asSeconds() >= 0.25f)
         {
+            Vec3 relative = stars.front().position - camera.position;
+
             std::cout
                 << "Camera: ("
-                << camera.position.x
-                << ", "
-                << camera.position.y
-                << ", "
-                << camera.position.z
-                << ")\n";
+                << camera.position.x << ", "
+                << camera.position.y << ", "
+                << camera.position.z << ")\n";
+
+            std::cout
+                << "First star: ("
+                << relative.x << ", "
+                << relative.y << ", "
+                << relative.z << ")\n";
 
             printClock.restart();
         }

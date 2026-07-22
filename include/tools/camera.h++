@@ -5,7 +5,7 @@
 #ifndef DUSK_CAMERA_H
 #define DUSK_CAMERA_H
 
-#include "math/Vec3.h++"
+#include "../math/Vec3.h++"
 
 struct Camera {
     Vec3 position;
