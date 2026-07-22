@@ -3,4 +3,12 @@ project(dusk)
 
 set(CMAKE_CXX_STANDARD 23)
 
-add_executable(dusk main.cpp)
+find_package(SFML 3 COMPONENTS Graphics Window System REQUIRED)
+
+add_executable(dusk src/main.cpp)
+
+target_link_libraries(dusk PRIVATE
+        SFML::Graphics
+        SFML::Window
+        SFML::System
+)
