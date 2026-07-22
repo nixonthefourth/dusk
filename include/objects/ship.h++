@@ -30,7 +30,7 @@ struct Ship {
     bool reverseThrust = false;
 
     /** Acceleration at full throttle in world units per second squared. */
-    float maxAcceleration = 360.f;
+    float maxAcceleration = 120.f;
 
     /** W/S throttle change speed per second. */
     float throttleChangeSpeed = 0.8f;
