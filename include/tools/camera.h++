@@ -7,16 +7,24 @@
 
 #include "../math/Vec3.h++"
 
+/** Camera state used by input, view-matrix creation, and projection. */
 struct Camera {
+    /** Camera origin in world space. */
     Vec3 position;
 
-    // Orientation is stored in radians. Field-of-view is stored in degrees.
+    /** Horizontal rotation in radians. */
     float yaw = 0.f;
+
+    /** Vertical rotation in radians. */
     float pitch = 0.f;
+
+    /** Roll rotation in radians. */
     float roll = 0.f;
 
+    /** Movement speed in world units per second. */
     float speed = 800.f;
 
+    /** Vertical field-of-view in degrees. */
     float fov = 90.f;
 };
 

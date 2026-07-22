@@ -10,11 +10,13 @@
 #include <algorithm>
 #include <cmath>
 
+/** Tunable keyboard camera-control settings. */
 struct CameraControls {
+    /** Arrow-key turning speed in radians per second. */
     float lookSpeed = 1.6f;
-    float sprintMultiplier = 4.f;
 };
 
+/** Returns the camera's forward direction from yaw and pitch. */
 inline Vec3 cameraForward(const Camera& camera)
 {
     const float cosPitch = std::cos(camera.pitch);
@@ -27,6 +29,7 @@ inline Vec3 cameraForward(const Camera& camera)
     });
 }
 
+/** Returns the camera's horizontal right direction from yaw. */
 inline Vec3 cameraRight(const Camera& camera)
 {
     return normalized(
@@ -37,33 +40,30 @@ inline Vec3 cameraRight(const Camera& camera)
     });
 }
 
+/** Applies keyboard movement and arrow-key turning to the camera. */
 inline void updateCameraFromKeyboard(Camera& camera, float dt, const CameraControls& controls = {})
 {
-    const float speed =
-        camera.speed *
-        (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::LShift) ? controls.sprintMultiplier : 1.f);
-
     const Vec3 forward = cameraForward(camera);
     const Vec3 right = cameraRight(camera);
     const Vec3 up = {0.f, 1.f, 0.f};
 
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::W))
-        camera.position += forward * speed * dt;
+        camera.position += forward * camera.speed * dt;
 
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::S))
-        camera.position -= forward * speed * dt;
+        camera.position -= forward * camera.speed * dt;
 
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::A))
-        camera.position -= right * speed * dt;
+        camera.position -= right * camera.speed * dt;
 
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::D))
-        camera.position += right * speed * dt;
+        camera.position += right * camera.speed * dt;
 
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Q))
-        camera.position += up * speed * dt;
+        camera.position += up * camera.speed * dt;
 
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::E))
-        camera.position -= up * speed * dt;
+        camera.position -= up * camera.speed * dt;
 
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Left))
         camera.yaw -= controls.lookSpeed * dt;

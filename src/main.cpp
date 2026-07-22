@@ -1,10 +1,11 @@
 #include <iostream>
 #include <SFML/Graphics.hpp>
+#include "objects/cube.h++"
+#include "rendering/cube_renderer.h++"
 #include "rendering/star_renderer.h++"
 #include "tools/camera_controller.h++"
 #include "tools/camera.h++"
 #include "world/starfield.h++"
-#include <vector>
 
 int main() {
     sf::RenderWindow window(
@@ -19,11 +20,16 @@ int main() {
 
     // Initialise Camera
     Camera camera;
+    CameraControls cameraControls;
 
-    // Generate stars
+    // Initialise world
     const StarfieldConfig starfieldConfig;
-    const std::vector<Star> stars = createStarfield(starfieldConfig);
-    const StarRenderer starRenderer({starfieldConfig.maxDepth, 1.f, 4.f});
+    Starfield starfield(starfieldConfig);
+    Cube cube;
+
+    const ProjectionConfig projectionConfig = {1.f, starfieldConfig.radius};
+    const StarRenderer starRenderer({starfieldConfig.radius, 1.f, 4.f}, projectionConfig);
+    const CubeRenderer cubeRenderer(projectionConfig);
 
     // Main update loop
     while (window.isOpen()) {
@@ -35,29 +41,37 @@ int main() {
                 window.close();
         }
 
-        updateCameraFromKeyboard(camera, dt);
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Escape))
+            window.close();
+
+        updateCameraFromKeyboard(camera, dt, cameraControls);
+        starfield.update(camera.position);
+        updateCube(cube, dt);
 
         if (printClock.getElapsedTime().asSeconds() >= 0.25f)
         {
-            Vec3 relative = stars.front().position - camera.position;
+            Vec3 relativeCube = cube.position - camera.position;
 
             std::cout
                 << "Camera: ("
                 << camera.position.x << ", "
                 << camera.position.y << ", "
-                << camera.position.z << ")\n";
+                << camera.position.z << ") yaw "
+                << camera.yaw << " pitch "
+                << camera.pitch << "\n";
 
             std::cout
-                << "First star: ("
-                << relative.x << ", "
-                << relative.y << ", "
-                << relative.z << ")\n";
+                << "Cube relative: ("
+                << relativeCube.x << ", "
+                << relativeCube.y << ", "
+                << relativeCube.z << ")\n";
 
             printClock.restart();
         }
 
         window.clear(sf::Color::Black);
-        starRenderer.draw(window, stars, camera);
+        starRenderer.draw(window, starfield.stars(), camera);
+        cubeRenderer.draw(window, cube, camera);
         window.display();
     }
 

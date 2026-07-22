@@ -7,6 +7,7 @@
 
 #include <cmath>
 
+/** Lightweight 2D vector for screen-space coordinates and simple math. */
 struct Vec2
 {
     float x = 0.f;
@@ -15,7 +16,7 @@ struct Vec2
 
 /* Compound operators */
 
-// Addition
+/** Adds b into a. */
 inline Vec2& operator+=(Vec2& a, const Vec2& b)
 {
     a.x += b.x;
@@ -23,7 +24,7 @@ inline Vec2& operator+=(Vec2& a, const Vec2& b)
     return a;
 }
 
-// Subtraction
+/** Subtracts b from a. */
 inline Vec2& operator-=(Vec2& a, const Vec2& b)
 {
     a.x -= b.x;
@@ -31,7 +32,7 @@ inline Vec2& operator-=(Vec2& a, const Vec2& b)
     return a;
 }
 
-// Component multiplication
+/** Multiplies a by b component-by-component. */
 inline Vec2& operator*=(Vec2& a, const Vec2& b)
 {
     a.x *= b.x;
@@ -39,7 +40,7 @@ inline Vec2& operator*=(Vec2& a, const Vec2& b)
     return a;
 }
 
-// Scalar multiplication
+/** Multiplies a by a scalar. */
 inline Vec2& operator*=(Vec2& a, float s)
 {
     a.x *= s;
@@ -47,7 +48,7 @@ inline Vec2& operator*=(Vec2& a, float s)
     return a;
 }
 
-// Component division
+/** Divides a by b component-by-component. */
 inline Vec2& operator/=(Vec2& a, const Vec2& b)
 {
     a.x /= b.x;
@@ -55,7 +56,7 @@ inline Vec2& operator/=(Vec2& a, const Vec2& b)
     return a;
 }
 
-// Scalar division
+/** Divides a by a scalar. */
 inline Vec2& operator/=(Vec2& a, float s)
 {
     a.x /= s;
@@ -65,43 +66,43 @@ inline Vec2& operator/=(Vec2& a, float s)
 
 /* Standard operators */
 
-// Addition
+/** Returns the sum of two vectors. */
 inline Vec2 operator+(Vec2 a, const Vec2& b)
 {
     return a += b;
 }
 
-// Subtraction
+/** Returns the difference between two vectors. */
 inline Vec2 operator-(Vec2 a, const Vec2& b)
 {
     return a -= b;
 }
 
-// Component multiplication
+/** Returns component-by-component multiplication. */
 inline Vec2 operator*(Vec2 a, const Vec2& b)
 {
     return a *= b;
 }
 
-// Scalar multiplication
+/** Returns a vector multiplied by a scalar. */
 inline Vec2 operator*(Vec2 a, float s)
 {
     return a *= s;
 }
 
-// Scalar multiplication (commutative)
+/** Returns a vector multiplied by a scalar. */
 inline Vec2 operator*(float s, Vec2 a)
 {
     return a *= s;
 }
 
-// Component division
+/** Returns component-by-component division. */
 inline Vec2 operator/(Vec2 a, const Vec2& b)
 {
     return a /= b;
 }
 
-// Scalar division
+/** Returns a vector divided by a scalar. */
 inline Vec2 operator/(Vec2 a, float s)
 {
     return a /= s;
@@ -109,13 +110,13 @@ inline Vec2 operator/(Vec2 a, float s)
 
 /* Utility functions */
 
-// Magnitude
+/** Returns vector length. */
 inline float length(const Vec2& v)
 {
     return std::sqrt(v.x * v.x + v.y * v.y);
 }
 
-// Normalized vector
+/** Returns a unit vector, or zero when the input is zero length. */
 inline Vec2 normalized(const Vec2& v)
 {
     float len = length(v);
@@ -130,7 +131,7 @@ inline Vec2 normalized(const Vec2& v)
     };
 }
 
-// Dot product
+/** Returns the dot product of two vectors. */
 inline float dot(const Vec2& a, const Vec2& b)
 {
     return

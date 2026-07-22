@@ -7,13 +7,14 @@
 
 #include <cmath>
 
+/** Lightweight 3D vector for world-space and camera-space math. */
 struct Vec3 {
     float x = 0.f, y = 0.f, z = 0.f;
 };
 
 /* Compound operators */
 
-// Addition
+/** Adds b into a. */
 inline Vec3& operator+=(Vec3& a, const Vec3& b)
 {
     a.x += b.x;
@@ -22,7 +23,7 @@ inline Vec3& operator+=(Vec3& a, const Vec3& b)
     return a;
 }
 
-// Subtraction
+/** Subtracts b from a. */
 inline Vec3& operator-=(Vec3& a, const Vec3& b)
 {
     a.x -= b.x;
@@ -31,7 +32,7 @@ inline Vec3& operator-=(Vec3& a, const Vec3& b)
     return a;
 }
 
-// Component multiplication
+/** Multiplies a by b component-by-component. */
 inline Vec3& operator*=(Vec3& a, const Vec3& b)
 {
     a.x *= b.x;
@@ -40,7 +41,7 @@ inline Vec3& operator*=(Vec3& a, const Vec3& b)
     return a;
 }
 
-// Scalar multiplication
+/** Multiplies a by a scalar. */
 inline Vec3& operator*=(Vec3& a, float s)
 {
     a.x *= s;
@@ -49,7 +50,7 @@ inline Vec3& operator*=(Vec3& a, float s)
     return a;
 }
 
-// Component division
+/** Divides a by b component-by-component. */
 inline Vec3& operator/=(Vec3& a, const Vec3& b)
 {
     a.x /= b.x;
@@ -58,7 +59,7 @@ inline Vec3& operator/=(Vec3& a, const Vec3& b)
     return a;
 }
 
-// Scalar division
+/** Divides a by a scalar. */
 inline Vec3& operator/=(Vec3& a, float s)
 {
     a.x /= s;
@@ -69,43 +70,43 @@ inline Vec3& operator/=(Vec3& a, float s)
 
 /* Standard operators */
 
-// Addition
+/** Returns the sum of two vectors. */
 inline Vec3 operator+(Vec3 a, const Vec3& b)
 {
     return a += b;
 }
 
-// Subtraction
+/** Returns the difference between two vectors. */
 inline Vec3 operator-(Vec3 a, const Vec3& b)
 {
     return a -= b;
 }
 
-// Component multiplication
+/** Returns component-by-component multiplication. */
 inline Vec3 operator*(Vec3 a, const Vec3& b)
 {
     return a *= b;
 }
 
-// Scalar multiplication
+/** Returns a vector multiplied by a scalar. */
 inline Vec3 operator*(Vec3 a, float s)
 {
     return a *= s;
 }
 
-// Scalar multiplication (commutative)
+/** Returns a vector multiplied by a scalar. */
 inline Vec3 operator*(float s, Vec3 a)
 {
     return a *= s;
 }
 
-// Component division
+/** Returns component-by-component division. */
 inline Vec3 operator/(Vec3 a, const Vec3& b)
 {
     return a /= b;
 }
 
-// Scalar division
+/** Returns a vector divided by a scalar. */
 inline Vec3 operator/(Vec3 a, float s)
 {
     return a /= s;
@@ -113,7 +114,7 @@ inline Vec3 operator/(Vec3 a, float s)
 
 /* Utility functions */
 
-// Magnitude (Length)
+/** Returns vector length. */
 inline float length(const Vec3& v)
 {
     return std::sqrt(
@@ -123,7 +124,7 @@ inline float length(const Vec3& v)
     );
 }
 
-// Unit vector
+/** Returns a unit vector, or zero when the input is zero length. */
 inline Vec3 normalized(const Vec3& v)
 {
     float len = length(v);
@@ -139,7 +140,7 @@ inline Vec3 normalized(const Vec3& v)
     };
 }
 
-// Dot product
+/** Returns the dot product of two vectors. */
 inline float dot(const Vec3& a, const Vec3& b)
 {
     return
@@ -148,7 +149,7 @@ inline float dot(const Vec3& a, const Vec3& b)
         a.z * b.z;
 }
 
-// Cross product
+/** Returns the cross product of two vectors. */
 inline Vec3 cross(const Vec3& a, const Vec3& b)
 {
     return

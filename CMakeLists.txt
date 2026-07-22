@@ -8,10 +8,13 @@ find_package(SFML 3 COMPONENTS Graphics Window System REQUIRED)
 add_executable(dusk src/main.cpp
         include/tools/camera.h++
         include/tools/camera_controller.h++
+        include/math/Mat4.h++
         include/math/Vec2.h++
         include/math/Vec3.h++
+        include/objects/cube.h++
         include/objects/star.h++
         include/world/starfield.h++
+        include/rendering/cube_renderer.h++
         include/rendering/projector.h++
         include/rendering/star_renderer.h++)
 

@@ -13,19 +13,29 @@
 #include <cstdint>
 #include <vector>
 
+/** Visual controls for drawing projected stars. */
 struct StarRenderSettings {
+    /** Distance at which stars fade to their minimum opacity. */
     float fadeDepth = 20000.f;
+
+    /** Smallest star radius in pixels. */
     float minRadius = 1.f;
+
+    /** Largest star radius in pixels. */
     float maxRadius = 4.f;
 };
 
+/** Draws stars by projecting their 3D positions into the active render target. */
 class StarRenderer {
 public:
-    explicit StarRenderer(StarRenderSettings settings = {})
-        : settings_(settings)
+    /** Creates a star renderer using visual settings and projection clipping settings. */
+    explicit StarRenderer(StarRenderSettings settings = {}, ProjectionConfig projectionConfig = {})
+        : settings_(settings),
+          projector_(projectionConfig)
     {
     }
 
+    /** Projects, clips, fades, and draws each star. */
     void draw(sf::RenderTarget& target, const std::vector<Star>& stars, const Camera& camera) const
     {
         const sf::Vector2u size = target.getSize();
@@ -36,10 +46,12 @@ public:
         };
 
         sf::CircleShape shape;
+        const Mat4 viewMatrix = projector_.createViewMatrix(camera);
 
         for (const Star& star : stars)
         {
-            const auto projected = projector_.project(star.position, camera, viewport);
+            const Vec3 cameraSpace = transformPoint(viewMatrix, star.position);
+            const auto projected = projector_.projectCameraSpace(cameraSpace, camera, viewport);
 
             if (!projected)
                 continue;
