@@ -7,7 +7,7 @@
 #include <SFML/Graphics.hpp>
 
 struct Camera {
-    sf::Vector3f position;
+    sf::Vector2f position;
     const float speed = 500;
 };
 

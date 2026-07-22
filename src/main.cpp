@@ -12,6 +12,11 @@ int main() {
     sf::Clock clock;
     sf::Clock printClock;
 
+    // Initialise Camera
+    Camera camera;
+    camera.position = {0.f, 0.f};
+    sf::View cam(sf::FloatRect({0.f, 0.f}, {800.f, 600.f}));
+
     // Main update loop
     while (window.isOpen()) {
         float dt = clock.restart().asSeconds();
@@ -23,10 +28,6 @@ int main() {
         }
 
         // WRITE GAMELOOP HERE
-
-        // Initialise Camera
-        Camera camera;
-        camera.position = {0.f, 0.f, 0.f};
 
         // Move Camera
         // Onwards
@@ -49,16 +50,6 @@ int main() {
             camera.position.y += camera.speed * dt;
         }
 
-        // Up
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Q)) {
-            camera.position.z += camera.speed * dt;
-        }
-
-        // Down
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::E)) {
-            camera.position.z -= camera.speed * dt;
-        }
-
         // Output camera positions in the terminal
         if (printClock.getElapsedTime().asSeconds() >= 0.25f)
         {
@@ -67,12 +58,13 @@ int main() {
                 << camera.position.x
                 << ", "
                 << camera.position.y
-                << ", "
-                << camera.position.z
                 << ")\n";
 
             printClock.restart();
         }
+
+        cam.setCenter(camera.position);
+        window.setView(cam);
 
         // Enable VSync in order to sync with monitor's settings
         window.setVerticalSyncEnabled(true);
