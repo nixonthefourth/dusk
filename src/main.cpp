@@ -1,10 +1,12 @@
 #include <iostream>
 #include <SFML/Graphics.hpp>
 #include "objects/cube.h++"
+#include "objects/ship.h++"
 #include "rendering/cube_renderer.h++"
+#include "rendering/ship_renderer.h++"
 #include "rendering/star_renderer.h++"
-#include "tools/camera_controller.h++"
 #include "tools/camera.h++"
+#include "tools/ship_controller.h++"
 #include "world/starfield.h++"
 
 int main() {
@@ -20,16 +22,18 @@ int main() {
 
     // Initialise Camera
     Camera camera;
-    CameraControls cameraControls;
 
     // Initialise world
     const StarfieldConfig starfieldConfig;
     Starfield starfield(starfieldConfig);
     Cube cube;
+    Ship ship;
 
     const ProjectionConfig projectionConfig = {1.f, starfieldConfig.radius};
     const StarRenderer starRenderer({starfieldConfig.radius, 1.f, 4.f}, projectionConfig);
     const CubeRenderer cubeRenderer(projectionConfig);
+    const ShipRenderer shipRenderer(projectionConfig);
+    updateCameraToFollowShip(camera, ship);
 
     // Main update loop
     while (window.isOpen()) {
@@ -44,14 +48,13 @@ int main() {
         if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Escape))
             window.close();
 
-        updateCameraFromKeyboard(camera, dt, cameraControls);
+        updateShipFromKeyboard(ship, dt);
+        updateCameraToFollowShip(camera, ship);
         starfield.update(camera.position);
         updateCube(cube, dt);
 
         if (printClock.getElapsedTime().asSeconds() >= 0.25f)
         {
-            Vec3 relativeCube = cube.position - camera.position;
-
             std::cout
                 << "Camera: ("
                 << camera.position.x << ", "
@@ -61,10 +64,12 @@ int main() {
                 << camera.pitch << "\n";
 
             std::cout
-                << "Cube relative: ("
-                << relativeCube.x << ", "
-                << relativeCube.y << ", "
-                << relativeCube.z << ")\n";
+                << "Ship: ("
+                << ship.position.x << ", "
+                << ship.position.y << ", "
+                << ship.position.z << ") yaw "
+                << ship.yaw << " pitch "
+                << ship.pitch << "\n";
 
             printClock.restart();
         }
@@ -72,6 +77,7 @@ int main() {
         window.clear(sf::Color::Black);
         starRenderer.draw(window, starfield.stars(), camera);
         cubeRenderer.draw(window, cube, camera);
+        shipRenderer.draw(window, ship, camera);
         window.display();
     }
 
