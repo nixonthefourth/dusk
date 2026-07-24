@@ -46,7 +46,7 @@ public:
             if (cameraSpace.z <= 1.f)
                 continue;
 
-            const auto projected = projector_.projectCameraSpace(cameraSpace, camera, viewport);
+            const auto projected = projector_.projectCameraSpace(cameraSpace, camera, viewport, planet.radius);
 
             if (!projected)
                 continue;

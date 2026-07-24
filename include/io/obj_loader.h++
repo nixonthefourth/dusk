@@ -29,6 +29,17 @@ struct ObjLoadOptions {
     bool flipY = false;
 };
 
+/** Returns true when coordinate flips mirror the model and invert face winding. */
+inline bool reversesObjWinding(const ObjLoadOptions& options)
+{
+    const int flippedAxes =
+        (options.flipX ? 1 : 0) +
+        (options.flipY ? 1 : 0) +
+        (options.flipZ ? 1 : 0);
+
+    return flippedAxes % 2 != 0;
+}
+
 /** Converts OBJ vertex indices into zero-based indices, including negative relative indices. */
 inline std::optional<int> parseObjIndex(const std::string& token, int vertexCount)
 {
@@ -72,6 +83,18 @@ inline void addObjEdge(VectorModel& model, std::set<std::pair<int, int>>& edges,
     model.lines.push_back({edge.first, edge.second, false});
 }
 
+/** Adds one triangle face, skipping degenerate triangles and preserving corrected winding. */
+inline void addObjFace(VectorModel& model, int a, int b, int c, bool reverseWinding)
+{
+    if (a == b || b == c || a == c)
+        return;
+
+    if (reverseWinding)
+        std::swap(b, c);
+
+    model.faces.push_back({a, b, c});
+}
+
 /** Reads OBJ text from a stream and converts vertices/faces/lines into a wire model. */
 inline std::optional<VectorModel> loadObjStreamAsVectorModel(
     std::istream& input,
@@ -80,6 +103,7 @@ inline std::optional<VectorModel> loadObjStreamAsVectorModel(
 {
     VectorModel model;
     std::set<std::pair<int, int>> edges;
+    const bool reverseWinding = reversesObjWinding(options);
     std::string line;
 
     while (std::getline(input, line))
@@ -122,7 +146,12 @@ inline std::optional<VectorModel> loadObjStreamAsVectorModel(
                 addObjEdge(model, edges, indices[i - 1], indices[i]);
 
             if (tag == "f" && indices.size() > 2)
+            {
                 addObjEdge(model, edges, indices.back(), indices.front());
+
+                for (std::size_t i = 2; i < indices.size(); ++i)
+                    addObjFace(model, indices[0], indices[i - 1], indices[i], reverseWinding);
+            }
         }
     }
 

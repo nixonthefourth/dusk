@@ -11,6 +11,10 @@
 #include "rendering/projector.h++"
 #include "tools/camera.h++"
 #include <SFML/Graphics.hpp>
+#include <algorithm>
+#include <set>
+#include <utility>
+#include <vector>
 
 /** Draws the player ship as clipped, projected vector lines. */
 class ShipRenderer {
@@ -33,16 +37,30 @@ public:
 
         const bool cameraAboveShip = dot(camera.position - ship.position, shipUp(ship)) > 0.f;
         const Mat4 viewMatrix = projector_.createViewMatrix(camera);
+        std::vector<Vec3> cameraVertices;
+        cameraVertices.reserve(ship.model.vertices.size());
+
+        for (const Vec3& vertex : ship.model.vertices)
+            cameraVertices.push_back(transformPoint(viewMatrix, shipLocalToWorld(ship, vertex)));
+
+        const FaceEdgeVisibility faceEdges = classifyFaceEdges(ship.model, cameraVertices);
 
         for (const VectorLine& line : ship.model.lines)
         {
             if (line.hideWhenViewedFromAbove && cameraAboveShip)
                 continue;
 
-            const Vec3 startWorld = shipLocalToWorld(ship, ship.model.vertices[line.start]);
-            const Vec3 endWorld = shipLocalToWorld(ship, ship.model.vertices[line.end]);
-            const Vec3 start = transformPoint(viewMatrix, startWorld);
-            const Vec3 end = transformPoint(viewMatrix, endWorld);
+            if (!isValidVertexIndex(line.start, cameraVertices.size()) ||
+                !isValidVertexIndex(line.end, cameraVertices.size()))
+            {
+                continue;
+            }
+
+            if (!lineSurvivesFaceCulling(line, faceEdges))
+                continue;
+
+            const Vec3 start = cameraVertices[static_cast<std::size_t>(line.start)];
+            const Vec3 end = cameraVertices[static_cast<std::size_t>(line.end)];
             const auto clipped = projector_.clipLineCameraSpace(start, end, camera, viewport);
 
             if (!clipped)
@@ -71,7 +89,81 @@ public:
     }
 
 private:
+    using EdgeKey = std::pair<int, int>;
+
+    struct FaceEdgeVisibility {
+        std::set<EdgeKey> all;
+        std::set<EdgeKey> visible;
+    };
+
     Projector projector_;
+
+    static bool isValidVertexIndex(int index, std::size_t vertexCount)
+    {
+        return index >= 0 && static_cast<std::size_t>(index) < vertexCount;
+    }
+
+    static EdgeKey edgeKeyFor(int a, int b)
+    {
+        return std::minmax(a, b);
+    }
+
+    static void addFaceEdges(std::set<EdgeKey>& edges, const VectorFace& face)
+    {
+        edges.insert(edgeKeyFor(face.a, face.b));
+        edges.insert(edgeKeyFor(face.b, face.c));
+        edges.insert(edgeKeyFor(face.c, face.a));
+    }
+
+    static bool hasArea(const Vec3& a, const Vec3& b, const Vec3& c)
+    {
+        const Vec3 normal = cross(b - a, c - a);
+        return dot(normal, normal) > 0.f;
+    }
+
+    FaceEdgeVisibility classifyFaceEdges(
+        const VectorModel& model,
+        const std::vector<Vec3>& cameraVertices
+    ) const
+    {
+        FaceEdgeVisibility result;
+
+        for (const VectorFace& face : model.faces)
+        {
+            if (!isValidVertexIndex(face.a, cameraVertices.size()) ||
+                !isValidVertexIndex(face.b, cameraVertices.size()) ||
+                !isValidVertexIndex(face.c, cameraVertices.size()))
+            {
+                continue;
+            }
+
+            const Vec3& a = cameraVertices[static_cast<std::size_t>(face.a)];
+            const Vec3& b = cameraVertices[static_cast<std::size_t>(face.b)];
+            const Vec3& c = cameraVertices[static_cast<std::size_t>(face.c)];
+
+            if (!hasArea(a, b, c))
+                continue;
+
+            addFaceEdges(result.all, face);
+
+            if (projector_.isFrontFacing(a, b, c))
+                addFaceEdges(result.visible, face);
+        }
+
+        return result;
+    }
+
+    static bool lineSurvivesFaceCulling(
+        const VectorLine& line,
+        const FaceEdgeVisibility& faceEdges
+    )
+    {
+        if (faceEdges.all.empty())
+            return true;
+
+        const EdgeKey edge = edgeKeyFor(line.start, line.end);
+        return !faceEdges.all.contains(edge) || faceEdges.visible.contains(edge);
+    }
 };
 
 #endif //DUSK_SHIP_RENDERER_H

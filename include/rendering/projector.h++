@@ -36,6 +36,9 @@ using ProjectedTriangle = std::array<ProjectedPoint, 3>;
 struct ProjectionConfig {
     float nearPlane = 1.f;
     float farPlane = 20000.f;
+
+    /** Extra side-frustum room as a fraction of the visible FOV, reducing edge pop-in. */
+    float sideGuardBand = 0.12f;
 };
 
 /** A line segment expressed in camera space after frustum clipping. */
@@ -58,7 +61,7 @@ struct Frustum {
             return false;
 
         const float yLimit = point.z * halfVerticalFovTan + radius;
-        const float xLimit = yLimit * aspect + radius;
+        const float xLimit = point.z * halfVerticalFovTan * aspect + radius;
 
         return
             point.x >= -xLimit &&
@@ -91,12 +94,13 @@ public:
     std::optional<ProjectedPoint> projectCameraSpace(
         const Vec3& cameraSpace,
         const Camera& camera,
-        const Viewport& viewport
+        const Viewport& viewport,
+        float clipRadius = 0.f
     ) const
     {
         const Frustum frustum = createFrustum(camera, viewport);
 
-        if (!frustum.contains(cameraSpace))
+        if (!frustum.contains(cameraSpace, clipRadius))
             return std::nullopt;
 
         const float focalLength = focalLengthFor(camera, viewport);
@@ -179,7 +183,7 @@ public:
     /**
      * Projects a world-space triangle, culling it before any vertex is projected if it faces
      * away from the camera. The three vertices are transformed into camera space first, the
-     * face is tested with isBackFacing(), and only front-facing triangles proceed to
+     * face is tested with isFrontFacing(), and only front-facing triangles proceed to
      * projectCameraSpace() per vertex. Returns nullopt if the triangle is back-facing or if
      * any of its vertices are clipped by the frustum.
      */
@@ -196,7 +200,7 @@ public:
         const Vec3 cameraB = transformPoint(view, worldB);
         const Vec3 cameraC = transformPoint(view, worldC);
 
-        if (isBackFacing(cameraA, cameraB, cameraC))
+        if (!isFrontFacing(cameraA, cameraB, cameraC))
             return std::nullopt;
 
         const std::optional<ProjectedPoint> a = projectCameraSpace(cameraA, camera, viewport);
@@ -210,19 +214,29 @@ public:
     }
 
     /**
-     * Returns true when a camera-space triangle faces away from the camera and should be culled.
-     * Camera space has the camera at the origin, so the vector from the camera to any triangle
-     * vertex (here, `a`) can be used directly as the view direction for the test: the cross
-     * product of two edges gives the face normal, and its dot product with that view direction
-     * is positive when the normal points back toward the camera (front-facing) or negative when
-     * it points away (back-facing) — the sign convention below assumes a particular winding order.
-     * If front-facing triangles get culled instead of back-facing ones, flip the comparison
-     * (change `>= 0.f` to `<= 0.f`) to match your winding order.
+     * Returns true when a camera-space triangle faces the camera.
+     *
+     * Camera space looks down +Z. The triangle is front-facing when its wound normal points back
+     * toward the camera, which is the opposite direction to the vector from the camera origin to
+     * the face centroid. Degenerate and edge-on triangles have no useful visible area, so they are
+     * treated as not front-facing.
      */
-    bool isBackFacing(const Vec3& a, const Vec3& b, const Vec3& c) const
+    bool isFrontFacing(const Vec3& a, const Vec3& b, const Vec3& c) const
     {
         const Vec3 normal = cross(b - a, c - a);
-        return dot(normal, a) >= 0.f;
+        const float normalLengthSquared = dot(normal, normal);
+
+        if (normalLengthSquared <= 0.f)
+            return false;
+
+        const Vec3 centroid = (a + b + c) / 3.f;
+        return dot(normal, centroid) < 0.f;
+    }
+
+    /** Returns true when a camera-space triangle faces away from the camera and should be culled. */
+    bool isBackFacing(const Vec3& a, const Vec3& b, const Vec3& c) const
+    {
+        return !isFrontFacing(a, b, c);
     }
 
     /** Builds the world-to-camera transform from camera position and yaw/pitch/roll. */
@@ -312,11 +326,13 @@ private:
     /** Builds a camera-space frustum from projection settings and viewport aspect. */
     Frustum createFrustum(const Camera& camera, const Viewport& viewport) const
     {
+        const float sideGuardBand = std::max(config_.sideGuardBand, 0.f);
+
         return
         {
             config_.nearPlane,
             config_.farPlane,
-            std::tan(degreesToRadians(camera.fov) * 0.5f),
+            std::tan(degreesToRadians(camera.fov) * 0.5f) * (1.f + sideGuardBand),
             viewport.width / viewport.height
         };
     }

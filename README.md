@@ -586,12 +586,13 @@ The ship renderer lives in:
 include/rendering/ship_renderer.h++
 ```
 
-The ship is a vector line model:
+The ship is a vector model with line edges for drawing and optional triangle faces for culling:
 
 ```cpp
 struct VectorModel {
     std::vector<Vec3> vertices;
     std::vector<VectorLine> lines;
+    std::vector<VectorFace> faces;
 };
 ```
 
@@ -626,6 +627,7 @@ The draw path is:
 local ship vertex
   -> shipLocalToWorld()
   -> camera view matrix
+  -> face culling
   -> frustum line clipping
   -> projection
   -> SFML line draw
@@ -651,7 +653,7 @@ std::optional<VectorModel> loadObjFileAsVectorModel(
 Supported OBJ records:
 
 - `v x y z`: loaded as model vertices.
-- `f ...`: face boundaries become unique wire edges.
+- `f ...`: face boundaries become unique wire edges, and faces are triangulated for culling.
 - `l ...`: line records become wire edges.
 
 Ignored OBJ data:
@@ -660,12 +662,11 @@ Ignored OBJ data:
 - UVs
 - materials
 - smoothing groups
-- filled triangles/polygons
 
 This is intentional: `dusk` is a line-rendered fake-3D experiment, so the useful conversion is:
 
 ```text
-OBJ vertices and faces -> unique vertices and edges -> VectorModel
+OBJ vertices and faces -> unique wire edges plus culling faces -> VectorModel
 ```
 
 ### Loading An OBJ Into The Ship
@@ -684,6 +685,8 @@ options.scale = 100.f;
 options.flipZ = true;
 world.playerShip.loadObjModel("assets/ships/my_ship.obj", options);
 ```
+
+If an import option flips an odd number of axes, the loader reverses face winding so back-face culling still treats outward-facing polygons correctly.
 
 Where to put that? The recommended place is inside your scene header, because the scene decides which world objects exist and how they are configured.
 
@@ -1169,7 +1172,7 @@ shipRenderer.draw(window, ship, camera);
 - `include/rendering/ship_renderer.h++`: example of a line-model renderer.
 - `include/rendering/planet_renderer.h++`: example of projected filled bodies.
 - `include/rendering/hud_renderer.h++`: example of screen-space HUD rendering.
-- `include/rendering/projector.h++`: projection, view matrix, and clipping.
+- `include/rendering/projector.h++`: projection, view matrix, culling and clipping.
 
 ## Current Limitations
 
