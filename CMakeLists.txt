@@ -16,6 +16,7 @@ add_executable(dusk src/main.cpp
         include/math/Vec2.h++
         include/math/Vec3.h++
         include/model/vector_model.h++
+        include/objects/collision_body.h++
         include/objects/cube.h++
         include/objects/planet.h++
         include/objects/ship.h++

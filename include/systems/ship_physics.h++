@@ -11,6 +11,8 @@
 /** Integrates Newtonian ship motion from persistent velocity and current thrust. */
 inline void integrateShipPhysics(Ship& ship, float dt)
 {
+    ship.previousPosition = ship.position;
+
     const float thrustDirection = ship.reverseThrust ? -1.f : 1.f;
     const Vec3 acceleration =
         shipForward(ship) *

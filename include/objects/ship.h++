@@ -8,6 +8,7 @@
 #include "io/obj_loader.h++"
 #include "math/Vec3.h++"
 #include "model/vector_model.h++"
+#include "objects/collision_body.h++"
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -61,8 +62,17 @@ struct Ship {
     /** Ship origin in world space. */
     Vec3 position = {0.f, 0.f, 0.f};
 
+    /** Ship origin before the latest physics integration step. */
+    Vec3 previousPosition = {0.f, 0.f, 0.f};
+
     /** Ship velocity in world units per second. */
     Vec3 velocity;
+
+    /** Object-level collision state, refreshed by World every physics update. */
+    CollisionBody collision;
+
+    /** Coarse spherical collision radius around the ship origin. */
+    float collisionRadius = 140.f;
 
     /** Horizontal heading in radians. */
     float yaw = 0.f;

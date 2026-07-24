@@ -11,7 +11,7 @@ The current project includes:
 - A wireframe Sidewinder-inspired ship rendered from vector line data.
 - A first test scene with a planet and a rotating cube portal.
 - A second test scene with two projected planets.
-- Cube-triggered scene teleportation.
+- Object-level collision detection, including cube-triggered scene teleportation.
 - A recycled endless starfield.
 - Frustum clipping for projected points and lines.
 - Newtonian-ish ship physics with persistent velocity.
@@ -35,7 +35,7 @@ Below is the running plan for the engine and the game built on top of it. Items 
 - [x] Scene management
 - [ ] Music and sound
 - [x] OBJ loader
-- [ ] Collisions
+- [x] Object-level collision detection
 - [ ] Rigid bodies
 - [x] Integrator upgrade: currently explicit Euler, moving to velocity Verlet to preserve phase-space geometry
 
@@ -1181,7 +1181,7 @@ This is still intentionally tiny:
 - No depth buffer.
 - No triangle rasterizer.
 - OBJ loading only extracts vertices and wire edges.
-- No general collision detection; the cube portal uses a small scene-specific trigger.
+- Collision detection currently uses object-level spherical volumes and per-frame hit records.
 - No time-step accumulator.
 - No real asset system.
 - HUD uses primitive shapes instead of text/fonts; the menu uses the bundled Jersey 15 font.
@@ -1192,6 +1192,6 @@ Those are good next steps, but the current shape is enough to experiment with fa
 
 This is something worth working on next:
 
-- Collision detection
+- Collision responses
 - Galactic generation (on-paper)
 - Full celestial procedural generation

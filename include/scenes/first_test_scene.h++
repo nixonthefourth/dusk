@@ -6,7 +6,6 @@
 #define DUSK_FIRST_TEST_SCENE_H
 
 #include "scenes/scene.h++"
-#include <algorithm>
 
 /** First playable test: fly toward the cube portal beside a planet. */
 class FirstTestScene : public Scene {
@@ -29,8 +28,6 @@ public:
         planet.position = {-2600.f, -900.f, 6200.f};
         planet.radius = 1800.f;
         world_.planets.push_back(planet);
-
-        previousShipPosition_ = world_.playerShip.position;
     }
 
     const char* name() const override
@@ -50,10 +47,9 @@ public:
 
     void updatePhysics(float dt) override
     {
-        previousShipPosition_ = world_.playerShip.position;
         Scene::updatePhysics(dt);
 
-        if (shipCrossedCubePortal())
+        if (world_.playerShip.collision.collidingWith(CollisionObjectType::Cube))
             pendingTransition_ = SceneTransition::TwoPlanet;
     }
 
@@ -66,25 +62,7 @@ public:
 
 private:
     World world_;
-    Vec3 previousShipPosition_;
     SceneTransition pendingTransition_ = SceneTransition::None;
-
-    bool shipCrossedCubePortal() const
-    {
-        const float activationRadius = world_.cube.size * 0.56f;
-        const Vec3 segment = world_.playerShip.position - previousShipPosition_;
-        const float segmentLengthSquared = dot(segment, segment);
-        float t = 0.f;
-
-        if (segmentLengthSquared > 0.f)
-        {
-            t = dot(world_.cube.position - previousShipPosition_, segment) / segmentLengthSquared;
-            t = std::clamp(t, 0.f, 1.f);
-        }
-
-        const Vec3 closestPoint = previousShipPosition_ + segment * t;
-        return length(closestPoint - world_.cube.position) <= activationRadius;
-    }
 };
 
 #endif //DUSK_FIRST_TEST_SCENE_H
