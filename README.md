@@ -375,6 +375,26 @@ focalLength = viewportHeight * 0.5 / tan(fov * 0.5)
 
 So a narrow FOV gives a larger focal length, which feels more zoomed in. A wide FOV gives a smaller focal length, which feels more zoomed out.
 
+### Vector Value Updates
+
+Values of velocity and displacement are directly updated through the velocity verlet algorithm in the `verlet` namespace.
+
+The position is updated first: 
+```cpp
+Vec3 position_update(const Vec3& r, const Vec3& v, const Vec3& a, float dt) {
+        return r + v * dt + 0.5 * a * dt * dt;
+    }
+```
+
+Then, the velocity is updated:
+```cpp
+Vec3 velocity_update(const Vec3& v, const Vec3& a_old, const Vec3& a_new, float dt) {
+        return v + 0.5 * (a_old + a_new) * dt;
+    }
+```
+
+Acceleration is updated via multiple physics forces, although might need addition of the gravitational attraction between the stellar objects and firther forces.
+
 ### Frustum Clipping
 
 The frustum is the visible 3D cone/pyramid in front of the camera. The project stores it as:
