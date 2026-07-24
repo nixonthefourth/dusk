@@ -1163,3 +1163,13 @@ This is still intentionally tiny:
 - HUD uses primitive shapes instead of text/fonts; the menu uses the bundled Jersey 15 font.
 
 Those are good next steps, but the current shape is enough to experiment with fake-3D projection, starfields, scene flow, planet rendering, line models, and simple space-flight physics.
+
+## Next Additions
+
+This is something worth working on next:
+
+- Back-face culling
+- Velocity Verlet physics integration
+- Collision detection
+- Galactic generation (on-paper)
+- Full celestial procedural generation
