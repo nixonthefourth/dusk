@@ -18,8 +18,9 @@ public:
         // To use an OBJ ship model instead, keep the OBJ with the project and uncomment:
         //
         // ObjLoadOptions options;
-        // options.scale = 100.f;
-        // world_.playerShip.loadObjModel("assets/ships/my_ship.obj", options);
+        // options.scale = 20.f;
+        // options.flipY = true;
+        // world_.playerShip.loadObjModel("../assets/ships/ship.obj", options);
     }
 
     const char* name() const override
