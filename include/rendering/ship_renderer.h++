@@ -11,46 +11,6 @@
 #include "rendering/projector.h++"
 #include "tools/camera.h++"
 #include <SFML/Graphics.hpp>
-#include <vector>
-
-/** One wireframe edge in the ship model. */
-struct ShipLine {
-    int start = 0;
-    int end = 0;
-
-    /** Underside edges are skipped when viewed from above the ship. */
-    bool hideWhenViewedFromAbove = false;
-};
-
-/** Vector-array wireframe model inspired by the Elite 1984 Sidewinder. */
-struct ShipModel {
-    std::vector<Vec3> vertices =
-    {
-        {0.f, 0.f, 430.f},
-        {-260.f, -35.f, 100.f},
-        {260.f, -35.f, 100.f},
-        {-560.f, -70.f, -300.f},
-        {560.f, -70.f, -300.f},
-        {0.f, 120.f, -130.f},
-        {0.f, -130.f, -130.f},
-        {-260.f, 45.f, -470.f},
-        {260.f, 45.f, -470.f},
-        {-260.f, -85.f, -470.f},
-        {260.f, -85.f, -470.f},
-        {0.f, 85.f, 140.f}
-    };
-
-    std::vector<ShipLine> lines =
-    {
-        {0, 1, false}, {0, 2, false}, {1, 3, false}, {2, 4, false},
-        {3, 7, false}, {4, 8, false}, {7, 8, false}, {5, 7, false},
-        {5, 8, false}, {1, 5, false}, {2, 5, false}, {5, 11, false},
-        {0, 11, false}, {11, 1, false}, {11, 2, false},
-        {0, 6, true}, {1, 6, true}, {2, 6, true}, {3, 9, true},
-        {4, 10, true}, {6, 9, true}, {6, 10, true}, {9, 10, true},
-        {7, 9, true}, {8, 10, true}
-    };
-};
 
 /** Draws the player ship as clipped, projected vector lines. */
 class ShipRenderer {
@@ -74,13 +34,13 @@ public:
         const bool cameraAboveShip = dot(camera.position - ship.position, shipUp(ship)) > 0.f;
         const Mat4 viewMatrix = projector_.createViewMatrix(camera);
 
-        for (const ShipLine& line : model_.lines)
+        for (const VectorLine& line : ship.model.lines)
         {
             if (line.hideWhenViewedFromAbove && cameraAboveShip)
                 continue;
 
-            const Vec3 startWorld = shipLocalToWorld(ship, model_.vertices[line.start]);
-            const Vec3 endWorld = shipLocalToWorld(ship, model_.vertices[line.end]);
+            const Vec3 startWorld = shipLocalToWorld(ship, ship.model.vertices[line.start]);
+            const Vec3 endWorld = shipLocalToWorld(ship, ship.model.vertices[line.end]);
             const Vec3 start = transformPoint(viewMatrix, startWorld);
             const Vec3 end = transformPoint(viewMatrix, endWorld);
             const auto clipped = projector_.clipLineCameraSpace(start, end, camera, viewport);
@@ -111,7 +71,6 @@ public:
     }
 
 private:
-    ShipModel model_;
     Projector projector_;
 };
 

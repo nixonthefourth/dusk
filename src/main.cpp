@@ -4,9 +4,10 @@
 #include "rendering/hud_renderer.h++"
 #include "rendering/ship_renderer.h++"
 #include "rendering/star_renderer.h++"
+#include "scenes/default_scene.h++"
+#include "scenes/scene_manager.h++"
 #include "tools/camera.h++"
 #include "tools/ship_controller.h++"
-#include "world/world.h++"
 
 int main() {
     sf::RenderWindow window(
@@ -22,8 +23,10 @@ int main() {
     // Initialise Camera
     Camera camera;
 
-    // Initialise world
-    World world;
+    // Initialise scene/world
+    SceneManager sceneManager;
+    sceneManager.setScene<DefaultScene>();
+    World& world = sceneManager.world();
     ShipInputState shipInputState;
     ShipCameraRig shipCameraRig;
 
@@ -48,9 +51,9 @@ int main() {
             window.close();
 
         updateShipFromKeyboard(world.playerShip, dt, shipInputState);
-        updateWorldPhysics(world, dt);
+        sceneManager.activeScene().updatePhysics(dt);
         updateShipCamera(camera, world.playerShip, dt, shipCameraRig);
-        updateWorldStreaming(world, camera);
+        sceneManager.activeScene().updateStreaming(camera);
 
         if (printClock.getElapsedTime().asSeconds() >= 0.25f)
         {

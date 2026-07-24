@@ -5,9 +5,43 @@
 #ifndef DUSK_SHIP_H
 #define DUSK_SHIP_H
 
+#include "io/obj_loader.h++"
 #include "math/Vec3.h++"
+#include "model/vector_model.h++"
 #include <algorithm>
 #include <cmath>
+#include <string>
+
+/** Creates the built-in Sidewinder-inspired vector model used when no OBJ is loaded. */
+inline VectorModel createDefaultShipModel()
+{
+    return
+    {
+        {
+            {0.f, 0.f, 430.f},
+            {-260.f, -35.f, 100.f},
+            {260.f, -35.f, 100.f},
+            {-560.f, -70.f, -300.f},
+            {560.f, -70.f, -300.f},
+            {0.f, 120.f, -130.f},
+            {0.f, -130.f, -130.f},
+            {-260.f, 45.f, -470.f},
+            {260.f, 45.f, -470.f},
+            {-260.f, -85.f, -470.f},
+            {260.f, -85.f, -470.f},
+            {0.f, 85.f, 140.f}
+        },
+        {
+            {0, 1, false}, {0, 2, false}, {1, 3, false}, {2, 4, false},
+            {3, 7, false}, {4, 8, false}, {7, 8, false}, {5, 7, false},
+            {5, 8, false}, {1, 5, false}, {2, 5, false}, {5, 11, false},
+            {0, 11, false}, {11, 1, false}, {11, 2, false},
+            {0, 6, true}, {1, 6, true}, {2, 6, true}, {3, 9, true},
+            {4, 10, true}, {6, 9, true}, {6, 10, true}, {9, 10, true},
+            {7, 9, true}, {8, 10, true}
+        }
+    };
+}
 
 /** Player ship state and tuning values. */
 struct Ship {
@@ -40,6 +74,21 @@ struct Ship {
 
     /** Q/E pitch speed in radians per second. */
     float pitchSpeed = 0.8f;
+
+    /** Local-space vector model rendered for this ship. */
+    VectorModel model = createDefaultShipModel();
+
+    /** Replaces the ship's local vector model with an OBJ converted into vertices and edges. */
+    bool loadObjModel(const std::string& path, const ObjLoadOptions& options = {})
+    {
+        const auto loadedModel = loadObjFileAsVectorModel(path, options);
+
+        if (!loadedModel)
+            return false;
+
+        model = *loadedModel;
+        return true;
+    }
 };
 
 /** Returns the ship's local forward direction. */

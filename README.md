@@ -68,15 +68,26 @@ src/
   main.cpp
 
 include/
+  io/
+    obj_loader.h++
+
   math/
     Vec2.h++
     Vec3.h++
     Mat4.h++
 
+  model/
+    vector_model.h++
+
   objects/
     ship.h++
     cube.h++
     star.h++
+
+  scenes/
+    scene.h++
+    default_scene.h++
+    scene_manager.h++
 
   systems/
     ship_physics.h++
@@ -101,6 +112,9 @@ include/
 The important separation is:
 
 - `objects/`: data and local object helpers.
+- `model/`: shared wire/vector model structures.
+- `io/`: file loading and conversion helpers, such as OBJ-to-vector conversion.
+- `scenes/`: scene interface, active scene ownership, and scene presets.
 - `systems/`: simulation logic, such as physics.
 - `tools/`: input/control helpers and camera behavior.
 - `world/`: ownership of world-coordinate objects.
@@ -111,9 +125,9 @@ That last point matters. `main.cpp` should ideally stay boring:
 
 ```cpp
 updateShipFromKeyboard(world.playerShip, dt, shipInputState);
-updateWorldPhysics(world, dt);
+sceneManager.activeScene().updatePhysics(dt);
 updateShipCamera(camera, world.playerShip, dt, shipCameraRig);
-updateWorldStreaming(world, camera);
+sceneManager.activeScene().updateStreaming(camera);
 
 starRenderer.draw(window, world.starfield.stars(), camera);
 cubeRenderer.draw(window, world.cube, camera);
@@ -139,7 +153,7 @@ The convention used throughout the project is:
 - `+y`: up.
 - `+z`: forward.
 
-The player acts on one singular ship object:
+The player acts on one singular ship object in the active scene's world:
 
 ```cpp
 struct World {
@@ -159,6 +173,16 @@ Camera chooses a world position behind/up from the ship.
 Renderer transforms world positions into camera space.
 Projector turns camera space into screen pixels.
 ```
+
+`main.cpp` does not construct world objects directly anymore. It asks the scene manager for the active scene:
+
+```cpp
+SceneManager sceneManager;
+sceneManager.setScene<DefaultScene>();
+World& world = sceneManager.world();
+```
+
+That active scene owns the world, and the world owns objects in world coordinates.
 
 ## How Fake 3D Rendering Works
 
@@ -420,16 +444,16 @@ include/rendering/ship_renderer.h++
 The ship is a vector line model:
 
 ```cpp
-struct ShipModel {
+struct VectorModel {
     std::vector<Vec3> vertices;
-    std::vector<ShipLine> lines;
+    std::vector<VectorLine> lines;
 };
 ```
 
 Each line indexes two vertices:
 
 ```cpp
-struct ShipLine {
+struct VectorLine {
     int start = 0;
     int end = 0;
     bool hideWhenViewedFromAbove = false;
@@ -437,6 +461,19 @@ struct ShipLine {
 ```
 
 That `hideWhenViewedFromAbove` flag is used for underside lines, so the ship can remain wireframe without always showing its bottom structure through the top.
+
+The model is owned by the ship object itself:
+
+```cpp
+struct Ship {
+    Vec3 position;
+    Vec3 velocity;
+    float throttle;
+    VectorModel model = createDefaultShipModel();
+};
+```
+
+That means the object carries its physics state, gameplay parameters, and renderable vector model together. The renderer only reads `ship.model`.
 
 The draw path is:
 
@@ -448,6 +485,228 @@ local ship vertex
   -> projection
   -> SFML line draw
 ```
+
+## OBJ Loading
+
+OBJ loading lives in:
+
+```text
+include/io/obj_loader.h++
+```
+
+The loader converts OBJ data into the same `VectorModel` format used by the ship renderer:
+
+```cpp
+std::optional<VectorModel> loadObjFileAsVectorModel(
+    const std::string& path,
+    const ObjLoadOptions& options = {}
+);
+```
+
+Supported OBJ records:
+
+- `v x y z`: loaded as model vertices.
+- `f ...`: face boundaries become unique wire edges.
+- `l ...`: line records become wire edges.
+
+Ignored OBJ data:
+
+- normals
+- UVs
+- materials
+- smoothing groups
+- filled triangles/polygons
+
+This is intentional: `dusk` is a line-rendered fake-3D experiment, so the useful conversion is:
+
+```text
+OBJ vertices and faces -> unique vertices and edges -> VectorModel
+```
+
+### Loading An OBJ Into The Ship
+
+The ship object exposes:
+
+```cpp
+bool loadObjModel(const std::string& path, const ObjLoadOptions& options = {});
+```
+
+Example:
+
+```cpp
+ObjLoadOptions options;
+options.scale = 100.f;
+options.flipZ = true;
+world.playerShip.loadObjModel("assets/ships/my_ship.obj", options);
+```
+
+Where to put that? The recommended place is inside your scene header, because the scene decides which world objects exist and how they are configured.
+
+For example, in `include/scenes/default_scene.h++`:
+
+```cpp
+DefaultScene()
+{
+    world_.cube.position = {0.f, 0.f, 4000.f};
+
+    ObjLoadOptions options;
+    options.scale = 100.f;
+    world_.playerShip.loadObjModel("assets/ships/my_ship.obj", options);
+}
+```
+
+If loading fails, the ship keeps its built-in vector model.
+
+### OBJ Index Notes
+
+OBJ indices are 1-based:
+
+```obj
+v 0 0 0
+v 1 0 0
+l 1 2
+```
+
+The loader converts those to zero-based C++ indices.
+
+It also accepts slash syntax:
+
+```obj
+f 1/1/1 2/2/1 3/3/1
+```
+
+Only the vertex index before the first slash is used.
+
+Negative OBJ indices are supported too, because many simple exporters use them:
+
+```obj
+f -4 -3 -2 -1
+```
+
+### Hand-Authored Models Vs OBJ Models
+
+Hand-authored vector models can use `hideWhenViewedFromAbove` per edge:
+
+```cpp
+{0, 6, true}
+```
+
+OBJ files do not contain that project-specific visibility hint, so all OBJ edges load with:
+
+```cpp
+hideWhenViewedFromAbove = false;
+```
+
+If you want custom hidden underside edges for an imported model, load it, then edit `ship.model.lines` in the scene after loading.
+
+## Scene Management
+
+Scene code lives in:
+
+```text
+include/scenes/
+```
+
+The pieces are:
+
+- `scene.h++`: base `Scene` interface.
+- `default_scene.h++`: the current playable scene.
+- `scene_manager.h++`: owns and exposes the active scene.
+
+The base scene interface owns a world and has update hooks:
+
+```cpp
+class Scene {
+public:
+    virtual const char* name() const = 0;
+    virtual World& world() = 0;
+    virtual const World& world() const = 0;
+
+    virtual void updatePhysics(float dt)
+    {
+        updateWorldPhysics(world(), dt);
+    }
+
+    virtual void updateStreaming(const Camera& camera)
+    {
+        updateWorldStreaming(world(), camera);
+    }
+};
+```
+
+The default scene is just a header:
+
+```text
+include/scenes/default_scene.h++
+```
+
+That makes it easy to create another scene as a new `h++` file.
+
+### Creating Your Own Scene
+
+Create `include/scenes/test_scene.h++`:
+
+```cpp
+#ifndef DUSK_TEST_SCENE_H
+#define DUSK_TEST_SCENE_H
+
+#include "scenes/scene.h++"
+
+class TestScene : public Scene {
+public:
+    TestScene()
+    {
+        world_.cube.position = {2000.f, 500.f, 8000.f};
+
+        ObjLoadOptions options;
+        options.scale = 80.f;
+        world_.playerShip.loadObjModel("assets/ships/test_ship.obj", options);
+    }
+
+    const char* name() const override
+    {
+        return "test";
+    }
+
+    World& world() override
+    {
+        return world_;
+    }
+
+    const World& world() const override
+    {
+        return world_;
+    }
+
+private:
+    World world_;
+};
+
+#endif //DUSK_TEST_SCENE_H
+```
+
+Then include it in `main.cpp` and activate it:
+
+```cpp
+#include "scenes/test_scene.h++"
+
+SceneManager sceneManager;
+sceneManager.setScene<TestScene>();
+```
+
+### Scene-Specific Updates
+
+Override `updatePhysics()` when a scene needs custom simulation:
+
+```cpp
+void updatePhysics(float dt) override
+{
+    updateWorldPhysics(world_, dt);
+    world_.cube.rotationSpeed = 1.5f;
+}
+```
+
+Override `updateStreaming()` if a scene wants custom starfield behavior or streamed objects.
 
 ## The HUD
 
@@ -541,6 +800,8 @@ inline void updateWorldPhysics(World& world, float dt)
 }
 ```
 
+Or, for scene-specific behavior, keep the default `World` small and do special updates inside a custom scene's `updatePhysics()`.
+
 ### 4. Render It
 
 For a projected point:
@@ -572,6 +833,8 @@ Draw it:
 ```cpp
 asteroidRenderer.draw(window, world.asteroid, camera);
 ```
+
+If the object only belongs to one scene, you can keep the renderer call conditional or add a scene-specific render pass later. Right now rendering is still centralized in `main.cpp`.
 
 ## Adding Your Own Physics
 
@@ -716,7 +979,11 @@ shipRenderer.draw(window, ship, camera);
 ## Useful Files To Start With
 
 - `src/main.cpp`: shows the whole frame loop.
+- `include/scenes/default_scene.h++`: configure the default world and load OBJ models here.
+- `include/scenes/scene_manager.h++`: active scene ownership.
 - `include/world/world.h++`: add world-coordinate objects here.
+- `include/model/vector_model.h++`: shared vector-node and edge format.
+- `include/io/obj_loader.h++`: OBJ-to-vector conversion.
 - `include/objects/ship.h++`: example of an object with state and helper functions.
 - `include/systems/ship_physics.h++`: example of a physics system.
 - `include/tools/ship_controller.h++`: example of input and camera behavior.
@@ -730,7 +997,7 @@ This is still intentionally tiny:
 
 - No depth buffer.
 - No triangle rasterizer.
-- No loaded 3D model format.
+- OBJ loading only extracts vertices and wire edges.
 - No collision detection.
 - No time-step accumulator.
 - No real asset system.
