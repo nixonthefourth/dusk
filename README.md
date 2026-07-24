@@ -31,7 +31,7 @@ Below is the running plan for the engine and the game built on top of it. Items 
 
 - [x] C++/SFML projection and rendering system that fakes 3D rendering in 2D
 - [x] Frustum clipping
-- [ ] Culling
+- [x] Culling
 - [x] Scene management
 - [ ] Music and sound
 - [x] OBJ loader
