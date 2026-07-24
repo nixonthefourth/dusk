@@ -34,7 +34,8 @@ add_executable(dusk src/main.cpp
         include/rendering/planet_renderer.h++
         include/rendering/projector.h++
         include/rendering/ship_renderer.h++
-        include/rendering/star_renderer.h++)
+        include/rendering/star_renderer.h++
+        include/math/verlet.h++)
 
 target_include_directories(dusk PRIVATE include)
 target_include_directories(dusk PRIVATE src)

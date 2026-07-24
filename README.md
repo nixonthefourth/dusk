@@ -37,7 +37,7 @@ Below is the running plan for the engine and the game built on top of it. Items 
 - [x] OBJ loader
 - [ ] Collisions
 - [ ] Rigid bodies
-- [ ] Integrator upgrade: currently explicit Euler, moving to velocity Verlet to preserve phase-space geometry
+- [x] Integrator upgrade: currently explicit Euler, moving to velocity Verlet to preserve phase-space geometry
 
 ### Game
 
@@ -1169,7 +1169,6 @@ Those are good next steps, but the current shape is enough to experiment with fa
 This is something worth working on next:
 
 - Back-face culling
-- Velocity Verlet physics integration
 - Collision detection
 - Galactic generation (on-paper)
 - Full celestial procedural generation

@@ -6,6 +6,7 @@
 #define DUSK_SHIP_PHYSICS_H
 
 #include "objects/ship.h++"
+#include "math/verlet.h++"
 
 /** Integrates Newtonian ship motion from persistent velocity and current thrust. */
 inline void integrateShipPhysics(Ship& ship, float dt)
@@ -17,8 +18,15 @@ inline void integrateShipPhysics(Ship& ship, float dt)
         ship.throttle *
         thrustDirection;
 
-    ship.velocity += acceleration * dt;
-    ship.position += ship.velocity * dt;
+    ship.position = verlet::position_update(ship.position, ship.velocity, acceleration, dt);
+
+    const Vec3 acceleration_new =
+        shipForward(ship) *
+        ship.maxAcceleration *
+        ship.throttle *
+        thrustDirection;
+
+    ship.velocity = verlet::velocity_update(ship.velocity, acceleration, acceleration_new, dt);
 }
 
 /** Returns velocity magnitude in world units per second. */
