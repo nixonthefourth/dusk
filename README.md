@@ -17,6 +17,101 @@ The current project includes:
 - Newtonian-ish ship physics with persistent velocity.
 - A minimalist HUD drawn without fonts.
 
+## Manifesto
+
+`dusk` is a spare-time side-project, worked on with no pressure from university or any project plan. It exists to answer one question: how would a vector-graphics game like *Elite* (1984) be built today, in the same wireframe style, but with a bit more modern polish?
+
+The defining constraint is that the rendering and engine side of things is done entirely manually. SFML is only used for drawing lines; there is no OpenGL, no depth buffer, no borrowed 3D pipeline. All of the math, classes, and engineering underneath that are written from scratch. This trades convenience for control, and for the chance to learn 3D fundamentals from the bare metal up.
+
+## Roadmap
+
+Below is the running plan for the engine and the game built on top of it. Items already implemented are checked off; everything else is a future direction, tackled whenever the mood strikes.
+
+### Engine
+
+- [x] C++/SFML projection and rendering system that fakes 3D rendering in 2D
+- [x] Frustum clipping
+- [ ] Culling
+- [x] Scene management
+- [ ] Music and sound
+- [x] OBJ loader
+- [ ] Collisions
+- [ ] Rigid bodies
+- [ ] Integrator upgrade: currently explicit Euler, moving to velocity Verlet to preserve phase-space geometry
+
+### Game
+
+- [ ] Procedural world generation
+    - [ ] Planets per system
+    - [ ] Systems (up to 1000 in the galaxy)
+    - [ ] In-system and inter-system economy
+    - [ ] Simple-reflex agent (S-RA) NPC ships
+    - [ ] Missions
+- [ ] End goal: reach the centre of the galaxy
+- [ ] Newtonian physics
+    - [x] Ship thrust follows Newton's first law
+    - [ ] Objects act upon one another
+    - [ ] Towed cargo mass affects ship handling
+- [ ] Phase-space warp between system nodes
+- [ ] Galactic map
+- [ ] System map
+- [ ] Spaceships
+    - [ ] Chemical combustion ships
+    - [ ] Electric ships
+    - [ ] 20 ships total
+- [ ] World
+    - [ ] Asteroid belts
+    - [ ] OBJ-loaded models
+    - [ ] Stars
+    - [ ] Planets
+- [ ] Dynamic S-RA economy driven by supply and demand
+- [ ] System economy tiers
+    - [ ] Poor
+    - [ ] Developing
+    - [ ] Progressive
+- [ ] Tradeable goods
+    - [ ] Silicon chips
+    - [ ] Food
+    - [ ] Liquor
+    - [ ] Wines
+    - [ ] Base ores
+    - [ ] Advanced ores
+    - [ ] Advanced electronics
+    - [ ] Furs
+    - [ ] Animals
+    - [ ] Books
+    - [ ] Chemical fuel
+- [ ] World occupations
+    - [ ] Mining
+    - [ ] Engineering and tech
+    - [ ] Agricultural
+- [ ] Mission variety
+    - [ ] Live cargo transport
+    - [ ] Mining operations
+    - [ ] Bounty hunting
+    - [ ] Cargo transport
+    - [ ] Space station defence/offence
+- [ ] NPC interactions
+- [ ] HUD
+    - [x] Thrust
+    - [ ] Relative velocity/pitch/yaw
+    - [ ] Targeting, radar-esque
+- [ ] Physics
+    - [ ] Hitboxes
+    - [ ] Fuel expenditure (mass matters)
+- [ ] Upgrades
+    - [ ] Docking computer Mk1 (guided docking) and Mk2 (fully automatic docking)
+    - [ ] Guns: laser guns, grenade launcher
+    - [ ] Economics scanner
+    - [ ] Political scanner
+    - [ ] Additional fuel tanks/batteries
+    - [ ] Jump drives
+    - [ ] Mining gear
+- [ ] Space stations: small, medium, large
+- [x] Wireframe graphics style
+- [ ] Classical music for docking (*The Blue Danube*, for example)
+
+P.S I wanted to add something that breathes life without the player on the small scale. The system reacts to itself and the world almost to a clock, that runs in the background and allows the procedural world to live.
 ## Build
 
 Requirements:
