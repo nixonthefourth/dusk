@@ -10,6 +10,7 @@
 #include "math/Vec3.h++"
 #include "tools/camera.h++"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <optional>
 
@@ -27,6 +28,9 @@ struct ProjectedPoint {
     /** Positive camera-space depth used for fading and sorting. */
     float depth = 0.f;
 };
+
+/** The three projected screen-space points of a triangle, in the same order as its input vertices. */
+using ProjectedTriangle = std::array<ProjectedPoint, 3>;
 
 /** Near/far clipping planes for perspective projection. */
 struct ProjectionConfig {
@@ -170,6 +174,55 @@ public:
             start + delta * enter,
             start + delta * exit
         };
+    }
+
+    /**
+     * Projects a world-space triangle, culling it before any vertex is projected if it faces
+     * away from the camera. The three vertices are transformed into camera space first, the
+     * face is tested with isBackFacing(), and only front-facing triangles proceed to
+     * projectCameraSpace() per vertex. Returns nullopt if the triangle is back-facing or if
+     * any of its vertices are clipped by the frustum.
+     */
+    std::optional<ProjectedTriangle> projectTriangle(
+        const Vec3& worldA,
+        const Vec3& worldB,
+        const Vec3& worldC,
+        const Camera& camera,
+        const Viewport& viewport
+    ) const
+    {
+        const Mat4 view = createViewMatrix(camera);
+        const Vec3 cameraA = transformPoint(view, worldA);
+        const Vec3 cameraB = transformPoint(view, worldB);
+        const Vec3 cameraC = transformPoint(view, worldC);
+
+        if (isBackFacing(cameraA, cameraB, cameraC))
+            return std::nullopt;
+
+        const std::optional<ProjectedPoint> a = projectCameraSpace(cameraA, camera, viewport);
+        const std::optional<ProjectedPoint> b = projectCameraSpace(cameraB, camera, viewport);
+        const std::optional<ProjectedPoint> c = projectCameraSpace(cameraC, camera, viewport);
+
+        if (!a || !b || !c)
+            return std::nullopt;
+
+        return ProjectedTriangle{*a, *b, *c};
+    }
+
+    /**
+     * Returns true when a camera-space triangle faces away from the camera and should be culled.
+     * Camera space has the camera at the origin, so the vector from the camera to any triangle
+     * vertex (here, `a`) can be used directly as the view direction for the test: the cross
+     * product of two edges gives the face normal, and its dot product with that view direction
+     * is positive when the normal points back toward the camera (front-facing) or negative when
+     * it points away (back-facing) — the sign convention below assumes a particular winding order.
+     * If front-facing triangles get culled instead of back-facing ones, flip the comparison
+     * (change `>= 0.f` to `<= 0.f`) to match your winding order.
+     */
+    bool isBackFacing(const Vec3& a, const Vec3& b, const Vec3& c) const
+    {
+        const Vec3 normal = cross(b - a, c - a);
+        return dot(normal, a) >= 0.f;
     }
 
     /** Builds the world-to-camera transform from camera position and yaw/pitch/roll. */
