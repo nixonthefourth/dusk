@@ -18,8 +18,7 @@ public:
         // To use an OBJ ship model instead, keep the OBJ with the project and uncomment:
         //
         // ObjLoadOptions options;
-        // options.scale = 20.f;
-        // options.flipY = true;
+        // options.scale = 15.f;
         // world_.playerShip.loadObjModel("../assets/ships/ship.obj", options);
     }
 
