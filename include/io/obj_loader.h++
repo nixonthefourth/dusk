@@ -23,8 +23,10 @@ struct ObjLoadOptions {
     /** Adds an offset to every loaded vertex after scaling. */
     Vec3 offset;
 
-    /** Flips OBJ z coordinates when adapting models from opposite handedness. */
+    /** Flips OBJ coordinates when adapting models from opposite directions. */
     bool flipZ = false;
+    bool flipX = false;
+    bool flipY = false;
 };
 
 /** Converts OBJ vertex indices into zero-based indices, including negative relative indices. */
@@ -96,6 +98,12 @@ inline std::optional<VectorModel> loadObjStreamAsVectorModel(
 
             if (options.flipZ)
                 vertex.z = -vertex.z;
+
+            if (options.flipY)
+                vertex.y = -vertex.y;
+
+            if (options.flipX)
+                vertex.x = -vertex.x;
 
             model.vertices.push_back(vertex * options.scale + options.offset);
         }
