@@ -6,9 +6,12 @@
 
 The current project includes:
 
+- A working main menu with keyboard and mouse start input.
 - A camera that follows a player ship.
 - A wireframe Sidewinder-inspired ship rendered from vector line data.
-- A rotating cube for projection/camera testing.
+- A first test scene with a planet and a rotating cube portal.
+- A second test scene with two projected planets.
+- Cube-triggered scene teleportation.
 - A recycled endless starfield.
 - Frustum clipping for projected points and lines.
 - Newtonian-ish ship physics with persistent velocity.
@@ -37,13 +40,20 @@ Run:
 
 ## Controls
 
-The input pipeline is ship-first:
+The menu accepts:
+
+- `Enter`: start the first test scene.
+- `Space`: start the first test scene.
+- Mouse click on `PLAY`: start the first test scene.
+- `Escape`: quit.
+
+Playable scenes use a ship-first input pipeline:
 
 ```text
 keyboard -> ship controls -> ship physics -> camera follows ship -> render
 ```
 
-Controls:
+Flight controls:
 
 - `W`: increase throttle.
 - `S`: decrease throttle.
@@ -54,6 +64,8 @@ Controls:
 - `E`: pitch nose down.
 - `Arrow Up`: hold to orbit the camera around the ship.
 - `Escape`: quit.
+
+In the first test scene, fly the ship through the rotating cube to teleport into the second scene with two planets.
 
 Because movement is velocity-based, reducing throttle does not stop the ship immediately. It only stops adding acceleration. To brake:
 
@@ -82,12 +94,16 @@ include/
   objects/
     ship.h++
     cube.h++
+    planet.h++
     star.h++
 
   scenes/
     scene.h++
     default_scene.h++
+    first_test_scene.h++
+    main_menu.h++
     scene_manager.h++
+    two_planet_scene.h++
 
   systems/
     ship_physics.h++
@@ -104,6 +120,7 @@ include/
   rendering/
     projector.h++
     star_renderer.h++
+    planet_renderer.h++
     cube_renderer.h++
     ship_renderer.h++
     hud_renderer.h++
@@ -124,15 +141,25 @@ The important separation is:
 That last point matters. `main.cpp` should ideally stay boring:
 
 ```cpp
-updateShipFromKeyboard(world.playerShip, dt, shipInputState);
+if (sceneManager.activeScene().acceptsShipInput())
+    updateShipFromKeyboard(world.playerShip, dt, shipInputState);
+
 sceneManager.activeScene().updatePhysics(dt);
-updateShipCamera(camera, world.playerShip, dt, shipCameraRig);
+sceneManager.activeScene().updateCamera(camera, dt, shipCameraRig);
 sceneManager.activeScene().updateStreaming(camera);
 
 starRenderer.draw(window, world.starfield.stars(), camera);
-cubeRenderer.draw(window, world.cube, camera);
+planetRenderer.draw(window, world.planets, camera);
+
+if (world.cubeActive)
+    cubeRenderer.draw(window, world.cube, camera);
+
 shipRenderer.draw(window, world.playerShip, camera);
-hudRenderer.draw(window, world.playerShip);
+
+if (sceneManager.activeScene().showsHud())
+    hudRenderer.draw(window, world.playerShip);
+
+sceneManager.activeScene().drawOverlay(window);
 ```
 
 This keeps input, physics, camera, world streaming, and rendering from tangling together.
@@ -159,6 +186,8 @@ The player acts on one singular ship object in the active scene's world:
 struct World {
     Starfield starfield;
     Cube cube;
+    bool cubeActive = true;
+    std::vector<Planet> planets;
     Ship playerShip;
 };
 ```
@@ -178,7 +207,7 @@ Projector turns camera space into screen pixels.
 
 ```cpp
 SceneManager sceneManager;
-sceneManager.setScene<DefaultScene>();
+sceneManager.setScene<MainMenuScene>();
 World& world = sceneManager.world();
 ```
 
@@ -610,10 +639,13 @@ include/scenes/
 The pieces are:
 
 - `scene.h++`: base `Scene` interface.
-- `default_scene.h++`: the current playable scene.
+- `main_menu.h++`: start menu with keyboard and mouse activation.
+- `first_test_scene.h++`: one-planet scene with a cube portal.
+- `two_planet_scene.h++`: destination scene with two planets.
+- `default_scene.h++`: simple experimental scene kept for quick testing.
 - `scene_manager.h++`: owns and exposes the active scene.
 
-The base scene interface owns a world and has update hooks:
+The base scene interface owns a world and has hooks for input, simulation, camera behavior, streaming, overlays, and transitions:
 
 ```cpp
 class Scene {
@@ -622,25 +654,39 @@ public:
     virtual World& world() = 0;
     virtual const World& world() const = 0;
 
+    virtual void handleEvent(const sf::Event&, const sf::RenderWindow&) {}
+    virtual bool acceptsShipInput() const { return true; }
+    virtual bool showsHud() const { return true; }
+
     virtual void updatePhysics(float dt)
     {
         updateWorldPhysics(world(), dt);
+    }
+
+    virtual void updateCamera(Camera& camera, float dt, ShipCameraRig& rig)
+    {
+        updateShipCamera(camera, world().playerShip, dt, rig);
     }
 
     virtual void updateStreaming(const Camera& camera)
     {
         updateWorldStreaming(world(), camera);
     }
+
+    virtual void drawOverlay(sf::RenderTarget&) {}
+    virtual SceneTransition consumeTransition() { return SceneTransition::None; }
 };
 ```
 
-The default scene is just a header:
+Scene transitions are small enum requests consumed by `main.cpp`. The current flow is:
 
 ```text
-include/scenes/default_scene.h++
+MainMenuScene
+  -> FirstTestScene
+  -> TwoPlanetScene
 ```
 
-That makes it easy to create another scene as a new `h++` file.
+`FirstTestScene` requests `SceneTransition::TwoPlanet` when the ship passes through the cube portal volume.
 
 ### Creating Your Own Scene
 
@@ -657,6 +703,11 @@ public:
     TestScene()
     {
         world_.cube.position = {2000.f, 500.f, 8000.f};
+
+        Planet planet;
+        planet.position = {-2600.f, -900.f, 6200.f};
+        planet.radius = 1800.f;
+        world_.planets.push_back(planet);
 
         ObjLoadOptions options;
         options.scale = 80.f;
@@ -706,7 +757,7 @@ void updatePhysics(float dt) override
 }
 ```
 
-Override `updateStreaming()` if a scene wants custom starfield behavior or streamed objects.
+Override `handleEvent()` for menu-style input, `updateCamera()` for a scene-specific camera, `drawOverlay()` for screen-space UI, or `consumeTransition()` when a scene needs to request a switch.
 
 ## The HUD
 
@@ -732,7 +783,8 @@ Current colors:
 HUD rendering happens after world rendering:
 
 ```cpp
-hudRenderer.draw(window, world.playerShip);
+if (sceneManager.activeScene().showsHud())
+    hudRenderer.draw(window, world.playerShip);
 ```
 
 Since the HUD is drawn in screen coordinates, it does not use the projector or camera.
@@ -771,6 +823,8 @@ Edit `include/world/world.h++`:
 struct World {
     Starfield starfield;
     Cube cube;
+    bool cubeActive = true;
+    std::vector<Planet> planets;
     Ship playerShip;
     Asteroid asteroid;
 };
@@ -795,7 +849,10 @@ Then call it from `updateWorldPhysics()`:
 inline void updateWorldPhysics(World& world, float dt)
 {
     integrateShipPhysics(world.playerShip, dt);
-    updateCube(world.cube, dt);
+
+    if (world.cubeActive)
+        updateCube(world.cube, dt);
+
     updateAsteroid(world.asteroid, dt);
 }
 ```
@@ -834,7 +891,7 @@ Draw it:
 asteroidRenderer.draw(window, world.asteroid, camera);
 ```
 
-If the object only belongs to one scene, you can keep the renderer call conditional or add a scene-specific render pass later. Right now rendering is still centralized in `main.cpp`.
+If the object only belongs to one scene, you can keep the renderer call conditional, mirror the current `cubeActive` approach, or add a scene-specific render pass later. Right now world rendering is still centralized in `main.cpp`.
 
 ## Adding Your Own Physics
 
@@ -856,7 +913,9 @@ inline void updateWorldPhysics(World& world, float dt)
 {
     integrateShipPhysics(world.playerShip, dt);
     applyLinearDrag(world.playerShip, 0.02f, dt);
-    updateCube(world.cube, dt);
+
+    if (world.cubeActive)
+        updateCube(world.cube, dt);
 }
 ```
 
@@ -957,6 +1016,7 @@ Keep these boundaries:
 - Input maps keys to intent and settings.
 - Physics updates positions and velocities.
 - World owns objects.
+- Scenes request transitions; `main.cpp` performs them.
 - Camera decides view.
 - Rendering reads state and draws.
 - Projection math stays in `Projector`.
@@ -979,7 +1039,10 @@ shipRenderer.draw(window, ship, camera);
 ## Useful Files To Start With
 
 - `src/main.cpp`: shows the whole frame loop.
-- `include/scenes/default_scene.h++`: configure the default world and load OBJ models here.
+- `include/scenes/main_menu.h++`: menu input and overlay rendering.
+- `include/scenes/first_test_scene.h++`: cube-portal transition example.
+- `include/scenes/two_planet_scene.h++`: two-planet scene setup.
+- `include/scenes/default_scene.h++`: simple experimental world and OBJ loading notes.
 - `include/scenes/scene_manager.h++`: active scene ownership.
 - `include/world/world.h++`: add world-coordinate objects here.
 - `include/model/vector_model.h++`: shared vector-node and edge format.
@@ -988,6 +1051,7 @@ shipRenderer.draw(window, ship, camera);
 - `include/systems/ship_physics.h++`: example of a physics system.
 - `include/tools/ship_controller.h++`: example of input and camera behavior.
 - `include/rendering/ship_renderer.h++`: example of a line-model renderer.
+- `include/rendering/planet_renderer.h++`: example of projected filled bodies.
 - `include/rendering/hud_renderer.h++`: example of screen-space HUD rendering.
 - `include/rendering/projector.h++`: projection, view matrix, and clipping.
 
@@ -998,9 +1062,9 @@ This is still intentionally tiny:
 - No depth buffer.
 - No triangle rasterizer.
 - OBJ loading only extracts vertices and wire edges.
-- No collision detection.
+- No general collision detection; the cube portal uses a small scene-specific trigger.
 - No time-step accumulator.
 - No real asset system.
-- HUD uses primitive shapes instead of text/fonts.
+- HUD uses primitive shapes instead of text/fonts; the menu uses the bundled Jersey 15 font.
 
-Those are good next steps, but the current shape is enough to experiment with fake-3D projection, starfields, line models, and simple space-flight physics.
+Those are good next steps, but the current shape is enough to experiment with fake-3D projection, starfields, scene flow, planet rendering, line models, and simple space-flight physics.

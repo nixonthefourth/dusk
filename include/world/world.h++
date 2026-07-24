@@ -6,10 +6,12 @@
 #define DUSK_WORLD_H
 
 #include "objects/cube.h++"
+#include "objects/planet.h++"
 #include "objects/ship.h++"
 #include "systems/ship_physics.h++"
 #include "tools/camera.h++"
 #include "world/starfield.h++"
+#include <vector>
 
 /** Owns all objects that exist in world coordinates. */
 struct World {
@@ -19,6 +21,12 @@ struct World {
     /** Test cube in world space. */
     Cube cube;
 
+    /** Whether the test cube should update and render in this scene. */
+    bool cubeActive = true;
+
+    /** Planet bodies visible in the current scene. */
+    std::vector<Planet> planets;
+
     /** Singular player-controlled ship object in world space. */
     Ship playerShip;
 };
@@ -27,7 +35,9 @@ struct World {
 inline void updateWorldPhysics(World& world, float dt)
 {
     integrateShipPhysics(world.playerShip, dt);
-    updateCube(world.cube, dt);
+
+    if (world.cubeActive)
+        updateCube(world.cube, dt);
 }
 
 /** Updates camera-dependent world streaming after the camera has moved. */
