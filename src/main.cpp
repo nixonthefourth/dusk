@@ -107,29 +107,6 @@ int main() {
 
         World& renderWorld = sceneManager.world();
 
-        if (printClock.getElapsedTime().asSeconds() >= 0.25f)
-        {
-            std::cout
-                << "Scene: " << sceneManager.activeScene().name() << "\n"
-                << "Camera: ("
-                << camera.position.x << ", "
-                << camera.position.y << ", "
-                << camera.position.z << ") yaw "
-                << camera.yaw << " pitch "
-                << camera.pitch << "\n";
-
-            std::cout
-                << "Ship: ("
-                << renderWorld.playerShip.position.x << ", "
-                << renderWorld.playerShip.position.y << ", "
-                << renderWorld.playerShip.position.z << ") velocity "
-                << shipSpeed(renderWorld.playerShip) << " throttle "
-                << renderWorld.playerShip.throttle * 100.f
-                << (renderWorld.playerShip.reverseThrust ? "% reverse\n" : "% forward\n");
-
-            printClock.restart();
-        }
-
         window.clear(sf::Color::Black);
         starRenderer.draw(window, renderWorld.starfield.stars(), camera);
         planetRenderer.draw(window, renderWorld.planets, camera);

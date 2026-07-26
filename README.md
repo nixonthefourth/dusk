@@ -1197,5 +1197,4 @@ Those are good next steps, but the current shape is enough to experiment with fa
 This is something worth working on next:
 
 - Collision responses
-- Galactic generation (on-paper)
 - Full celestial procedural generation
