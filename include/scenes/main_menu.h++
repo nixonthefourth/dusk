@@ -21,6 +21,12 @@ public:
         world_.playerShip.position = {0.f, -80.f, 0.f};
         world_.playerShip.yaw = 0.55f;
 
+        ObjLoadOptions options;
+        options.scale = 200.f;
+        options.rotationDegrees = {0.f, -90.f, -90.f};
+        options.centerOnOrigin = true;
+        world_.playerShip.loadObjModel("assets/objects/ships/banshee.obj", options);
+
         playText_.setStyle(sf::Text::Bold);
         playText_.setFillColor(sf::Color::Black);
 

@@ -682,11 +682,15 @@ Example:
 ```cpp
 ObjLoadOptions options;
 options.scale = 100.f;
+options.rotationDegrees = {90.f, 0.f, 0.f};
 options.flipZ = true;
 world.playerShip.loadObjModel("assets/ships/my_ship.obj", options);
 ```
 
 If an import option flips an odd number of axes, the loader reverses face winding so back-face culling still treats outward-facing polygons correctly.
+`rotationDegrees` rotates imported vertices around local X, then Y, then Z before scaling and offsetting, which is useful when a model exports with its forward axis pointing the wrong way.
+OBJ imports are centered on their transformed bounding box by default, so `ship.position` and the follow camera stay centered on the visible model even when the source file was authored away from local origin.
+Set `options.centerOnOrigin = false;` only when you intentionally want to preserve the OBJ file's original pivot.
 
 Where to put that? The recommended place is inside your scene header, because the scene decides which world objects exist and how they are configured.
 

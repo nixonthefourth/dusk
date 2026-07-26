@@ -21,6 +21,12 @@ public:
         world_.playerShip.throttle = 0.f;
         world_.playerShip.reverseThrust = false;
 
+        ObjLoadOptions options;
+        options.scale = 200.f;
+        options.rotationDegrees = {0.f, -90.f, -90.f};
+        options.centerOnOrigin = true;
+        world_.playerShip.loadObjModel("assets/objects/ships/banshee.obj", options);
+
         Planet bluePlanet;
         bluePlanet.position = {-2400.f, -850.f, 5600.f};
         bluePlanet.radius = 1650.f;

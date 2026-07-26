@@ -8,6 +8,7 @@
 #include "math/Vec3.h++"
 #include "model/vector_model.h++"
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <optional>
 #include <set>
@@ -17,11 +18,17 @@
 
 /** Options used while converting OBJ data into local vector-model data. */
 struct ObjLoadOptions {
-    /** Scales every OBJ vertex while loading. */
+    /** Scales every OBJ vertex after flips and rotation. */
     float scale = 1.f;
 
-    /** Adds an offset to every loaded vertex after scaling. */
+    /** Adds an offset after all import transforms and optional origin centering. */
     Vec3 offset;
+
+    /** Rotates every OBJ vertex around local X/Y/Z axes in degrees before scaling. */
+    Vec3 rotationDegrees;
+
+    /** Recenters the model around its transformed bounding-box center. */
+    bool centerOnOrigin = true;
 
     /** Flips OBJ coordinates when adapting models from opposite directions. */
     bool flipZ = false;
@@ -38,6 +45,95 @@ inline bool reversesObjWinding(const ObjLoadOptions& options)
         (options.flipZ ? 1 : 0);
 
     return flippedAxes % 2 != 0;
+}
+
+/** Converts degrees into radians for import-time model rotation. */
+inline float degreesToRadians(float degrees)
+{
+    constexpr float pi = 3.14159265358979323846f;
+    return degrees * pi / 180.f;
+}
+
+/** Rotates a local OBJ vertex around X, then Y, then Z. */
+inline Vec3 rotateObjVertex(Vec3 vertex, const Vec3& rotationDegrees)
+{
+    const float rotationX = degreesToRadians(rotationDegrees.x);
+    const float sinX = std::sin(rotationX);
+    const float cosX = std::cos(rotationX);
+    vertex =
+    {
+        vertex.x,
+        cosX * vertex.y - sinX * vertex.z,
+        sinX * vertex.y + cosX * vertex.z
+    };
+
+    const float rotationY = degreesToRadians(rotationDegrees.y);
+    const float sinY = std::sin(rotationY);
+    const float cosY = std::cos(rotationY);
+    vertex =
+    {
+        cosY * vertex.x + sinY * vertex.z,
+        vertex.y,
+        -sinY * vertex.x + cosY * vertex.z
+    };
+
+    const float rotationZ = degreesToRadians(rotationDegrees.z);
+    const float sinZ = std::sin(rotationZ);
+    const float cosZ = std::cos(rotationZ);
+    return
+    {
+        cosZ * vertex.x - sinZ * vertex.y,
+        sinZ * vertex.x + cosZ * vertex.y,
+        vertex.z
+    };
+}
+
+/** Applies per-vertex import transforms before model-level centering and offset. */
+inline Vec3 transformObjVertex(Vec3 vertex, const ObjLoadOptions& options)
+{
+    if (options.flipZ)
+        vertex.z = -vertex.z;
+
+    if (options.flipY)
+        vertex.y = -vertex.y;
+
+    if (options.flipX)
+        vertex.x = -vertex.x;
+
+    vertex = rotateObjVertex(vertex, options.rotationDegrees);
+    return vertex * options.scale;
+}
+
+/** Recenters a transformed vector model so its bounding box surrounds local origin. */
+inline void centerModelOnOrigin(VectorModel& model)
+{
+    if (model.vertices.empty())
+        return;
+
+    Vec3 minimum = model.vertices.front();
+    Vec3 maximum = model.vertices.front();
+
+    for (const Vec3& vertex : model.vertices)
+    {
+        minimum.x = std::min(minimum.x, vertex.x);
+        minimum.y = std::min(minimum.y, vertex.y);
+        minimum.z = std::min(minimum.z, vertex.z);
+        maximum.x = std::max(maximum.x, vertex.x);
+        maximum.y = std::max(maximum.y, vertex.y);
+        maximum.z = std::max(maximum.z, vertex.z);
+    }
+
+    const Vec3 center = (minimum + maximum) * 0.5f;
+
+    for (Vec3& vertex : model.vertices)
+        vertex -= center;
+}
+
+/** Applies a final local-space offset to every vector model vertex. */
+inline void offsetModel(VectorModel& model, const Vec3& offset)
+{
+    for (Vec3& vertex : model.vertices)
+        vertex += offset;
 }
 
 /** Converts OBJ vertex indices into zero-based indices, including negative relative indices. */
@@ -120,16 +216,7 @@ inline std::optional<VectorModel> loadObjStreamAsVectorModel(
             if (!lineStream)
                 continue;
 
-            if (options.flipZ)
-                vertex.z = -vertex.z;
-
-            if (options.flipY)
-                vertex.y = -vertex.y;
-
-            if (options.flipX)
-                vertex.x = -vertex.x;
-
-            model.vertices.push_back(vertex * options.scale + options.offset);
+            model.vertices.push_back(transformObjVertex(vertex, options));
         }
         else if (tag == "f" || tag == "l")
         {
@@ -157,6 +244,11 @@ inline std::optional<VectorModel> loadObjStreamAsVectorModel(
 
     if (model.vertices.empty())
         return std::nullopt;
+
+    if (options.centerOnOrigin)
+        centerModelOnOrigin(model);
+
+    offsetModel(model, options.offset);
 
     return model;
 }
