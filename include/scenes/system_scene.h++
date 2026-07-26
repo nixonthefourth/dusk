@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <random>
 #include <string>
+#include "objects/npc_ship.h++"
+#include "systems/npc_ai.h++"
 
 /** The one reused scene for every system; regenerated on entry from the galaxy seed. */
 class SystemScene : public Scene {
@@ -94,6 +96,31 @@ private:
             world_.stationOrbitRadius = placement.orbitRadius;
             world_.stationOrbitAngle = placement.orbitAngle;
             world_.stationOrbitSpeed = placement.orbitSpeed;
+        }
+
+        // Outer bound for NPC roaming, sized to comfortably contain every planet's orbit.
+        float outerRadius = world_.star.radius * 3.f;
+
+        for (const Planet& planet : world_.planets)
+            outerRadius = std::max(outerRadius, length(planet.position) + planet.radius);
+
+        world_.systemOuterRadius = outerRadius + 5000.f;
+
+        world_.npcShips.assign(static_cast<std::size_t>(info.npcShipCount), NpcShip{});
+
+        std::uniform_real_distribution<float> initialStaggerDist(0.f, npc_ai::minWarpOutDuration);
+
+        for (NpcShip& npc : world_.npcShips)
+        {
+            ObjLoadOptions npcOptions;
+            npcOptions.scale = 200.f;
+            npcOptions.rotationDegrees = {0.f, -90.f, -90.f};
+            npcOptions.centerOnOrigin = true;
+            npc.ship.loadObjModel("assets/objects/ships/banshee.obj", npcOptions);
+
+            npc.state = NpcState::Inactive;
+            npc.stateTimer = 0.f;
+            npc.wakeDelay = initialStaggerDist(world_.npcRng);
         }
 
         world_.playerShip.position = procgen::shipSpawnPosition(world_.star, world_.planets);

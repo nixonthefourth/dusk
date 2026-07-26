@@ -14,6 +14,8 @@
 #include "world/starfield.h++"
 #include <vector>
 #include "systems/orbital_physics.h++"
+#include "objects/npc_ship.h++"
+#include "systems/npc_ai.h++"
 #include <cmath>
 
 /** Owns all objects that exist in world coordinates. */
@@ -22,6 +24,15 @@ struct World {
     Cube cube;
     bool cubeActive = true;
     std::vector<Planet> planets;
+
+    /** All NPC ships currently populating this system. */
+    std::vector<NpcShip> npcShips;
+
+    /** Live randomness for NPC behaviour — reseeded fresh every time a system is entered. */
+    std::mt19937 npcRng = std::mt19937(std::random_device{}());
+
+    /** Outer bound NPCs roam within; set by whoever generates the system. */
+    float systemOuterRadius = 40000.f;
 
     /** Central star. Always static — never touched by orbital integration. */
     Planet star;
@@ -35,25 +46,44 @@ struct World {
     Ship playerShip;
 };
 
+
+
+/** Sums gravitational acceleration from the star and every planet at a given position. */
+inline Vec3 gravityAt(const World& world, const Vec3& position)
+{
+    Vec3 acceleration = orbital::gravitationalAcceleration(position, world.star.position, world.star.mass);
+
+    for (const Planet& planet : world.planets)
+        acceleration += orbital::gravitationalAcceleration(position, planet.position, planet.mass);
+
+    return acceleration;
+}
+
 /** Sums gravitational acceleration from the star and every planet at the ship's position. */
 inline Vec3 gravityOnShip(const World& world)
 {
-    Vec3 acceleration = orbital::gravitationalAcceleration(
-        world.playerShip.position,
-        world.star.position,
-        world.star.mass
-    );
+    return gravityAt(world, world.playerShip.position);
+}
 
-    for (const Planet& planet : world.planets)
+/** Advances every NPC's simple-reflex behaviour and physics for one frame. */
+inline void updateNpcShips(World& world, float dt)
+{
+    for (NpcShip& npc : world.npcShips)
     {
-        acceleration += orbital::gravitationalAcceleration(
-            world.playerShip.position,
-            planet.position,
-            planet.mass
+        const Vec3 gravity = gravityAt(world, npc.ship.position);
+
+        npc_ai::updateNpcShip(
+            npc,
+            dt,
+            world.npcRng,
+            world.star,
+            world.planets,
+            world.cube.position,
+            world.cubeActive,
+            world.systemOuterRadius,
+            gravity
         );
     }
-
-    return acceleration;
 }
 
 /** Keeps the station cube circling its host planet's current (possibly moving) position. */
@@ -272,6 +302,7 @@ inline void updateWorldPhysics(World& world, float dt)
 
     orbital::integrateOrbitalPhysics(world.planets, world.star.position, world.star.mass, dt);
     updateStationOrbit(world, dt);
+    updateNpcShips(world, dt);
 
     if (world.cubeActive)
         updateCube(world.cube, dt);

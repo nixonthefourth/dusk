@@ -14,7 +14,7 @@
 
 namespace orbital {
     /** Gravitational constant tuned for this project's world-unit scale, not real SI units. */
-    constexpr float g = 300.f;
+    constexpr float g = 600.f;
 
     /** Softening distance so acceleration doesn't spike toward infinity at very close range. */
     constexpr float minDistance = 200.f;

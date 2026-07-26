@@ -41,7 +41,9 @@ add_executable(dusk src/main.cpp
         include/procgen/planet_generation.h++
         include/systems/economy.h++
         include/scenes/system_scene.h++
-        include/systems/orbital_physics.h++)
+        include/systems/orbital_physics.h++
+        include/objects/npc_ship.h++
+        include/systems/npc_ai.h++)
 
 target_include_directories(dusk PRIVATE include)
 target_include_directories(dusk PRIVATE src)

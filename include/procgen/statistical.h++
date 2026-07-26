@@ -22,6 +22,7 @@ struct SystemInfo {
     std::vector<std::string> goods;
     std::string occupation;
     int stationCount = 0;
+    int npcShipCount = 0;
 };
 
 /* Name generation */
@@ -169,6 +170,19 @@ inline int generateStationCount(std::mt19937& rng, EconomyTier economyTier)
     return std::clamp(rolled + (bonus > 0 ? 1 : 0) - (bonus < 0 ? 1 : 0), 1, 4);
 }
 
+/** Rolls how many NPC ships populate a system, biased upward for wealthier economies. */
+inline int generateNpcShipCount(std::mt19937& rng, EconomyTier economyTier)
+{
+    const int minShips = economyTier == EconomyTier::Poor ? 1
+        : (economyTier == EconomyTier::Developing ? 2 : 4);
+
+    const int maxShips = economyTier == EconomyTier::Poor ? 4
+        : (economyTier == EconomyTier::Developing ? 7 : 10);
+
+    std::uniform_int_distribution<int> distribution(minShips, maxShips);
+    return distribution(rng);
+}
+
 /* Top-level generation */
 
 /** Pure function: the same seed always produces the same SystemInfo. */
@@ -179,6 +193,7 @@ inline SystemInfo generateSystemInfo(std::uint32_t systemSeed)
 
     info.name = generateSystemName(rng);
     info.economyTier = generateEconomyTier(rng);
+    info.npcShipCount = generateNpcShipCount(rng, info.economyTier);
     info.occupation = generateOccupation(rng);
     info.goods = generateGoods(rng, info.occupation);
     info.planetCount = generatePlanetCount(rng);

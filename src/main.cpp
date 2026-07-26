@@ -112,6 +112,12 @@ int main() {
 
         shipRenderer.draw(window, renderWorld.playerShip, camera);
 
+        for (const NpcShip& npc : renderWorld.npcShips)
+        {
+            if (npc.isVisible())
+                shipRenderer.draw(window, npc.ship, camera);
+        }
+
         if (sceneManager.activeScene().showsHud())
             hudRenderer.draw(window, renderWorld.playerShip);
 
