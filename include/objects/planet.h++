@@ -10,23 +10,17 @@
 
 /** A simple spherical world body rendered through the fake-3D projector. */
 struct Planet {
-    /** Center of the planet in world space. */
     Vec3 position;
-
-    /** World-space sphere radius. */
+    Vec3 velocity;
+    float mass = 1.f;
     float radius = 1000.f;
-
-    /** Object-level collision state, refreshed by World every physics update. */
     CollisionBody collision;
-
-    /** Whether a projected ellipse ring should be drawn around the planet. */
     bool hasRing = false;
-
-    /** Ring rotation in screen-space degrees. */
     float ringRotationDegrees = 0.f;
-
-    /** Ring height as a fraction of its projected width. */
     float ringFlattening = 0.28f;
+
+    /** Marks this as the system's central star, rendered as a filled disc instead of a wire grid. */
+    bool isStar = false;
 };
 
 /** Returns the planet's current collision radius, derived from its visible sphere. */

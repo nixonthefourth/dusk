@@ -152,11 +152,11 @@ inline std::vector<std::string> generateGoods(std::mt19937& rng, const std::stri
 /** Rolls how many planetary objects a system contains. */
 inline int generatePlanetCount(std::mt19937& rng)
 {
-    std::uniform_int_distribution<int> distribution(1, 8);
+    std::uniform_int_distribution<int> distribution(1, 4);
     return distribution(rng);
 }
 
-/** Rolls how many stations a system has, weighted toward one or zero. */
+/** Rolls how many stations a system has. */
 inline int generateStationCount(std::mt19937& rng, EconomyTier economyTier)
 {
     // More developed systems are more likely to host a station.
@@ -164,9 +164,9 @@ inline int generateStationCount(std::mt19937& rng, EconomyTier economyTier)
         ? 1
         : (economyTier == EconomyTier::Developing ? 0 : -1);
 
-    std::discrete_distribution<int> distribution({40, 45, 15}); // 0, 1, 2 stations, before bonus
+    std::discrete_distribution<int> distribution({40, 45, 15}); // 1, 2, 3 stations, before bonus
     const int rolled = distribution(rng);
-    return std::clamp(rolled + (bonus > 0 ? 1 : 0) - (bonus < 0 ? 1 : 0), 0, 3);
+    return std::clamp(rolled + (bonus > 0 ? 1 : 0) - (bonus < 0 ? 1 : 0), 1, 4);
 }
 
 /* Top-level generation */
@@ -185,27 +185,6 @@ inline SystemInfo generateSystemInfo(std::uint32_t systemSeed)
     info.stationCount = generateStationCount(rng, info.economyTier);
 
     return info;
-}
-
-/** Derives a stable per-system seed from the galaxy seed and system index. */
-inline std::uint32_t deriveSystemSeed(std::uint32_t gameSeed, int systemIndex)
-{
-    std::seed_seq seedSequence{gameSeed, static_cast<std::uint32_t>(systemIndex)};
-    std::array<std::uint32_t, 1> output{};
-    seedSequence.generate(output.begin(), output.end());
-    return output[0];
-}
-
-/** Generates the full roster of on-paper systems for a galaxy seed. */
-inline std::vector<SystemInfo> generateGalaxy(std::uint32_t gameSeed, int systemCount = 1000)
-{
-    std::vector<SystemInfo> systems;
-    systems.reserve(static_cast<std::size_t>(systemCount));
-
-    for (int systemIndex = 0; systemIndex < systemCount; ++systemIndex)
-        systems.push_back(generateSystemInfo(deriveSystemSeed(gameSeed, systemIndex)));
-
-    return systems;
 }
 
 #endif //DUSK_STATISTICAL_H

@@ -13,24 +13,51 @@
 #include "tools/camera.h++"
 #include "world/starfield.h++"
 #include <vector>
+#include "systems/orbital_physics.h++"
+#include <cmath>
 
 /** Owns all objects that exist in world coordinates. */
 struct World {
-    /** Endless-looking background star volume. */
     Starfield starfield;
-
-    /** Test cube in world space. */
     Cube cube;
-
-    /** Whether the test cube should update and render in this scene. */
     bool cubeActive = true;
-
-    /** Planet bodies visible in the current scene. */
     std::vector<Planet> planets;
 
-    /** Singular player-controlled ship object in world space. */
+    /** Central star. Always static — never touched by orbital integration. */
+    Planet star;
+
+    /** Index into `planets` that the station cube orbits, or -1 if there's no station. */
+    int stationHostPlanetIndex = -1;
+    float stationOrbitRadius = 0.f;
+    float stationOrbitAngle = 0.f;
+    float stationOrbitSpeed = 0.15f;
+
     Ship playerShip;
 };
+
+/** Keeps the station cube circling its host planet's current (possibly moving) position. */
+inline void updateStationOrbit(World& world, float dt)
+{
+    if (!world.cubeActive)
+        return;
+
+    if (world.stationHostPlanetIndex < 0 ||
+        static_cast<std::size_t>(world.stationHostPlanetIndex) >= world.planets.size())
+    {
+        return;
+    }
+
+    world.stationOrbitAngle += world.stationOrbitSpeed * dt;
+
+    const Planet& host = world.planets[static_cast<std::size_t>(world.stationHostPlanetIndex)];
+
+    world.cube.position = host.position + Vec3
+    {
+        std::cos(world.stationOrbitAngle) * world.stationOrbitRadius,
+        0.f,
+        std::sin(world.stationOrbitAngle) * world.stationOrbitRadius
+    };
+}
 
 /** Clears collision hits from every object before fresh detection runs. */
 inline void clearWorldCollisions(World& world)
@@ -220,6 +247,8 @@ inline void updateWorldCollisions(World& world)
 inline void updateWorldPhysics(World& world, float dt)
 {
     integrateShipPhysics(world.playerShip, dt);
+    orbital::integrateOrbitalPhysics(world.planets, world.star.position, world.star.mass, dt);
+    updateStationOrbit(world, dt);
 
     if (world.cubeActive)
         updateCube(world.cube, dt);

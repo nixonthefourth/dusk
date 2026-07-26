@@ -9,8 +9,6 @@ The current project includes:
 - A working main menu with keyboard and mouse start input.
 - A camera that follows a player ship.
 - A wireframe Sidewinder-inspired ship rendered from vector line data.
-- A first test scene with a planet and a rotating cube portal.
-- A second test scene with two projected planets.
 - Object-level collision detection, including cube-triggered scene teleportation.
 - A recycled endless starfield.
 - Frustum clipping for projected points and lines.
@@ -137,9 +135,9 @@ Run:
 
 The menu accepts:
 
-- `Enter`: start the first test scene.
-- `Space`: start the first test scene.
-- Mouse click on `PLAY`: start the first test scene.
+- `Enter`: start the game.
+- `Space`: start the game.
+- Mouse click on `PLAY`: start the game.
 - `Escape`: quit.
 
 Playable scenes use a ship-first input pipeline:
@@ -159,8 +157,6 @@ Flight controls:
 - `E`: pitch nose down.
 - `Arrow Up`: hold to orbit the camera around the ship.
 - `Escape`: quit.
-
-In the first test scene, fly the ship through the rotating cube to teleport into the second scene with two planets.
 
 Because movement is velocity-based, reducing throttle does not stop the ship immediately. It only stops adding acceleration. To brake:
 
@@ -195,11 +191,9 @@ include/
   scenes/
     scene.h++
     default_scene.h++
-    first_test_scene.h++
     main_menu.h++
     scene_manager.h++
-    two_planet_scene.h++
-
+    
   systems/
     ship_physics.h++
 
@@ -763,8 +757,6 @@ The pieces are:
 
 - `scene.h++`: base `Scene` interface.
 - `main_menu.h++`: start menu with keyboard and mouse activation.
-- `first_test_scene.h++`: one-planet scene with a cube portal.
-- `two_planet_scene.h++`: destination scene with two planets.
 - `default_scene.h++`: simple experimental scene kept for quick testing.
 - `scene_manager.h++`: owns and exposes the active scene.
 
@@ -805,11 +797,8 @@ Scene transitions are small enum requests consumed by `main.cpp`. The current fl
 
 ```text
 MainMenuScene
-  -> FirstTestScene
-  -> TwoPlanetScene
+  -> system_scene
 ```
-
-`FirstTestScene` requests `SceneTransition::TwoPlanet` when the ship passes through the cube portal volume.
 
 ### Creating Your Own Scene
 

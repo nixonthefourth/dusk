@@ -17,6 +17,7 @@ enum class SceneTransition {
     None,
     FirstTest,
     TwoPlanet,
+    EnterSystem,
     Exit
 };
 

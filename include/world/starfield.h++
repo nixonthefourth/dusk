@@ -13,13 +13,8 @@
 
 /** Settings for the camera-centered, recycled star volume. */
 struct StarfieldConfig {
-    /** Number of stars kept alive and reused forever. */
     int starCount = 3000;
-
-    /** Half-size of the cubic star volume around its current center. */
-    float radius = 30000.f;
-
-    /** Recenter the field when the camera travels this fraction of the radius. */
+    float radius = 90000.f; // was 30000.f
     float recycleThreshold = 0.5f;
 };
 

@@ -14,10 +14,10 @@
 /** Third-person camera offset relative to the ship. */
 struct ShipCameraSettings {
     /** Distance behind the ship along its local forward axis. */
-    float followDistance = 1000.f;
+    float followDistance = 500.f;
 
     /** Height above the ship in world space, keeping the view upright. */
-    float followHeight = 800.f;
+    float followHeight = 500.f;
 
     /** Point ahead of the ship that the camera looks toward. */
     float lookAhead = 700.f;

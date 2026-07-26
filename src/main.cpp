@@ -5,12 +5,12 @@
 #include "rendering/planet_renderer.h++"
 #include "rendering/ship_renderer.h++"
 #include "rendering/star_renderer.h++"
-#include "scenes/first_test_scene.h++"
 #include "scenes/scene_manager.h++"
 #include "scenes/main_menu.h++"
-#include "scenes/two_planet_scene.h++"
 #include "tools/camera.h++"
 #include "tools/ship_controller.h++"
+#include "procgen/galaxy.h++"
+#include "scenes/system_scene.h++"
 
 int main() {
     sf::RenderWindow window(
@@ -27,6 +27,8 @@ int main() {
     Camera camera;
 
     // Initialise scene/world
+    Galaxy galaxy = generateGalaxy(1337u); // TODO: seed from a save file or menu input later
+
     SceneManager sceneManager;
     sceneManager.setScene<MainMenuScene>();
     ShipInputState shipInputState;
@@ -45,12 +47,8 @@ int main() {
 
         switch (transition)
         {
-            case SceneTransition::FirstTest:
-                sceneManager.setScene<FirstTestScene>();
-                break;
-
-            case SceneTransition::TwoPlanet:
-                sceneManager.setScene<TwoPlanetScene>();
+            case SceneTransition::EnterSystem:
+                sceneManager.setScene<SystemScene>(galaxy, 0);
                 break;
 
             case SceneTransition::Exit:
@@ -109,7 +107,7 @@ int main() {
 
         window.clear(sf::Color::Black);
         starRenderer.draw(window, renderWorld.starfield.stars(), camera);
-        planetRenderer.draw(window, renderWorld.planets, camera);
+        planetRenderer.drawSystem(window, renderWorld.star, renderWorld.planets, camera);
 
         if (renderWorld.cubeActive)
             cubeRenderer.draw(window, renderWorld.cube, camera);

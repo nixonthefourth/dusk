@@ -56,7 +56,7 @@ public:
             if (keyPressed->code == sf::Keyboard::Key::Enter ||
                 keyPressed->code == sf::Keyboard::Key::Space)
             {
-                pendingTransition_ = SceneTransition::FirstTest;
+                pendingTransition_ = SceneTransition::EnterSystem;
             }
         }
 
@@ -72,7 +72,7 @@ public:
 
             if (playButtonBounds(window.getSize()).contains(mouse))
             {
-                pendingTransition_ = SceneTransition::FirstTest;
+                pendingTransition_ = SceneTransition::EnterSystem;
                 return;
             }
 

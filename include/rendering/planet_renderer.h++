@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <vector>
 
-/** Draws projected spherical planets as ascetic monochrome wire models. */
+/** Draws projected spherical planets and stars as ascetic monochrome wire models. */
 class PlanetRenderer {
 public:
     /** Creates a planet renderer using shared projection clipping settings. */
@@ -24,59 +24,34 @@ public:
     {
     }
 
-    /** Projects, sorts, and draws planets from back to front. */
-    void draw(sf::RenderTarget& target, const std::vector<Planet>& planets, const Camera& camera) const
+    /** Projects, sorts, and draws a system's star together with its planets, back to front. */
+    void drawSystem(
+        sf::RenderTarget& target,
+        const Planet& star,
+        const std::vector<Planet>& planets,
+        const Camera& camera
+    ) const
     {
-        const sf::Vector2u size = target.getSize();
-        const Viewport viewport =
-        {
-            static_cast<float>(size.x),
-            static_cast<float>(size.y)
-        };
-
-        const Mat4 viewMatrix = projector_.createViewMatrix(camera);
-        const float focalLength = focalLengthFor(camera, viewport);
-        std::vector<ProjectedPlanet> visiblePlanets;
-        visiblePlanets.reserve(planets.size());
+        std::vector<const Planet*> bodies;
+        bodies.reserve(planets.size() + 1);
+        bodies.push_back(&star);
 
         for (const Planet& planet : planets)
-        {
-            const Vec3 cameraSpace = transformPoint(viewMatrix, planet.position);
+            bodies.push_back(&planet);
 
-            if (cameraSpace.z <= 1.f)
-                continue;
+        drawBodies(target, bodies, camera);
+    }
 
-            const auto projected = projector_.projectCameraSpace(cameraSpace, camera, viewport, planet.radius);
+    /** Projects, sorts, and draws planets alone, without a star. */
+    void draw(sf::RenderTarget& target, const std::vector<Planet>& planets, const Camera& camera) const
+    {
+        std::vector<const Planet*> bodies;
+        bodies.reserve(planets.size());
 
-            if (!projected)
-                continue;
+        for (const Planet& planet : planets)
+            bodies.push_back(&planet);
 
-            const float screenRadius = planet.radius * focalLength / cameraSpace.z;
-
-            if (screenRadius < 2.f)
-                continue;
-
-            if (projected->position.x < -screenRadius ||
-                projected->position.x > viewport.width + screenRadius ||
-                projected->position.y < -screenRadius ||
-                projected->position.y > viewport.height + screenRadius)
-            {
-                continue;
-            }
-
-            visiblePlanets.push_back({&planet, *projected, screenRadius});
-        }
-
-        std::sort(
-            visiblePlanets.begin(),
-            visiblePlanets.end(),
-            [](const ProjectedPlanet& a, const ProjectedPlanet& b) {
-                return a.projected.depth > b.projected.depth;
-            }
-        );
-
-        for (const ProjectedPlanet& projectedPlanet : visiblePlanets)
-            drawPlanet(target, projectedPlanet, camera, viewport, viewMatrix);
+        drawBodies(target, bodies, camera);
     }
 
 private:
@@ -98,6 +73,61 @@ private:
     static float focalLengthFor(const Camera& camera, const Viewport& viewport)
     {
         return (viewport.height * 0.5f) / std::tan(degreesToRadians(camera.fov) * 0.5f);
+    }
+
+    /** Shared draw path for any list of stellar bodies (stars, planets, or both together). */
+    void drawBodies(sf::RenderTarget& target, const std::vector<const Planet*>& bodies, const Camera& camera) const
+    {
+        const sf::Vector2u size = target.getSize();
+        const Viewport viewport =
+        {
+            static_cast<float>(size.x),
+            static_cast<float>(size.y)
+        };
+
+        const Mat4 viewMatrix = projector_.createViewMatrix(camera);
+        const float focalLength = focalLengthFor(camera, viewport);
+        std::vector<ProjectedPlanet> visiblePlanets;
+        visiblePlanets.reserve(bodies.size());
+
+        for (const Planet* planet : bodies)
+        {
+            const Vec3 cameraSpace = transformPoint(viewMatrix, planet->position);
+
+            if (cameraSpace.z <= 1.f)
+                continue;
+
+            const auto projected = projector_.projectCameraSpace(cameraSpace, camera, viewport, planet->radius);
+
+            if (!projected)
+                continue;
+
+            const float screenRadius = planet->radius * focalLength / cameraSpace.z;
+
+            if (screenRadius < 2.f)
+                continue;
+
+            if (projected->position.x < -screenRadius ||
+                projected->position.x > viewport.width + screenRadius ||
+                projected->position.y < -screenRadius ||
+                projected->position.y > viewport.height + screenRadius)
+            {
+                continue;
+            }
+
+            visiblePlanets.push_back({planet, *projected, screenRadius});
+        }
+
+        std::sort(
+            visiblePlanets.begin(),
+            visiblePlanets.end(),
+            [](const ProjectedPlanet& a, const ProjectedPlanet& b) {
+                return a.projected.depth > b.projected.depth;
+            }
+        );
+
+        for (const ProjectedPlanet& projectedPlanet : visiblePlanets)
+            drawPlanet(target, projectedPlanet, camera, viewport, viewMatrix);
     }
 
     void drawPlanet(

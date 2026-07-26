@@ -22,11 +22,9 @@ add_executable(dusk src/main.cpp
         include/objects/ship.h++
         include/objects/star.h++
         include/scenes/default_scene.h++
-        include/scenes/first_test_scene.h++
         include/scenes/main_menu.h++
         include/scenes/scene.h++
         include/scenes/scene_manager.h++
-        include/scenes/two_planet_scene.h++
         include/systems/ship_physics.h++
         include/world/starfield.h++
         include/world/world.h++
@@ -37,7 +35,13 @@ add_executable(dusk src/main.cpp
         include/rendering/ship_renderer.h++
         include/rendering/star_renderer.h++
         include/math/verlet.h++
-        include/galaxy/statistical.h++)
+        include/procgen/statistical.h++
+        include/procgen/galaxy.h++
+        include/procgen/planet_generation.h++
+        include/procgen/planet_generation.h++
+        include/systems/economy.h++
+        include/scenes/system_scene.h++
+        include/systems/orbital_physics.h++)
 
 target_include_directories(dusk PRIVATE include)
 target_include_directories(dusk PRIVATE src)
