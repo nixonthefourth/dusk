@@ -8,25 +8,37 @@
 #include "objects/ship.h++"
 #include "math/verlet.h++"
 
+/** Returns the current thrust force vector from ship controls. */
+inline Vec3 shipThrustForce(const Ship& ship)
+{
+    const float thrustDirection = ship.reverseThrust ? -1.f : 1.f;
+    return
+        shipForward(ship) *
+        ship.maxThrust *
+        ship.throttle *
+        thrustDirection;
+}
+
+/** Returns current ship acceleration, protecting the integrator from invalid mass. */
+inline Vec3 shipAcceleration(const Ship& ship)
+{
+    if (ship.mass <= 0.f)
+        return {};
+
+    return shipThrustForce(ship) / ship.mass;
+}
+
 /** Integrates Newtonian ship motion from persistent velocity and current thrust. */
 inline void integrateShipPhysics(Ship& ship, float dt)
 {
     ship.previousPosition = ship.position;
 
-    const float thrustDirection = ship.reverseThrust ? -1.f : 1.f;
-    const Vec3 force =
-        shipForward(ship) *
-        ship.maxThrust *
-        ship.throttle *
-        thrustDirection;
-
-    const Vec3 acceleration = force / ship.mass;
+    const Vec3 acceleration = shipAcceleration(ship);
 
     ship.position = verlet::position_update(ship.position, ship.velocity, acceleration, dt);
 
-    const Vec3 acceleration_new = force / ship.mass;
-
-    ship.velocity = verlet::velocity_update(ship.velocity, acceleration, acceleration_new, dt);
+    // Current thrust acceleration is constant across this frame.
+    ship.velocity = verlet::velocity_update(ship.velocity, acceleration, acceleration, dt);
 }
 
 /** Returns velocity magnitude in world units per second. */

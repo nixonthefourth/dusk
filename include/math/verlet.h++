@@ -16,8 +16,8 @@ namespace verlet {
     /// @param a Given acceleration
     /// @param dt Current timestep
     /// @return Returns updated displacement
-    Vec3 position_update(const Vec3& r, const Vec3& v, const Vec3& a, float dt) {
-        return r + v * dt + 0.5 * a * dt * dt;
+    inline Vec3 position_update(const Vec3& r, const Vec3& v, const Vec3& a, float dt) {
+        return r + v * dt + 0.5f * a * dt * dt;
     }
 
     /// @brief Updates velocity vector of an object
@@ -26,8 +26,8 @@ namespace verlet {
     /// @param a_new Acceleration dt+1
     /// @param dt Current timestep
     /// @return Returns updated velocity
-    Vec3 velocity_update(const Vec3& v, const Vec3& a_old, const Vec3& a_new, float dt) {
-        return v + 0.5 * (a_old + a_new) * dt;
+    inline Vec3 velocity_update(const Vec3& v, const Vec3& a_old, const Vec3& a_new, float dt) {
+        return v + 0.5f * (a_old + a_new) * dt;
     }
 }
 
