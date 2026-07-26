@@ -14,19 +14,17 @@ inline void integrateShipPhysics(Ship& ship, float dt)
     ship.previousPosition = ship.position;
 
     const float thrustDirection = ship.reverseThrust ? -1.f : 1.f;
-    const Vec3 acceleration =
+    const Vec3 force =
         shipForward(ship) *
-        ship.maxAcceleration *
+        ship.maxThrust *
         ship.throttle *
         thrustDirection;
+
+    const Vec3 acceleration = force / ship.mass;
 
     ship.position = verlet::position_update(ship.position, ship.velocity, acceleration, dt);
 
-    const Vec3 acceleration_new =
-        shipForward(ship) *
-        ship.maxAcceleration *
-        ship.throttle *
-        thrustDirection;
+    const Vec3 acceleration_new = force / ship.mass;
 
     ship.velocity = verlet::velocity_update(ship.velocity, acceleration, acceleration_new, dt);
 }

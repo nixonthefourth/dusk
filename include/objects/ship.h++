@@ -87,7 +87,7 @@ struct Ship {
     bool reverseThrust = false;
 
     /** Acceleration at full throttle in world units per second squared. */
-    float maxAcceleration = 80.f;
+    float maxThrust = 1000.f;
 
     /** W/S throttle change speed per second. */
     float throttleChangeSpeed = 0.5f;
@@ -97,6 +97,9 @@ struct Ship {
 
     /** Q/E pitch speed in radians per second. */
     float pitchSpeed = 0.8f;
+
+    /** Mass of the ship in tonnes. */
+    float mass = 15.f;
 
     /** Local-space vector model rendered for this ship. */
     VectorModel model = createDefaultShipModel();
