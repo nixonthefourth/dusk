@@ -1,6 +1,6 @@
 # dusk
 
-![Flight Demo](demo/demo.gif)
+![Flight Demo](demo/demo.png)
 
 `dusk` is a small SFML/C++ experiment for faking 3D with 2D rendering. It keeps a simple 3D world in memory, transforms points through a camera view matrix, projects those points onto the 2D screen, and draws the result with SFML primitives.
 
