@@ -15,9 +15,6 @@ public:
           playText_(font_, "PLAY", 42),
           exitText_(font_, "EXIT", 42)
     {
-        world_.cube.position = {0.f, 120.f, 3200.f};
-        world_.cube.size = 900.f;
-        world_.cube.rotationSpeed = 0.32f;
         world_.playerShip.position = {0.f, -80.f, 0.f};
         world_.playerShip.yaw = 0.55f;
 

@@ -4,17 +4,6 @@
 
 `dusk` is a small SFML/C++ experiment for faking 3D with 2D rendering. It keeps a simple 3D world in memory, transforms points through a camera view matrix, projects those points onto the 2D screen, and draws the result with SFML primitives.
 
-The current project includes:
-
-- A working main menu with keyboard and mouse start input.
-- A camera that follows a player ship.
-- A wireframe Sidewinder-inspired ship rendered from vector line data.
-- Object-level collision detection, including cube-triggered scene teleportation.
-- A recycled endless starfield.
-- Frustum clipping for projected points and lines.
-- Newtonian-ish ship physics with persistent velocity.
-- A minimalist HUD drawn without fonts.
-
 ## Manifesto
 
 `dusk` is a spare-time side-project, worked on with no pressure from university or any project plan. It exists to answer one question: how would a vector-graphics game like *Elite* (1984) be built today, in the same wireframe style, but with a bit more modern polish?
@@ -34,21 +23,22 @@ Below is the running plan for the engine and the game built on top of it. Items 
 - [ ] Music and sound
 - [x] OBJ loader
 - [x] Object-level collision detection
-- [ ] Rigid bodies
+- [ ] Rigid body interaction
+- [x] Collision detection
 - [x] Integrator upgrade: currently explicit Euler, moving to velocity Verlet to preserve phase-space geometry
 
 ### Game
 
 - [ ] Procedural world generation
-    - [ ] Planets per system
-    - [ ] Systems (up to 1000 in the galaxy)
+    - [x] Planets per system
+    - [x] Systems (up to 1000 in the galaxy)
     - [ ] In-system and inter-system economy
     - [ ] Simple-reflex agent (S-RA) NPC ships
     - [ ] Missions
 - [ ] End goal: reach the centre of the galaxy
 - [ ] Newtonian physics
     - [x] Ship thrust follows Newton's first law
-    - [ ] Objects act upon one another
+    - [x] Objects act upon one another
     - [ ] Towed cargo mass affects ship handling
 - [ ] Phase-space warp between system nodes
 - [ ] Galactic map
@@ -59,30 +49,30 @@ Below is the running plan for the engine and the game built on top of it. Items 
     - [ ] 20 ships total
 - [ ] World
     - [ ] Asteroid belts
-    - [ ] OBJ-loaded models
-    - [ ] Stars
-    - [ ] Planets
+    - [x] OBJ-loaded models
+    - [x] Stars
+    - [x] Planets
 - [ ] Dynamic S-RA economy driven by supply and demand
-- [ ] System economy tiers
-    - [ ] Poor
-    - [ ] Developing
-    - [ ] Progressive
-- [ ] Tradeable goods
-    - [ ] Silicon chips
-    - [ ] Food
-    - [ ] Liquor
-    - [ ] Wines
-    - [ ] Base ores
-    - [ ] Advanced ores
-    - [ ] Advanced electronics
-    - [ ] Furs
-    - [ ] Animals
-    - [ ] Books
-    - [ ] Chemical fuel
-- [ ] World occupations
-    - [ ] Mining
-    - [ ] Engineering and tech
-    - [ ] Agricultural
+- [x] System economy tiers
+    - [x] Poor
+    - [x] Developing
+    - [x] Progressive
+- [x] Tradeable goods
+    - [x] Silicon chips
+    - [x] Food
+    - [x] Liquor
+    - [x] Wines
+    - [x] Base ores
+    - [x] Advanced ores
+    - [x] Advanced electronics
+    - [x] Furs
+    - [x] Animals
+    - [x] Books
+    - [x] Chemical fuel
+- [x] World occupations
+    - [x] Mining
+    - [x] Engineering and tech
+    - [x] Agricultural
 - [ ] Mission variety
     - [ ] Live cargo transport
     - [ ] Mining operations
@@ -95,7 +85,7 @@ Below is the running plan for the engine and the game built on top of it. Items 
     - [ ] Relative velocity/pitch/yaw
     - [ ] Targeting, radar-esque
 - [ ] Physics
-    - [ ] Hitboxes
+    - [x] Hitboxes
     - [ ] Fuel expenditure (mass matters)
 - [ ] Upgrades
     - [ ] Docking computer Mk1 (guided docking) and Mk2 (fully automatic docking)
@@ -225,6 +215,7 @@ The important separation is:
 - `tools/`: input/control helpers and camera behavior.
 - `world/`: ownership of world-coordinate objects.
 - `rendering/`: code that draws, projects, clips, or turns state into pixels.
+- `procgen/`: code containing galaxy orchestration
 - `src/main.cpp`: orchestration only.
 
 That last point matters. `main.cpp` should ideally stay boring:
@@ -1185,5 +1176,8 @@ Those are good next steps, but the current shape is enough to experiment with fa
 
 This is something worth working on next:
 
+- Space station model
+- Space station variety during the procedural generation
+- Map menu
 - Collision responses
-- Full celestial procedural generation
+- Simple-Reflex Agent NPC per system
