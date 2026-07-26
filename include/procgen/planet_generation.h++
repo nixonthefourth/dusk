@@ -108,15 +108,30 @@ namespace procgen {
     }
 
     /**
-     * Places the ship just outside the star, then checks whichever body (star or planet) ends up
-     * nearest to that spot. If the ship is closer than 20% of that body's radius beyond its
-     * surface, it gets nudged straight out along the same direction until it clears that margin.
+     * Places the ship inside the system, roughly halfway to the innermost planet's orbit, then
+     * checks whichever body (star or planet) ends up nearest to that spot. If the ship is closer
+     * than 20% of that body's radius beyond its surface, it gets nudged straight out along the
+     * same direction until it clears that margin.
      */
     inline Vec3 shipSpawnPosition(const Planet& star, const std::vector<Planet>& planets)
     {
-        constexpr float clearanceFraction = 0.2f;
+        constexpr float clearanceFraction = 0.02f;
 
-        Vec3 spawnPosition = star.position + Vec3{0.f, -60.f, -(star.radius * (1.f + clearanceFraction))};
+        // Anchor distance: halfway to the innermost planet, or a few star radii out if there are
+        // no planets at all, so the initial guess isn't automatically closest to the star.
+        float anchorDistance = star.radius * 4.f;
+
+        if (!planets.empty())
+        {
+            float nearestPlanetDistance = length(planets.front().position - star.position);
+
+            for (const Planet& planet : planets)
+                nearestPlanetDistance = std::min(nearestPlanetDistance, length(planet.position - star.position));
+
+            anchorDistance = nearestPlanetDistance * 0.65f;
+        }
+
+        Vec3 spawnPosition = star.position + Vec3{0.f, -60.f, -anchorDistance};
 
         const Planet* nearest = findNearestBody(spawnPosition, star, planets);
         const float requiredDistance = nearest->radius * (1.f + clearanceFraction);

@@ -35,6 +35,27 @@ struct World {
     Ship playerShip;
 };
 
+/** Sums gravitational acceleration from the star and every planet at the ship's position. */
+inline Vec3 gravityOnShip(const World& world)
+{
+    Vec3 acceleration = orbital::gravitationalAcceleration(
+        world.playerShip.position,
+        world.star.position,
+        world.star.mass
+    );
+
+    for (const Planet& planet : world.planets)
+    {
+        acceleration += orbital::gravitationalAcceleration(
+            world.playerShip.position,
+            planet.position,
+            planet.mass
+        );
+    }
+
+    return acceleration;
+}
+
 /** Keeps the station cube circling its host planet's current (possibly moving) position. */
 inline void updateStationOrbit(World& world, float dt)
 {
@@ -246,7 +267,9 @@ inline void updateWorldCollisions(World& world)
 /** Advances world objects that have physics or animation. */
 inline void updateWorldPhysics(World& world, float dt)
 {
-    integrateShipPhysics(world.playerShip, dt);
+    const Vec3 shipGravity = gravityOnShip(world);
+    integrateShipPhysics(world.playerShip, dt, shipGravity);
+
     orbital::integrateOrbitalPhysics(world.planets, world.star.position, world.star.mass, dt);
     updateStationOrbit(world, dt);
 

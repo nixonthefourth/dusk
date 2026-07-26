@@ -63,8 +63,6 @@ int main() {
         shipCameraRig = {};
         sceneManager.activeScene().updateCamera(camera, 0.f, shipCameraRig);
         sceneManager.activeScene().updateStreaming(camera);
-
-        std::cout << "Scene: " << sceneManager.activeScene().name() << "\n";
     };
 
     sceneManager.activeScene().updateCamera(camera, 0.f, shipCameraRig);

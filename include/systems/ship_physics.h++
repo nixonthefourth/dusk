@@ -20,24 +20,24 @@ inline Vec3 shipThrustForce(const Ship& ship)
 }
 
 /** Returns current ship acceleration, protecting the integrator from invalid mass. */
-inline Vec3 shipAcceleration(const Ship& ship)
+inline Vec3 shipAcceleration(const Ship& ship, const Vec3& externalAcceleration = {})
 {
     if (ship.mass <= 0.f)
-        return {};
+        return externalAcceleration;
 
-    return shipThrustForce(ship) / ship.mass;
+    return shipThrustForce(ship) / ship.mass + externalAcceleration;
 }
 
-/** Integrates Newtonian ship motion from persistent velocity and current thrust. */
-inline void integrateShipPhysics(Ship& ship, float dt)
+/** Integrates Newtonian ship motion from persistent velocity, thrust, and any external forces. */
+inline void integrateShipPhysics(Ship& ship, float dt, const Vec3& externalAcceleration = {})
 {
     ship.previousPosition = ship.position;
 
-    const Vec3 acceleration = shipAcceleration(ship);
+    const Vec3 acceleration = shipAcceleration(ship, externalAcceleration);
 
     ship.position = verlet::position_update(ship.position, ship.velocity, acceleration, dt);
 
-    // Current thrust acceleration is constant across this frame.
+    // Current thrust + gravity acceleration is treated as constant across this frame.
     ship.velocity = verlet::velocity_update(ship.velocity, acceleration, acceleration, dt);
 }
 

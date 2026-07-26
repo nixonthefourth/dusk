@@ -146,6 +146,12 @@ private:
             projectedPlanet.projected.position.y
         };
 
+        if (planet.isStar)
+        {
+            drawFilledStar(target, center, radius);
+            return;
+        }
+
         if (planet.hasRing)
             drawRing(target, planet, center, radius);
 
@@ -179,6 +185,16 @@ private:
                 static_cast<float>(meridianIndex) * pi / static_cast<float>(meridianBands);
             drawMeridianRing(target, planet, camera, viewport, viewMatrix, longitude, segments);
         }
+    }
+
+    /** Draws the star as a solid white disc instead of the wire grid used for planets. */
+    static void drawFilledStar(sf::RenderTarget& target, sf::Vector2f center, float radius)
+    {
+        sf::CircleShape disc(radius, 96);
+        disc.setOrigin({radius, radius});
+        disc.setPosition(center);
+        disc.setFillColor(sf::Color::White);
+        target.draw(disc);
     }
 
     void drawLatitudeRing(
