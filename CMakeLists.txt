@@ -5,8 +5,6 @@ set(CMAKE_CXX_STANDARD 23)
 
 find_package(SFML 3 COMPONENTS Graphics Window System REQUIRED)
 
-file(COPY assets DESTINATION ${CMAKE_BINARY_DIR})
-
 add_executable(dusk src/main.cpp
         include/tools/camera.h++
         include/tools/camera_controller.h++
@@ -44,6 +42,12 @@ add_executable(dusk src/main.cpp
         include/systems/orbital_physics.h++
         include/objects/npc_ship.h++
         include/systems/npc_ai.h++)
+
+# Copy assets on every build (not only at configure time), so newly added models are picked up.
+add_custom_command(TARGET dusk POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:dusk>/assets
+)
 
 target_include_directories(dusk PRIVATE include)
 target_include_directories(dusk PRIVATE src)

@@ -11,6 +11,7 @@
 #include "scenes/scene.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
+#include <iostream>
 #include <random>
 #include <string>
 #include "objects/npc_ship.h++"
@@ -137,9 +138,11 @@ private:
         world_.playerShip.loadObjModel("assets/objects/ships/banshee.obj", options_ship);
 
         ObjLoadOptions options_station_s;
-        options_station_s.scale = 100.f;
+        options_station_s.scale = 130.f;
         options_station_s.centerOnOrigin = true;
-        world_.station.loadObjModel("assets/objects/stations/station_s.obj", options_station_s);
+        if (!world_.station.loadObjModel("assets/objects/stations/station_s.obj", options_station_s))
+            std::cerr << "[dusk] failed to load assets/objects/stations/station_s.obj "
+                         "(is the assets folder next to the executable?)\n";
 
         currentSystemIndex_ = systemIndex;
         label_.setString(

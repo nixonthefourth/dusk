@@ -37,7 +37,7 @@ int main() {
     const ProjectionConfig projectionConfig = {1.f, sceneManager.world().starfield.radius()};
     const StarRenderer starRenderer({sceneManager.world().starfield.radius(), 1.f, 4.f}, projectionConfig);
     const PlanetRenderer planetRenderer(projectionConfig);
-    const StationRenderer cubeRenderer(projectionConfig);
+    const StationRenderer stationRenderer(projectionConfig);
     const ShipRenderer shipRenderer(projectionConfig);
     const HudRenderer hudRenderer;
 
@@ -108,7 +108,7 @@ int main() {
         planetRenderer.drawSystem(window, renderWorld.star, renderWorld.planets, camera);
 
         if (renderWorld.stationActive)
-            cubeRenderer.draw(window, renderWorld.station, camera);
+            stationRenderer.draw(window, renderWorld.station, camera);
 
         shipRenderer.draw(window, renderWorld.playerShip, camera);
 

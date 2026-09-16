@@ -7,25 +7,32 @@
 
 #include "math/Mat4.h++"
 #include "math/Vec3.h++"
+#include "model/vector_model.h++"
 #include "objects/cube.h++"
 #include "rendering/projector.h++"
 #include "tools/camera.h++"
 #include <SFML/Graphics.hpp>
-#include <array>
+#include <algorithm>
 #include <cmath>
+#include <set>
+#include <utility>
+#include <vector>
 
-/** Draws a rotating wireframe cube through the same fake-3D projector as stars. */
+/** Draws a station's vector model (loaded from OBJ) through the shared fake-3D projector. */
 class StationRenderer {
 public:
-    /** Creates a cube renderer with shared projection clipping settings. */
+    /** Creates a station renderer with shared projection clipping settings. */
     explicit StationRenderer(ProjectionConfig projectionConfig = {})
         : projector_(projectionConfig)
     {
     }
 
-    /** Transforms, clips, projects, and draws all cube edges. */
+    /** Rotates, translates, culls, clips, projects, and draws every model edge. */
     void draw(sf::RenderTarget& target, const Station& station, const Camera& camera) const
     {
+        if (station.model.vertices.empty())
+            return;
+
         const sf::Vector2u size = target.getSize();
         const Viewport viewport =
         {
@@ -34,12 +41,31 @@ public:
         };
 
         const Mat4 viewMatrix = projector_.createViewMatrix(camera);
-        const std::array<Vec3, 8> vertices = stationVertices(station);
 
-        for (const auto& edge : edges)
+        std::vector<Vec3> cameraVertices;
+        cameraVertices.reserve(station.model.vertices.size());
+
+        for (const Vec3& local : station.model.vertices)
         {
-            const Vec3 start = transformPoint(viewMatrix, vertices[edge[0]]);
-            const Vec3 end = transformPoint(viewMatrix, vertices[edge[1]]);
+            const Vec3 world = rotatePoint(local, station.rotation) + station.position;
+            cameraVertices.push_back(transformPoint(viewMatrix, world));
+        }
+
+        const FaceEdgeVisibility faceEdges = classifyFaceEdges(station.model, cameraVertices);
+
+        for (const VectorLine& line : station.model.lines)
+        {
+            if (!isValidVertexIndex(line.start, cameraVertices.size()) ||
+                !isValidVertexIndex(line.end, cameraVertices.size()))
+            {
+                continue;
+            }
+
+            if (!lineSurvivesFaceCulling(line, faceEdges))
+                continue;
+
+            const Vec3 start = cameraVertices[static_cast<std::size_t>(line.start)];
+            const Vec3 end = cameraVertices[static_cast<std::size_t>(line.end)];
             const auto clipped = projector_.clipLineCameraSpace(start, end, camera, viewport);
 
             if (!clipped)
@@ -51,7 +77,7 @@ public:
             if (!projectedStart || !projectedEnd)
                 continue;
 
-            sf::Vertex line[] =
+            sf::Vertex vertices[] =
             {
                 sf::Vertex(
                     {projectedStart->position.x, projectedStart->position.y},
@@ -63,19 +89,84 @@ public:
                 )
             };
 
-            target.draw(line, 2, sf::PrimitiveType::Lines);
+            target.draw(vertices, 2, sf::PrimitiveType::Lines);
         }
     }
 
 private:
+    using EdgeKey = std::pair<int, int>;
+
+    struct FaceEdgeVisibility {
+        std::set<EdgeKey> all;
+        std::set<EdgeKey> visible;
+    };
+
     Projector projector_;
 
-    static constexpr std::array<std::array<int, 2>, 12> edges =
-    {{
-        {{0, 1}}, {{1, 3}}, {{3, 2}}, {{2, 0}},
-        {{4, 5}}, {{5, 7}}, {{7, 6}}, {{6, 4}},
-        {{0, 4}}, {{1, 5}}, {{2, 6}}, {{3, 7}}
-    }};
+    static bool isValidVertexIndex(int index, std::size_t vertexCount)
+    {
+        return index >= 0 && static_cast<std::size_t>(index) < vertexCount;
+    }
+
+    static EdgeKey edgeKeyFor(int a, int b)
+    {
+        return std::minmax(a, b);
+    }
+
+    static void addFaceEdges(std::set<EdgeKey>& edges, const VectorFace& face)
+    {
+        edges.insert(edgeKeyFor(face.a, face.b));
+        edges.insert(edgeKeyFor(face.b, face.c));
+        edges.insert(edgeKeyFor(face.c, face.a));
+    }
+
+    /** Collects every face edge, and separately those belonging to at least one front-facing face. */
+    FaceEdgeVisibility classifyFaceEdges(
+        const VectorModel& model,
+        const std::vector<Vec3>& cameraVertices
+    ) const
+    {
+        FaceEdgeVisibility result;
+
+        for (const VectorFace& face : model.faces)
+        {
+            if (!isValidVertexIndex(face.a, cameraVertices.size()) ||
+                !isValidVertexIndex(face.b, cameraVertices.size()) ||
+                !isValidVertexIndex(face.c, cameraVertices.size()))
+            {
+                continue;
+            }
+
+            const Vec3& a = cameraVertices[static_cast<std::size_t>(face.a)];
+            const Vec3& b = cameraVertices[static_cast<std::size_t>(face.b)];
+            const Vec3& c = cameraVertices[static_cast<std::size_t>(face.c)];
+
+            const Vec3 normal = cross(b - a, c - a);
+
+            if (dot(normal, normal) <= 0.f)
+                continue;
+
+            addFaceEdges(result.all, face);
+
+            if (projector_.isFrontFacing(a, b, c))
+                addFaceEdges(result.visible, face);
+        }
+
+        return result;
+    }
+
+    /** Hides edges whose every adjacent face points away from the camera. */
+    static bool lineSurvivesFaceCulling(
+        const VectorLine& line,
+        const FaceEdgeVisibility& faceEdges
+    )
+    {
+        if (faceEdges.all.empty())
+            return true;
+
+        const EdgeKey edge = edgeKeyFor(line.start, line.end);
+        return !faceEdges.all.contains(edge) || faceEdges.visible.contains(edge);
+    }
 
     /** Rotates a local-space point around X, Y, then Z. */
     static Vec3 rotatePoint(Vec3 point, const Vec3& rotation)
@@ -106,30 +197,6 @@ private:
             sinZ * point.x + cosZ * point.y,
             point.z
         };
-    }
-
-    /** Returns all station vertices in world space after applying rotation and translation. */
-    static std::array<Vec3, 8> stationVertices(const Station& station)
-    {
-        const float halfSize = station.size * 0.5f;
-        const std::array<Vec3, 8> local =
-        {{
-            {-halfSize, -halfSize, -halfSize},
-            { halfSize, -halfSize, -halfSize},
-            {-halfSize,  halfSize, -halfSize},
-            { halfSize,  halfSize, -halfSize},
-            {-halfSize, -halfSize,  halfSize},
-            { halfSize, -halfSize,  halfSize},
-            {-halfSize,  halfSize,  halfSize},
-            { halfSize,  halfSize,  halfSize}
-        }};
-
-        std::array<Vec3, 8> vertices;
-
-        for (std::size_t i = 0; i < local.size(); ++i)
-            vertices[i] = rotatePoint(local[i], station.rotation) + station.position;
-
-        return vertices;
     }
 };
 

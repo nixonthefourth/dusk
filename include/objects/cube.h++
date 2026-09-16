@@ -8,8 +8,10 @@
 #include "math/Vec3.h++"
 #include "objects/collision_body.h++"
 #include "io/obj_loader.h++"
+#include "model/vector_model.h++"
+#include <string>
 
-/** Test object used to validate camera rotation and perspective projection. */
+/** A space station: world placement plus an OBJ-loaded vector model. */
 struct Station {
     /** Center of the station in world space. */
     Vec3 position = {0.f, 0.f, 4000.f};
@@ -29,9 +31,10 @@ struct Station {
     /** Base angular speed in radians per second. */
     float rotationSpeed = 0.7f;
 
+    /** Local-space vector model rendered for this station. Empty until an OBJ is loaded. */
     VectorModel model;
 
-    /** Replaces the ship's local vector model with an OBJ converted into vertices and edges. */
+    /** Replaces the station's local vector model with an OBJ converted into vertices and edges. */
     bool loadObjModel(const std::string& path, const ObjLoadOptions& options = {})
     {
         const auto loadedModel = loadObjFileAsVectorModel(path, options);
