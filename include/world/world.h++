@@ -21,8 +21,8 @@
 /** Owns all objects that exist in world coordinates. */
 struct World {
     Starfield starfield;
-    Cube cube;
-    bool cubeActive = true;
+    Station station;
+    bool stationActive = true;
     std::vector<Planet> planets;
 
     /** All NPC ships currently populating this system. */
@@ -78,8 +78,8 @@ inline void updateNpcShips(World& world, float dt)
             world.npcRng,
             world.star,
             world.planets,
-            world.cube.position,
-            world.cubeActive,
+            world.station.position,
+            world.stationActive,
             world.systemOuterRadius,
             gravity
         );
@@ -89,7 +89,7 @@ inline void updateNpcShips(World& world, float dt)
 /** Keeps the station cube circling its host planet's current (possibly moving) position. */
 inline void updateStationOrbit(World& world, float dt)
 {
-    if (!world.cubeActive)
+    if (!world.stationActive)
         return;
 
     if (world.stationHostPlanetIndex < 0 ||
@@ -102,7 +102,7 @@ inline void updateStationOrbit(World& world, float dt)
 
     const Planet& host = world.planets[static_cast<std::size_t>(world.stationHostPlanetIndex)];
 
-    world.cube.position = host.position + Vec3
+    world.station.position = host.position + Vec3
     {
         std::cos(world.stationOrbitAngle) * world.stationOrbitRadius,
         0.f,
@@ -114,7 +114,7 @@ inline void updateStationOrbit(World& world, float dt)
 inline void clearWorldCollisions(World& world)
 {
     world.playerShip.collision.clear();
-    world.cube.collision.clear();
+    world.station.collision.clear();
 
     for (Planet& planet : world.planets)
         planet.collision.clear();
@@ -222,7 +222,7 @@ inline void updateWorldCollisions(World& world)
 {
     clearWorldCollisions(world);
 
-    if (world.cubeActive)
+    if (world.stationActive)
     {
         detectWorldSweptSphereCollision(
             world.playerShip.collision,
@@ -231,11 +231,11 @@ inline void updateWorldCollisions(World& world)
             world.playerShip.previousPosition,
             world.playerShip.position,
             world.playerShip.collisionRadius,
-            world.cube.collision,
+            world.station.collision,
             CollisionObjectType::Cube,
             0,
-            world.cube.position,
-            cubeCollisionRadius(world.cube)
+            world.station.position,
+            stationCollisionRadius(world.station)
         );
     }
 
@@ -257,14 +257,14 @@ inline void updateWorldCollisions(World& world)
             planetCollisionRadius(planet)
         );
 
-        if (world.cubeActive)
+        if (world.stationActive)
         {
             detectWorldSphereCollision(
-                world.cube.collision,
+                world.station.collision,
                 CollisionObjectType::Cube,
                 0,
-                world.cube.position,
-                cubeCollisionRadius(world.cube),
+                world.station.position,
+                stationCollisionRadius(world.station),
                 planet.collision,
                 CollisionObjectType::Planet,
                 planetIndex,
@@ -304,8 +304,8 @@ inline void updateWorldPhysics(World& world, float dt)
     updateStationOrbit(world, dt);
     updateNpcShips(world, dt);
 
-    if (world.cubeActive)
-        updateCube(world.cube, dt);
+    if (world.stationActive)
+        updateStation(world.station, dt);
 
     updateWorldCollisions(world);
 }

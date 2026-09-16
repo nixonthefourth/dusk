@@ -1,6 +1,6 @@
 #include <iostream>
 #include <SFML/Graphics.hpp>
-#include "rendering/cube_renderer.h++"
+#include "rendering/station_renderer.h++"
 #include "rendering/hud_renderer.h++"
 #include "rendering/planet_renderer.h++"
 #include "rendering/ship_renderer.h++"
@@ -37,7 +37,7 @@ int main() {
     const ProjectionConfig projectionConfig = {1.f, sceneManager.world().starfield.radius()};
     const StarRenderer starRenderer({sceneManager.world().starfield.radius(), 1.f, 4.f}, projectionConfig);
     const PlanetRenderer planetRenderer(projectionConfig);
-    const CubeRenderer cubeRenderer(projectionConfig);
+    const StationRenderer cubeRenderer(projectionConfig);
     const ShipRenderer shipRenderer(projectionConfig);
     const HudRenderer hudRenderer;
 
@@ -107,8 +107,8 @@ int main() {
         starRenderer.draw(window, renderWorld.starfield.stars(), camera);
         planetRenderer.drawSystem(window, renderWorld.star, renderWorld.planets, camera);
 
-        if (renderWorld.cubeActive)
-            cubeRenderer.draw(window, renderWorld.cube, camera);
+        if (renderWorld.stationActive)
+            cubeRenderer.draw(window, renderWorld.station, camera);
 
         shipRenderer.draw(window, renderWorld.playerShip, camera);
 

@@ -2,8 +2,8 @@
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
 
-#ifndef DUSK_CUBE_RENDERER_H
-#define DUSK_CUBE_RENDERER_H
+#ifndef DUSK_STATION_RENDERER_H
+#define DUSK_STATION_RENDERER_H
 
 #include "math/Mat4.h++"
 #include "math/Vec3.h++"
@@ -15,16 +15,16 @@
 #include <cmath>
 
 /** Draws a rotating wireframe cube through the same fake-3D projector as stars. */
-class CubeRenderer {
+class StationRenderer {
 public:
     /** Creates a cube renderer with shared projection clipping settings. */
-    explicit CubeRenderer(ProjectionConfig projectionConfig = {})
+    explicit StationRenderer(ProjectionConfig projectionConfig = {})
         : projector_(projectionConfig)
     {
     }
 
     /** Transforms, clips, projects, and draws all cube edges. */
-    void draw(sf::RenderTarget& target, const Cube& cube, const Camera& camera) const
+    void draw(sf::RenderTarget& target, const Station& station, const Camera& camera) const
     {
         const sf::Vector2u size = target.getSize();
         const Viewport viewport =
@@ -34,7 +34,7 @@ public:
         };
 
         const Mat4 viewMatrix = projector_.createViewMatrix(camera);
-        const std::array<Vec3, 8> vertices = cubeVertices(cube);
+        const std::array<Vec3, 8> vertices = stationVertices(station);
 
         for (const auto& edge : edges)
         {
@@ -108,10 +108,10 @@ private:
         };
     }
 
-    /** Returns all cube vertices in world space after applying rotation and translation. */
-    static std::array<Vec3, 8> cubeVertices(const Cube& cube)
+    /** Returns all station vertices in world space after applying rotation and translation. */
+    static std::array<Vec3, 8> stationVertices(const Station& station)
     {
-        const float halfSize = cube.size * 0.5f;
+        const float halfSize = station.size * 0.5f;
         const std::array<Vec3, 8> local =
         {{
             {-halfSize, -halfSize, -halfSize},
@@ -127,10 +127,10 @@ private:
         std::array<Vec3, 8> vertices;
 
         for (std::size_t i = 0; i < local.size(); ++i)
-            vertices[i] = rotatePoint(local[i], cube.rotation) + cube.position;
+            vertices[i] = rotatePoint(local[i], station.rotation) + station.position;
 
         return vertices;
     }
 };
 
-#endif //DUSK_CUBE_RENDERER_H
+#endif //DUSK_STATION_RENDERER_H

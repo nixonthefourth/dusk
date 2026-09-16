@@ -80,7 +80,7 @@ namespace procgen {
 
     /** Where and how a generated station should orbit its chosen host planet. */
     struct StationPlacement {
-        Cube cube;
+        Station station;
         int hostPlanetIndex = -1;
         float orbitRadius = 0.f;
         float orbitAngle = 0.f;
@@ -170,10 +170,10 @@ namespace procgen {
         placement.orbitAngle = angleDist(rng);
         placement.orbitSpeed = speedDist(rng);
 
-        placement.cube.size = std::clamp(host.radius * 0.35f, 300.f, 900.f);
-        placement.cube.rotationSpeed = 0.15f;
-        placement.cube.collision.detectsCollisions = false;
-        placement.cube.position = host.position + Vec3
+        placement.station.size = std::clamp(host.radius * 0.35f, 300.f, 900.f);
+        placement.station.rotationSpeed = 0.15f;
+        placement.station.collision.detectsCollisions = false;
+        placement.station.position = host.position + Vec3
         {
             std::cos(placement.orbitAngle) * placement.orbitRadius,
             0.f,

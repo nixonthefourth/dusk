@@ -657,7 +657,7 @@ local ship vertex
   -> SFML line draw
 ```
 
-The cube renderer (`include/rendering/cube_renderer.h++`) is the simpler cousin of the same idea — no face culling, just eight rotated/translated corners, twelve fixed edges, clip, project, draw — useful as a smaller reference if the ship renderer feels like a lot to take in at once. It's the same `Cube` type and renderer originally built to sanity-check camera rotation and projection; today it's repurposed to draw the procedurally placed station orbiting a planet.
+The cube renderer (`include/rendering/station_renderer.h++`) is the simpler cousin of the same idea — no face culling, just eight rotated/translated corners, twelve fixed edges, clip, project, draw — useful as a smaller reference if the ship renderer feels like a lot to take in at once. It's the same `Cube` type and renderer originally built to sanity-check camera rotation and projection; today it's repurposed to draw the procedurally placed station orbiting a planet.
 
 ## The Planet Renderer
 

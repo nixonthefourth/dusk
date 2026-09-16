@@ -86,12 +86,12 @@ private:
         for (int planetIndex = 0; planetIndex < info.planetCount; ++planetIndex)
             world_.planets.push_back(procgen::generatePlanet(rng, planetIndex, world_.star));
 
-        world_.cubeActive = info.stationCount > 0 && !world_.planets.empty();
+        world_.stationActive = info.stationCount > 0 && !world_.planets.empty();
 
-        if (world_.cubeActive)
+        if (world_.stationActive)
         {
             const procgen::StationPlacement placement = procgen::generateStationPlacement(rng, world_.planets);
-            world_.cube = placement.cube;
+            world_.station = placement.station;
             world_.stationHostPlanetIndex = placement.hostPlanetIndex;
             world_.stationOrbitRadius = placement.orbitRadius;
             world_.stationOrbitAngle = placement.orbitAngle;
@@ -130,11 +130,16 @@ private:
         world_.playerShip.throttle = 0.f;
         world_.playerShip.reverseThrust = false;
 
-        ObjLoadOptions options;
-        options.scale = 100.f;
-        options.rotationDegrees = {-90.f, 0.f, 0.f};
-        options.centerOnOrigin = true;
-        world_.playerShip.loadObjModel("assets/objects/ships/banshee.obj", options);
+        ObjLoadOptions options_ship;
+        options_ship.scale = 100.f;
+        options_ship.rotationDegrees = {-90.f, 0.f, 0.f};
+        options_ship.centerOnOrigin = true;
+        world_.playerShip.loadObjModel("assets/objects/ships/banshee.obj", options_ship);
+
+        ObjLoadOptions options_station_s;
+        options_station_s.scale = 100.f;
+        options_station_s.centerOnOrigin = true;
+        world_.station.loadObjModel("assets/objects/stations/station_s.obj", options_station_s);
 
         currentSystemIndex_ = systemIndex;
         label_.setString(

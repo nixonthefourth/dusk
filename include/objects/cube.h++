@@ -2,15 +2,16 @@
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
 
-#ifndef DUSK_CUBE_H
-#define DUSK_CUBE_H
+#ifndef DUSK_STATION_H
+#define DUSK_STATION_H
 
 #include "math/Vec3.h++"
 #include "objects/collision_body.h++"
+#include "io/obj_loader.h++"
 
 /** Test object used to validate camera rotation and perspective projection. */
-struct Cube {
-    /** Center of the cube in world space. */
+struct Station {
+    /** Center of the station in world space. */
     Vec3 position = {0.f, 0.f, 4000.f};
 
     /** Euler rotation in radians. */
@@ -22,25 +23,39 @@ struct Cube {
     /** Object-level collision state, refreshed by World every physics update. */
     CollisionBody collision;
 
-    /** Sphere scale used for the cube's portal-like collision volume. */
+    /** Sphere scale used for the station's portal-like collision volume. */
     float collisionRadiusScale = 0.56f;
 
     /** Base angular speed in radians per second. */
     float rotationSpeed = 0.7f;
+
+    VectorModel model;
+
+    /** Replaces the ship's local vector model with an OBJ converted into vertices and edges. */
+    bool loadObjModel(const std::string& path, const ObjLoadOptions& options = {})
+    {
+        const auto loadedModel = loadObjFileAsVectorModel(path, options);
+
+        if (!loadedModel)
+            return false;
+
+        model = *loadedModel;
+        return true;
+    }
 };
 
-/** Returns the cube's current collision radius, derived from its object size. */
-inline float cubeCollisionRadius(const Cube& cube)
+/** Returns the station's current collision radius, derived from its object size. */
+inline float stationCollisionRadius(const Station& station)
 {
-    return cube.size * cube.collisionRadiusScale;
+    return station.size * station.collisionRadiusScale;
 }
 
-/** Advances the cube rotation with slightly different speeds per axis. */
-inline void updateCube(Cube& cube, float dt)
+/** Advances the station rotation with slightly different speeds per axis. */
+inline void updateStation(Station& station, float dt)
 {
-    cube.rotation.x += cube.rotationSpeed * 0.73f * dt;
-    cube.rotation.y += cube.rotationSpeed * dt;
-    cube.rotation.z += cube.rotationSpeed * 0.41f * dt;
+    station.rotation.x += station.rotationSpeed * 0.73f * dt;
+    station.rotation.y += station.rotationSpeed * dt;
+    station.rotation.z += station.rotationSpeed * 0.41f * dt;
 }
 
-#endif //DUSK_CUBE_H
+#endif //DUSK_STATION_H

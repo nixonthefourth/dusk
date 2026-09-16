@@ -13,7 +13,7 @@ public:
     /** Builds the default world and leaves the ship on its built-in vector model. */
     DefaultScene()
     {
-        world_.cube.position = {0.f, 0.f, 4000.f};
+        world_.station.position = {0.f, 0.f, 4000.f};
 
         // To use an OBJ ship model instead, keep the OBJ with the project and uncomment:
         //
