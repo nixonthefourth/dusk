@@ -86,7 +86,23 @@ inline void updateNpcShips(World& world, float dt)
     }
 }
 
-/** Keeps the station cube circling its host planet's current (possibly moving) position. */
+/**
+ * Direction the station is travelling along its orbit. The docking slot faces this way, so the
+ * approach lane in front of it runs alongside the orbit and never points into the host planet
+ * or back toward the star.
+ */
+inline Vec3 stationOrbitTangent(const World& world)
+{
+    const float direction = world.stationOrbitSpeed < 0.f ? -1.f : 1.f;
+    return Vec3
+    {
+        -std::sin(world.stationOrbitAngle) * direction,
+        0.f,
+        std::cos(world.stationOrbitAngle) * direction
+    };
+}
+
+/** Keeps the station circling its host planet's current (possibly moving) position. */
 inline void updateStationOrbit(World& world, float dt)
 {
     if (!world.stationActive)
@@ -108,6 +124,8 @@ inline void updateStationOrbit(World& world, float dt)
         0.f,
         std::sin(world.stationOrbitAngle) * world.stationOrbitRadius
     };
+
+    world.station.dockFacing = stationOrbitTangent(world);
 }
 
 /** Clears collision hits from every object before fresh detection runs. */
@@ -294,11 +312,14 @@ inline void updateWorldCollisions(World& world)
     }
 }
 
-/** Advances world objects that have physics or animation. */
-inline void updateWorldPhysics(World& world, float dt)
+/** Advances world objects that have physics or animation. Autopilots can take over the player ship. */
+inline void updateWorldPhysics(World& world, float dt, bool integratePlayerShip = true)
 {
-    const Vec3 shipGravity = gravityOnShip(world);
-    integrateShipPhysics(world.playerShip, dt, shipGravity);
+    if (integratePlayerShip)
+    {
+        const Vec3 shipGravity = gravityOnShip(world);
+        integrateShipPhysics(world.playerShip, dt, shipGravity);
+    }
 
     orbital::integrateOrbitalPhysics(world.planets, world.star.position, world.star.mass, dt);
     updateStationOrbit(world, dt);

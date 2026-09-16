@@ -80,6 +80,9 @@ struct Ship {
     /** Nose pitch in radians. */
     float pitch = 0.f;
 
+    /** Roll around the forward axis in radians. Player controls leave this at zero; the docking computer uses it. */
+    float roll = 0.f;
+
     /** Current throttle amount in the range [0, 1]. */
     float throttle = 0.f;
 
@@ -130,8 +133,8 @@ inline Vec3 shipForward(const Ship& ship)
     });
 }
 
-/** Returns the ship's local right direction. */
-inline Vec3 shipRight(const Ship& ship)
+/** Returns the ship's right direction before roll is applied (always horizontal). */
+inline Vec3 shipUnrolledRight(const Ship& ship)
 {
     return normalized(
     {
@@ -139,6 +142,24 @@ inline Vec3 shipRight(const Ship& ship)
         0.f,
         -std::sin(ship.yaw)
     });
+}
+
+/** Returns the ship's up direction before roll is applied. */
+inline Vec3 shipUnrolledUp(const Ship& ship)
+{
+    return normalized(cross(shipForward(ship), shipUnrolledRight(ship)));
+}
+
+/** Returns the ship's local right direction, rotated about the forward axis by roll. */
+inline Vec3 shipRight(const Ship& ship)
+{
+    if (ship.roll == 0.f)
+        return shipUnrolledRight(ship);
+
+    return normalized(
+        shipUnrolledRight(ship) * std::cos(ship.roll) +
+        shipUnrolledUp(ship) * std::sin(ship.roll)
+    );
 }
 
 /** Returns the ship's local up direction. */

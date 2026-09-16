@@ -41,7 +41,9 @@ add_executable(dusk src/main.cpp
         include/scenes/system_scene.h++
         include/systems/orbital_physics.h++
         include/objects/npc_ship.h++
-        include/systems/npc_ai.h++)
+        include/systems/npc_ai.h++
+        include/systems/docking_computer.h++
+        include/ui/menu_button.h++)
 
 # Copy assets on every build (not only at configure time), so newly added models are picked up.
 add_custom_command(TARGET dusk POST_BUILD

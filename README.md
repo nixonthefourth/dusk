@@ -4,7 +4,7 @@
 
 `dusk` is a small SFML/C++ experiment that fakes 3D in a 2D window. There is no OpenGL, no depth buffer, no borrowed rendering pipeline underneath it — just a `Vec3` world, a hand-rolled camera and view matrix, a perspective projector, and SFML lines and shapes doing the actual drawing. Everything from vector math to frustum clipping to Newtonian ship physics is written from scratch, on purpose.
 
-Pick PLAY, and you drop into a procedurally generated star system: a filled white sun, a handful of orbiting gridded planets, a rotating station cube, and a scatter of NPC ships going about their own simple-reflex business — all seeded from one number, with `[` and `]` letting you jump between systems while the real warp scene is still on the drawing board.
+Pick PLAY, and you drop into a procedurally generated star system: a filled white sun, a handful of orbiting gridded planets, a spinning wireframe space station you can auto-dock with, and a scatter of NPC ships going about their own simple-reflex business — all seeded from one number, with `[` and `]` letting you jump between systems while the real warp scene is still on the drawing board.
 
 ## Manifesto
 
@@ -19,14 +19,15 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - A single `Galaxy` of 1000 deterministically generated systems, built from one seed at startup — same seed, same galaxy, every time.
 - One reused `SystemScene` that regenerates its entire world from a system's own seed the moment you enter it, so system #217 always looks and plays out the same way.
 - Real orbital mechanics: planets orbit a central star under actual Newtonian gravity, integrated with velocity Verlet, and the star's own gravity pulls on the player ship too.
-- A rotating station cube procedurally placed in orbit around a random planet, in systems that roll one.
+- An OBJ-modelled space station procedurally placed in orbit around a random planet, in systems that roll one. It spins Elite-style around its docking axis, with the slot facing along its orbit.
+- A docking computer: press `C` and the ship flies itself to the station, lines up, matches the station's spin, and slides into the docking slot. Once docked, a station menu lets you stay or leave; leaving backs the ship out, turns it around, and hands control back.
 - Simple-reflex NPC ships that roam, avoid planets and stars, occasionally head to the station and dock, and periodically "warp out" and back in — no memory, no planning, just current-state reflexes.
 - An "on-paper" economy and system-flavor layer: procedural system names, an economy tier, a dominant occupation, a handful of tradeable goods, and derived prices per system — generated, but not yet wired into any in-game trading UI.
 - A camera that chases the ship from behind, plus an orbit "showcase" mode.
 - A wireframe ship rendered from a vector model, with face culling and hidden-underside edges.
 - OBJ loading, so you can swap the built-in ship for any triangulated wireframe model — the project ships with a `banshee.obj` model, used for both the player ship and every NPC ship.
 - Velocity Verlet ship physics: real acceleration, real persistent velocity, and now real external gravity, all fed through the same integrator.
-- Object-level collision detection (ship, cube, planets) using swept and static spherical volumes.
+- Object-level collision detection (ship, station, planets) using swept and static spherical volumes.
 - A recycled, endless-feeling starfield.
 - Frustum clipping for both points and line segments, with a small side guard-band so things don't visibly pop in at the frustum edges.
 - A system's star drawn as a solid filled disc, and its planets drawn as gridded, optionally ringed wireframes — sorted and drawn back-to-front together, with per-edge visibility shading based on facing direction.
@@ -86,8 +87,9 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [~] Physics
   - [x] Object-level collision hitboxes
   - [ ] Fuel expenditure (mass matters)
-- [ ] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear)
-- [~] Space stations: small, medium, large — one procedurally placed station cube per eligible system today
+- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear) — the docking computer exists, fitted as standard for now
+- [~] Docking — automatic docking and launch work; manual docking and station services are next
+- [~] Space stations: small, medium, large — one procedurally placed small station (`station_s.obj`) per eligible system today
 - [x] Wireframe graphics style
 - [ ] Classical music for docking (*The Blue Danube*, for example)
 
@@ -146,6 +148,15 @@ Once you're in a system:
 
 - `]`: jump to the next system in the galaxy.
 - `[`: jump to the previous system.
+- `C`: engage the docking computer. Press again during the approach or line-up to cancel; once the ship starts entering the slot the sequence is committed.
+
+`[` and `]` are ignored while the docking computer is flying the ship or you're docked.
+
+While docked:
+
+- The station menu opens automatically. `STAY` keeps you docked; `LEAVE` launches.
+- In the menu: `Tab`, `W`/`S`, or `Left`/`Right` switch the highlighted option, `Enter`/`Space` confirms, `1` stays, `2` or `L` leaves. The mouse works too.
+- With the menu closed: `Enter` reopens it, `L` launches.
 
 This is a deliberate stand-in for a proper warp/phase-space scene — it regenerates the destination system from its own seed and drops you in, instantly, so the orbital-mechanics and NPC-behavior work can be tested across many systems without a travel scene to build first.
 
@@ -177,7 +188,7 @@ include/
   objects/
     ship.h++
     npc_ship.h++
-    cube.h++
+    cube.h++            (the Station type and its docking port)
     planet.h++
     star.h++
     collision_body.h++
@@ -198,6 +209,7 @@ include/
     ship_physics.h++
     orbital_physics.h++
     npc_ai.h++
+    docking_computer.h++
     economy.h++
 
   tools/
@@ -209,11 +221,14 @@ include/
     world.h++
     starfield.h++
 
+  ui/
+    menu_button.h++
+
   rendering/
     projector.h++
     star_renderer.h++
     planet_renderer.h++
-    cube_renderer.h++
+    station_renderer.h++
     ship_renderer.h++
     hud_renderer.h++
 
@@ -223,6 +238,8 @@ assets/
   objects/
     ships/
       banshee.obj
+    stations/
+      station_s.obj
 ```
 
 The important separation is:
@@ -556,9 +573,33 @@ Galaxy galaxy = generateGalaxy(1337u); // TODO: seed from a save file or menu in
 
 ## Stations
 
-There's no dedicated `Station` object yet — `procgen::generateStationPlacement()` picks a random host planet from the system's planets, then reuses the existing `Cube` type as the station's visual and world-position stand-in, orbiting that planet at a rolled radius, angle, and speed. `World::updateStationOrbit()` advances `stationOrbitAngle` every physics tick and recomputes `world.cube.position` relative to whichever planet is hosting it — which matters, since planets themselves are now moving bodies under orbital physics, not fixed points.
+`Station` lives in `include/objects/cube.h++` (the file name is a leftover from when the station was a test cube). `procgen::generateStationPlacement()` picks a random host planet and rolls an orbit radius, angle, and speed; `SystemScene::enterSystem()` then loads `assets/objects/stations/station_s.obj` into the station and marks its docking slot. `World::updateStationOrbit()` moves the station around its host every physics tick — the host is itself moving under orbital physics — and keeps `station.dockFacing` pointing along the orbit.
 
-`SystemInfo::stationCount` is rolled per system but only the first station currently gets built; multi-station systems are a straightforward extension once there's a real `Station` type worth introducing.
+Instead of tumbling on Euler angles, a station has an explicit orientation basis (`axisX`/`axisY`/`axisZ`). `refreshStationOrientation()` rebuilds it every frame in two steps: rotate the model so its docking normal points along `dockFacing`, then spin it around that axis by `spinAngle`. That is the classic *Elite* arrangement — the slot stays put while the station turns around it — and it is what makes docking possible. `stationLocalToWorld()` is what the renderer and the docking computer use to place model points in the world.
+
+### The Docking Port
+
+`DockingPort` describes the slot in model space: the centre of the opening (`mouth`), the centre of its back wall (`back`), the outward `normal`, the long side of the slot (`slotAxis`), and its `depth`. It's built from vertex indices by `configureDockingPort()`. For `station_s.obj`, vertices 1–16 (0-based 0–15) outline the slot: the even ring sits on the hull, and the odd ring is the same outline two model units deeper. If you export a new station model, find the equivalent rings and pass their indices in `enterSystem()`.
+
+## Docking Computer
+
+`include/systems/docking_computer.h++` holds a `DockingComputer` state machine, driven by `SystemScene`:
+
+```text
+Idle -> Approach -> Align -> Enter -> Docked -> LaunchReverse -> LaunchTurn -> Idle
+          |           |
+          +-----------+--> Disengage -> Idle   (cancelled with C)
+```
+
+While it's active, `SystemScene::acceptsShipInput()` returns `false` and `updatePhysics()` calls `updateWorldPhysics(world, dt, false)` so the player ship skips normal integration; `docking::update()` then positions the ship itself. The flight is kinematic — the docking computer places the ship rather than thrusting it — which keeps it smooth and reliable while the target is orbiting a moving planet.
+
+- **Approach** flies to a point 1600 units in front of the slot. Far out, it heads straight there; within a few thousand units it blends in the approach point's own velocity, so it can keep pace with the orbiting station. The velocity *relative* to that point is kept as persistent state and smoothed — recomputing it from the ship's velocity each frame would let the station's centripetal acceleration show up as a constant lag. The path avoids the star, planets and the station hull (a detour waypoint for whatever is in the way, plus local steering away from nearby surfaces), and the speed drops near surfaces so the ship has room to turn.
+- **Align** holds the ship on the approach point, points the nose down the slot, and rolls the ship to match the slot's long side. The ship's new `roll` field exists for this; player controls leave it at zero.
+- **Enter** slides the ship down the slot axis, still matching the station's spin, until the nose is 10 units from the back wall.
+- **Docked** keeps the ship parked in the slot and opens the station menu.
+- **LaunchReverse** backs the ship straight out to 900 units, **LaunchTurn** turns it to face away and levels the wings, and control returns with the ship moving at the station's speed plus 300 units per second outward.
+
+The station menu is drawn by `SystemScene::drawOverlay()` using the button helpers in `include/ui/menu_button.h++`, which the main menu shares.
 
 ## NPC Ships And Simple-Reflex AI
 
@@ -657,7 +698,7 @@ local ship vertex
   -> SFML line draw
 ```
 
-The cube renderer (`include/rendering/station_renderer.h++`) is the simpler cousin of the same idea — no face culling, just eight rotated/translated corners, twelve fixed edges, clip, project, draw — useful as a smaller reference if the ship renderer feels like a lot to take in at once. It's the same `Cube` type and renderer originally built to sanity-check camera rotation and projection; today it's repurposed to draw the procedurally placed station orbiting a planet.
+The station renderer (`include/rendering/station_renderer.h++`) follows the same pipeline as the ship renderer: every model vertex goes through `stationLocalToWorld()`, then the view matrix, back-face edge culling, clipping, projection and drawing. The only difference is that the station's orientation comes from its basis vectors rather than yaw/pitch.
 
 ## The Planet Renderer
 

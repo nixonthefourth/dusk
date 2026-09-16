@@ -6,6 +6,7 @@
 #define DUSK_MAIN_MENU_H
 
 #include "scenes/scene.h++"
+#include "ui/menu_button.h++"
 #include <SFML/Graphics.hpp>
 
 class MainMenuScene : public Scene {
@@ -58,14 +59,14 @@ public:
         }
 
         if (const auto* mouseMoved = event.getIf<sf::Event::MouseMoved>())
-            updateHoverState(window.getSize(), toVector2f(mouseMoved->position));
+            updateHoverState(window.getSize(), ui::toVector2f(mouseMoved->position));
 
         if (const auto* mousePressed = event.getIf<sf::Event::MouseButtonPressed>())
         {
             if (mousePressed->button != sf::Mouse::Button::Left)
                 return;
 
-            const sf::Vector2f mouse = toVector2f(mousePressed->position);
+            const sf::Vector2f mouse = ui::toVector2f(mousePressed->position);
 
             if (playButtonBounds(window.getSize()).contains(mouse))
             {
@@ -110,8 +111,8 @@ public:
         veil.setFillColor(sf::Color(0, 0, 0, 90));
         target.draw(veil);
 
-        drawButton(target, playButtonBounds(size), playText_, true, playHovered_);
-        drawButton(target, exitButtonBounds(size), exitText_, false, exitHovered_);
+        ui::drawButton(target, playButtonBounds(size), playText_, true, playHovered_);
+        ui::drawButton(target, exitButtonBounds(size), exitText_, false, exitHovered_);
     }
 
     SceneTransition consumeTransition() override
@@ -130,11 +131,6 @@ private:
     bool exitHovered_ = false;
     SceneTransition pendingTransition_ = SceneTransition::None;
 
-    static sf::Vector2f toVector2f(sf::Vector2i vector)
-    {
-        return {static_cast<float>(vector.x), static_cast<float>(vector.y)};
-    }
-
     static sf::FloatRect playButtonBounds(sf::Vector2u targetSize)
     {
         return buttonBounds(targetSize, 0);
@@ -147,52 +143,13 @@ private:
 
     static sf::FloatRect buttonBounds(sf::Vector2u targetSize, int index)
     {
-        const float width = 220.f;
-        const float height = 58.f;
-        const float gap = 18.f;
-        const float totalHeight = height * 2.f + gap;
-        const float x = static_cast<float>(targetSize.x) * 0.5f - width * 0.5f;
-        const float y =
-            static_cast<float>(targetSize.y) * 0.5f - totalHeight * 0.5f +
-            static_cast<float>(index) * (height + gap);
-        return {{x, y}, {width, height}};
+        return ui::stackedButtonBounds(targetSize, index, 2);
     }
 
     void updateHoverState(sf::Vector2u targetSize, sf::Vector2f mouse)
     {
         playHovered_ = playButtonBounds(targetSize).contains(mouse);
         exitHovered_ = exitButtonBounds(targetSize).contains(mouse);
-    }
-
-    static void drawButton(
-        sf::RenderTarget& target,
-        const sf::FloatRect& bounds,
-        sf::Text& label,
-        bool primary,
-        bool hovered
-    )
-    {
-        sf::RectangleShape button(bounds.size);
-        button.setPosition(bounds.position);
-        button.setFillColor(primary ? sf::Color::White : sf::Color::Black);
-        button.setOutlineColor(primary ? sf::Color::Black : sf::Color::White);
-        button.setOutlineThickness(hovered ? 3.f : 2.f);
-        target.draw(button);
-
-        label.setFillColor(primary ? sf::Color::Black : sf::Color::White);
-        centerText(label, bounds.getCenter());
-        target.draw(label);
-    }
-
-    static void centerText(sf::Text& text, sf::Vector2f center)
-    {
-        const sf::FloatRect bounds = text.getLocalBounds();
-        text.setOrigin(
-        {
-            bounds.position.x + bounds.size.x * 0.5f,
-            bounds.position.y + bounds.size.y * 0.5f
-        });
-        text.setPosition(center);
     }
 };
 

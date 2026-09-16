@@ -47,7 +47,7 @@ public:
 
         for (const Vec3& local : station.model.vertices)
         {
-            const Vec3 world = rotatePoint(local, station.rotation) + station.position;
+            const Vec3 world = stationLocalToWorld(station, local);
             cameraVertices.push_back(transformPoint(viewMatrix, world));
         }
 
@@ -166,37 +166,6 @@ private:
 
         const EdgeKey edge = edgeKeyFor(line.start, line.end);
         return !faceEdges.all.contains(edge) || faceEdges.visible.contains(edge);
-    }
-
-    /** Rotates a local-space point around X, Y, then Z. */
-    static Vec3 rotatePoint(Vec3 point, const Vec3& rotation)
-    {
-        const float sinX = std::sin(rotation.x);
-        const float cosX = std::cos(rotation.x);
-        point =
-        {
-            point.x,
-            cosX * point.y - sinX * point.z,
-            sinX * point.y + cosX * point.z
-        };
-
-        const float sinY = std::sin(rotation.y);
-        const float cosY = std::cos(rotation.y);
-        point =
-        {
-            cosY * point.x + sinY * point.z,
-            point.y,
-            -sinY * point.x + cosY * point.z
-        };
-
-        const float sinZ = std::sin(rotation.z);
-        const float cosZ = std::cos(rotation.z);
-        return
-        {
-            cosZ * point.x - sinZ * point.y,
-            sinZ * point.x + cosZ * point.y,
-            point.z
-        };
     }
 };
 
