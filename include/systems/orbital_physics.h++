@@ -14,10 +14,10 @@
 
 namespace orbital {
     /** Gravitational constant tuned for this project's world-unit scale, not real SI units. */
-    constexpr float g = 600.f;
+    constexpr float g = 100.f;
 
     /** Softening distance so acceleration doesn't spike toward infinity at very close range. */
-    constexpr float minDistance = 200.f;
+    constexpr float minDistance = 250.f;
 
     /** Returns the acceleration exerted on a point at `from`, by a mass `towardMass` at `toward`. */
     inline Vec3 gravitationalAcceleration(const Vec3& from, const Vec3& toward, float towardMass)

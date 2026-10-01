@@ -7,6 +7,7 @@
 
 #include "objects/ship.h++"
 #include "math/verlet.h++"
+#import <stdio.h>
 
 /** Returns the current thrust force vector from ship controls. */
 inline Vec3 shipThrustForce(const Ship& ship)
