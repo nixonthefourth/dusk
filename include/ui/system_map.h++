@@ -118,6 +118,7 @@ public:
         target.draw(backdrop);
 
         drawOrbits(target, world, size);
+        drawBelts(target, font, world, size);
         drawStar(target, world, size);
         drawPlanets(target, font, world, size);
         drawStation(target, world, size);
@@ -146,6 +147,9 @@ private:
     static float mapScale(const World& world, sf::Vector2u size)
     {
         float extent = world.star.radius * 2.f;
+
+        for (const AsteroidBelt& belt : world.asteroidBelts)
+            extent = std::max(extent, belt.centreRadius + belt.halfWidth);
 
         for (const Planet& planet : world.planets)
             extent = std::max(extent, std::hypot(planet.position.x, planet.position.z) + planet.radius);
@@ -258,6 +262,48 @@ private:
             const float orbit = std::hypot(planet.position.x - world.star.position.x, planet.position.z - world.star.position.z) * scale;
             const bool lit = static_cast<int>(index) == highlighted_;
             drawCircle(target, star, orbit, lit ? sf::Color(110, 220, 255, 120) : sf::Color(55, 62, 70), sf::Color::Transparent, 1.f, 128);
+        }
+    }
+
+    /** Each belt as a speckled band between two dotted edge rings, labelled at the top. */
+    static void drawBelts(sf::RenderTarget& target, const sf::Font& font, const World& world, sf::Vector2u size)
+    {
+        const sf::Vector2f star = toScreen(world.star.position, world, size);
+        const float scale = mapScale(world, size);
+        const sf::Color edge(120, 112, 98);
+        const sf::Color speck(150, 140, 120, 170);
+
+        for (const AsteroidBelt& belt : world.asteroidBelts)
+        {
+            std::vector<sf::Vertex> points;
+
+            // Dotted inner and outer edges.
+            for (const float radius : {belt.centreRadius - belt.halfWidth, belt.centreRadius + belt.halfWidth})
+            {
+                const int dots = std::max(24, static_cast<int>(radius * scale * 0.9f));
+
+                for (int i = 0; i < dots; i += 2)
+                {
+                    const float angle = static_cast<float>(i) / static_cast<float>(dots) * 6.2831853f;
+                    points.push_back(sf::Vertex({star.x + std::sin(angle) * radius * scale, star.y - std::cos(angle) * radius * scale}, edge));
+                }
+            }
+
+            // A sample of the belt's own dust, flattened onto the map.
+            for (std::size_t i = 0; i < belt.dust.size(); i += 2)
+            {
+                const Vec3& mote = belt.dust[i];
+                points.push_back(sf::Vertex({star.x + mote.x * scale, star.y - mote.z * scale}, speck));
+            }
+
+            target.draw(points.data(), points.size(), sf::PrimitiveType::Points);
+
+            sf::Text label(font, "BELT", 14);
+            label.setFillColor(edge);
+            const sf::FloatRect bounds = label.getLocalBounds();
+            label.setOrigin({bounds.position.x + bounds.size.x * 0.5f, bounds.position.y + bounds.size.y});
+            label.setPosition({star.x, star.y - (belt.centreRadius + belt.halfWidth) * scale - 3.f});
+            target.draw(label);
         }
     }
 
@@ -459,6 +505,9 @@ private:
         };
 
         row("RADIUS", formatWorldDistance(body.radius));
+
+        if (highlighted_ < 0)
+            row("BELTS", world.asteroidBelts.empty() ? "NONE" : std::to_string(world.asteroidBelts.size()));
 
         if (highlighted_ >= 0)
         {

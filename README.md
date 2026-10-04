@@ -31,6 +31,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - Rate-controlled rotation: turn keys command a yaw/pitch rate that spins up smoothly and stops crisply, with a precision modifier for fine aiming.
 - An in-system cruise drive for crossing systems that are now hundreds of thousands of units across, with Elite-style mass locking near planets, the star and the station.
 - Planet-scale worlds: planets 20–70 ship-lengths in radius, a star bigger still, and orbits roughly 140,000 units apart.
+- Asteroid belts in about 60% of systems: dense fields of tumbling wireframe rocks streamed around you from the belt's seed, a dust ring visible from across the system, and rocks you can actually hit.
 - Object-level collision detection (ship, station, planets) using swept and static spherical volumes.
 - A recycled, endless-feeling starfield.
 - Frustum clipping for both points and line segments, with a small side guard-band so things don't visibly pop in at the frustum edges.
@@ -79,7 +80,7 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [ ] Electric ships
   - [ ] 20 ships total
 - [~] World
-  - [ ] Asteroid belts
+  - [x] Asteroid belts
   - [x] OBJ-loaded models
   - [x] Stars
   - [x] Planets
@@ -216,6 +217,7 @@ include/
     npc_ship.h++
     cube.h++            (the Station type and its docking port)
     planet.h++
+    asteroid.h++
     star.h++
     collision_body.h++
 
@@ -223,6 +225,7 @@ include/
     statistical.h++
     galaxy.h++
     planet_generation.h++
+    asteroid_generation.h++
 
   scenes/
     scene.h++
@@ -257,6 +260,7 @@ include/
     projector.h++
     star_renderer.h++
     planet_renderer.h++
+    asteroid_renderer.h++
     station_renderer.h++
     ship_renderer.h++
     hud_renderer.h++
@@ -625,7 +629,7 @@ Masses are set in `planet_generation.h++`. A star's mass is `750 × radius`, whi
 
 Procedural generation lives in `include/procgen/`, split across three files with very different jobs:
 
-- `statistical.h++` generates the cheap, "on-paper" facts about a system — a pronounceable procedural name, an `EconomyTier` (Poor/Developing/Progressive, weighted toward Poor), a dominant occupation, 2–4 goods it best sells, and rolled counts for planets, stations, and NPC ships. NPC counts are then scaled by `npcTrafficMultiplier` (currently 1.05, i.e. 5% more traffic); because counts are small whole numbers, the fractional ship is settled by a dice roll drawn after every other roll, so the galaxy-wide average rises by exactly that factor without changing anything else about any system. All of this is packed into a `SystemInfo` and is cheap enough to generate and hold 1000 of at once, up front.
+- `statistical.h++` generates the cheap, "on-paper" facts about a system — a pronounceable procedural name, an `EconomyTier` (Poor/Developing/Progressive, weighted toward Poor), a dominant occupation, 2–4 goods it best sells, and rolled counts for planets, stations, NPC ships and asteroid belts. NPC counts are then scaled by `npcTrafficMultiplier` (currently 1.2, i.e. 20% more traffic); because counts are small whole numbers, the fractional ship is settled by a dice roll drawn after every other roll, so the galaxy-wide average rises by exactly that factor without changing anything else about any system. All of this is packed into a `SystemInfo` and is cheap enough to generate and hold 1000 of at once, up front.
 - `galaxy.h++` derives a stable per-system seed from one galaxy seed plus a system index (`deriveSystemSeed()`), and calls `generateSystemInfo()` for every system to build the full `Galaxy` roster.
 - `planet_generation.h++` is where a `SystemInfo` actually becomes a playable `World`: it builds the star, places planets in outward, non-overlapping orbital shells with a real circular-orbit starting velocity, optionally places a station in orbit around a random planet, and works out a spawn pose (`shipSpawnPose()`): a few kilometres out from the station, facing it with its host planet filling the view behind, or facing the innermost planet in systems with no station.
 
@@ -717,7 +721,7 @@ Normal ("chase") mode:
 - The camera hangs on a damped spring driven by the ship's acceleration, as a loosely mounted camera would be. The ship's acceleration, measured from frame to frame and taken in ship-local axes, acts on the camera as an opposite pseudo-force: throttle up and it falls back, brake and it surges in, carve a turn and it swings out, and then it bounces back to rest. Stretch and compression slide the camera along its boom (the line from the ship to the rest position), so the viewing angle never changes; only the ship's apparent size does. Sideways and vertical sway are added on top.
 - Tuning lives in `ShipCameraSettings`:
   - `springFrequency` (3.2 rad/s) sets stiffness.
-  - `springDamping` (0.45; below 1 bounces, 1 settles without overshoot) sets how springy it feels.
+  - `springDamping` (0.7; below 1 bounces, 1 settles without overshoot) sets how springy it feels.
   - `accelerationGain` sets how far a given acceleration moves the camera (about 100 units back at full main-engine thrust).
   - `maxStretch`, `maxCompress` and `maxSway` limit the travel.
   - The driving force is soft-limited (`tanh`), so even cruise spool-up settles inside the limits.
@@ -731,6 +735,54 @@ Showcase mode (hold `Arrow Up`):
 - Useful for admiring the wireframe model, and what the main menu uses by default to show off the ship.
 
 There's a second, free-flying camera controller in `include/tools/camera_controller.h++` (WASD + QE + arrow-key look) that isn't wired into any current scene, but is there if you want an unattached debug camera.
+
+## Asteroid Belts
+
+About 60% of systems have an asteroid belt, and some have two. `SystemInfo::beltCount` is rolled last in `generateSystemInfo()`, after every other roll, so adding belts changed nothing else about any existing system. The galactic chart and system map both show the count.
+
+### Placement
+
+`procgen::generateAsteroidBelts()` (`include/procgen/asteroid_generation.h++`) looks at the system's actual planet orbits and lists the gaps:
+
+- inside the first planet's orbit, clear of the star's mass-lock zone;
+- between each pair of neighbouring planets;
+- beyond the outermost planet.
+
+It places each belt in a randomly chosen gap that leaves at least 14,000 units between the belt's edge and the nearest planet surface, allowing for orbital drift. Across all 1000 systems, every rolled belt fits.
+
+Each belt is a band in the system plane around the star, defined by its `centreRadius`, its `halfWidth` (10,000–17,000) and its `halfThickness` (3,000–5,500). Rock density peaks on the band's centre line and falls to zero at its edges (`beltDensityAt()`). Belts use their own RNG stream keyed off the system seed, so planets, stations and NPCs are untouched.
+
+### Streaming
+
+A belt never stores its rocks. `procgen::forEachAsteroidNear(belt, centre, radius, visit)` walks the 5,000-unit cells overlapping a sphere and works out each cell's rocks from scratch:
+
+- each cell gets its own seed from the belt seed and the cell coordinates;
+- a Poisson-distributed count follows the local density;
+- each rock gets a position, a size (mostly 70–1,100 units, with about 1% giants of 1,500–2,600 to steer around), a shape, a spin axis and a tumble rate.
+
+The same rocks come back every time you return. Generation costs about 0.2 ms per call whatever the density, because walking the cells dominates, and nothing at all is spent while you're away from a belt.
+
+### Shapes
+
+`objects/asteroid.h++` builds the rock templates. Each is an icosahedron (12 vertices) or a once-subdivided icosphere (42 vertices) with lumpy radii and a random squash. Faces are kept outward-wound, and each edge records the two faces it borders. Each belt makes 7 coarse and 4 fine shapes; boulders of 450 units and up use the fine ones.
+
+### Rendering
+
+`AsteroidRenderer` (`rendering/asteroid_renderer.h++`) draws two layers:
+
+- **Dust.** 2,600 fixed points through each band, projected with the bodies' far plane, so a belt reads as a faint ring from anywhere in the system.
+- **Rocks.** Everything within 32,000 units of the camera (roughly 150–230 rocks in the middle of a belt). Each rock tumbles around its own axis, driven by `World::elapsedTime`, and is drawn as a single batch.
+  - Its far side is hidden: an edge is drawn only if a face it borders faces the camera.
+  - Rocks fade in over the last third of the draw distance instead of popping.
+  - Ones under 1.5 pixels become dots, and ones under 6 pixels fall back to the coarse shapes.
+
+There's no depth buffer, so both layers skip any point whose line of sight passes through the star or a planet in front of it.
+
+### Physics and HUD
+
+`resolveShipAsteroidContact()` treats each nearby rock as a sphere slightly inside its jagged outline, so grazing a spike doesn't snag you. It pushes the ship back to the surface, removes the velocity pointing into the rock, and drops you out of cruise. Belts don't mass-lock: you can cruise straight across one, but hitting a rock at cruise speed ends the cruise.
+
+On the HUD, rocks of 250 units and up appear on the scanner as dim specks with faint stalks, and an amber `ASTEROID FIELD` warning appears above the scanner while you're inside a belt.
 
 ## The Starfield
 
@@ -997,7 +1049,7 @@ Targeting itself is world state: `World::target` holds a `TargetLock`, and `targ
 
 Chart positions come from `generateGalaxyLayout()` in `procgen/galaxy.h++`, which stores a `mapPosition` (light years from the core) on every `SystemInfo`. Systems lie on a two-armed logarithmic spiral with a central bulge, kept at least 6 LY apart so each stays clickable. The layout uses its own RNG stream, so it never disturbs the per-system seeds that rebuild each system. System 0, where you start, sits near the outer end of an arm, about 440 LY from the galactic core — the game's end goal, marked on the chart.
 
-Arrow keys pick the system that best continues in that direction (`distance / alignment²`, ignoring anything more than 60° off), and the view recentres when the selection nears the edge. The panel shows the selected system's distance, distance to the core, economy, trade, planets, station, traffic and exports, plus the jump button. Dots are coloured by economy tier: grey for Poor, white for Developing, cyan for Progressive.
+Arrow keys pick the system that best continues in that direction (`distance / alignment²`, ignoring anything more than 60° off), and the view recentres when the selection nears the edge. The panel shows the selected system's distance, distance to the core, economy, trade, planets, station, asteroid belts, traffic and exports, plus the jump button. Dots are coloured by economy tier: grey for Poor, white for Developing, cyan for Progressive.
 
 Jumping is still instant — `SystemScene::enterSystem()` regenerates the destination from its seed, exactly as the old `[`/`]` cycling did — and is refused while docked or under the docking computer. There's no jump range or fuel yet; `galacticDistance()` is there for when there is.
 
@@ -1009,28 +1061,28 @@ The panel lists the star and every planet, with each planet named after its syst
 
 ## Adding Your Own World Object
 
-The usual pattern, using an asteroid as an example:
+The usual pattern, using a navigation beacon as an example:
 
 ### 1. Add An Object Type
 
-`include/objects/asteroid.h++`:
+`include/objects/beacon.h++`:
 
 ```cpp
-#ifndef DUSK_ASTEROID_H
-#define DUSK_ASTEROID_H
+#ifndef DUSK_BEACON_H
+#define DUSK_BEACON_H
 
 #include "math/Vec3.h++"
 #include "objects/collision_body.h++"
 
-/** A simple world-space asteroid. */
-struct Asteroid {
+/** A simple world-space navigation beacon. */
+struct Beacon {
     Vec3 position = {1000.f, 200.f, 5000.f};
     Vec3 velocity;
     float radius = 120.f;
     CollisionBody collision;
 };
 
-#endif //DUSK_ASTEROID_H
+#endif //DUSK_BEACON_H
 ```
 
 ### 2. Add It To The World
@@ -1038,11 +1090,11 @@ struct Asteroid {
 Edit `include/world/world.h++`:
 
 ```cpp
-#include "objects/asteroid.h++"
+#include "objects/beacon.h++"
 
 struct World {
     // ...existing fields...
-    Asteroid asteroid;
+    Beacon beacon;
 };
 ```
 
@@ -1053,9 +1105,9 @@ If it should collide with anything, extend `updateWorldCollisions()` the same wa
 For simple motion, add a system function, preferably somewhere under `include/systems/`:
 
 ```cpp
-inline void updateAsteroid(Asteroid& asteroid, float dt)
+inline void updateBeacon(Beacon& beacon, float dt)
 {
-    asteroid.position += asteroid.velocity * dt;
+    beacon.position += beacon.velocity * dt;
 }
 ```
 
@@ -1066,7 +1118,7 @@ Then call it from `updateWorldPhysics()` in `world.h++`, or from a scene's overr
 For a simple projected point:
 
 ```cpp
-const auto projected = projector.project(asteroid.position, camera, viewport);
+const auto projected = projector.project(beacon.position, camera, viewport);
 ```
 
 For a full line model, follow the pattern in `cube_renderer.h++`: view matrix, clip line, project both endpoints, draw.
@@ -1074,9 +1126,9 @@ For a full line model, follow the pattern in `cube_renderer.h++`: view matrix, c
 ### 5. Wire It Into Main
 
 ```cpp
-const AsteroidRenderer asteroidRenderer(projectionConfig);
+const BeaconRenderer beaconRenderer(projectionConfig);
 // ...
-asteroidRenderer.draw(window, world.asteroid, camera);
+beaconRenderer.draw(window, world.beacon, camera);
 ```
 
 Guard the draw call the same way `cubeActive` already gates cube drawing, if the object is optional per scene.
@@ -1229,5 +1281,6 @@ This is still intentionally small:
 - No true fixed time-step accumulator; physics is split into sub-steps of at most 1/120 s, but their size still follows the frame time.
 - No real asset-management system beyond loading a font and an OBJ file at scene construction.
 - Only the station can be targeted; NPC ships and planets show on the scanner and maps but can't be locked yet.
+- Asteroid belts don't orbit, and NPC ships ignore asteroids (they fly straight through rocks). Rocks can't be mined or shot yet.
 
 That's still enough surface area to play with fake-3D projection, starfields, procedural galaxy generation, orbital mechanics, simple-reflex NPC behavior, planet rendering, and wireframe Newtonian space flight — and enough structure that adding the next object, physics rule, or scene should feel like following a pattern, not fighting one.

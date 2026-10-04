@@ -4,6 +4,7 @@
 #include <SFML/Graphics.hpp>
 #include "rendering/station_renderer.h++"
 #include "rendering/hud_renderer.h++"
+#include "rendering/asteroid_renderer.h++"
 #include "rendering/planet_renderer.h++"
 #include "rendering/ship_renderer.h++"
 #include "rendering/star_renderer.h++"
@@ -44,6 +45,9 @@ int main() {
 
     const StarRenderer starRenderer({sceneManager.world().starfield.radius(), 1.f, 4.f}, projectionConfig);
     const PlanetRenderer planetRenderer(bodyProjectionConfig);
+
+    // Rocks are only drawn near the camera; belt dust spans the whole system like the planets.
+    const AsteroidRenderer asteroidRenderer(projectionConfig, bodyProjectionConfig);
     const StationRenderer stationRenderer(projectionConfig);
     const ShipRenderer shipRenderer(projectionConfig);
     const HudRenderer hudRenderer;
@@ -123,6 +127,7 @@ int main() {
         window.clear(sf::Color::Black);
         starRenderer.draw(window, renderWorld.starfield.stars(), camera);
         planetRenderer.drawSystem(window, renderWorld.star, renderWorld.planets, camera);
+        asteroidRenderer.draw(window, renderWorld, camera);
 
         if (renderWorld.stationActive)
             stationRenderer.draw(window, renderWorld.station, camera);

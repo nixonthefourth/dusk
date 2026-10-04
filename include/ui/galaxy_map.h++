@@ -508,6 +508,7 @@ private:
         row("TRADE", info.occupation);
         row("PLANETS", std::to_string(info.planetCount));
         row("STATION", info.stationCount > 0 && info.planetCount > 0 ? "YES" : "NONE");
+        row("BELTS", info.beltCount > 0 ? std::to_string(info.beltCount) : "NONE");
         row("TRAFFIC", std::to_string(info.npcShipCount) + " SHIPS");
 
         y += 6.f;

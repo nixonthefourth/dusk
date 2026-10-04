@@ -5,17 +5,20 @@
 #ifndef DUSK_WORLD_H
 #define DUSK_WORLD_H
 
+#include "objects/asteroid.h++"
 #include "objects/cube.h++"
 #include "objects/planet.h++"
 #include "objects/ship.h++"
 #include "objects/collision_body.h++"
 #include "systems/ship_physics.h++"
 #include "tools/camera.h++"
+#include "procgen/asteroid_generation.h++"
 #include "world/starfield.h++"
 #include <vector>
 #include "systems/orbital_physics.h++"
 #include "objects/npc_ship.h++"
 #include "systems/npc_ai.h++"
+#include <algorithm>
 #include <cmath>
 #include <optional>
 
@@ -56,6 +59,12 @@ struct World {
 
     /** What the player has targeted, shown on the scanner, compass and in-view brackets. */
     TargetLock target;
+
+    /** Asteroid belts in this system. Rocks are streamed from each belt's seed on demand. */
+    std::vector<AsteroidBelt> asteroidBelts;
+
+    /** Seconds of simulated time in this system; drives cosmetic motion such as tumbling rocks. */
+    float elapsedTime = 0.f;
 };
 
 
@@ -154,6 +163,49 @@ inline void resolveShipBodyContact(Ship& ship, const World& world)
 
     for (const Planet& planet : world.planets)
         resolve(planet);
+}
+
+/** True while `position` is inside any asteroid belt's band (used for the HUD's field warning). */
+inline bool insideAsteroidBelt(const World& world, const Vec3& position)
+{
+    return std::any_of(world.asteroidBelts.begin(), world.asteroidBelts.end(), [&](const AsteroidBelt& belt)
+    {
+        return procgen::beltDensityAt(belt, position) > 0.f;
+    });
+}
+
+/**
+ * Keeps a ship outside every asteroid near it: like resolveShipBodyContact(), it is pushed back
+ * to the rock's surface, loses the velocity pointing into it, and drops out of cruise. Only rocks
+ * within reach are generated, and only when the ship is near a belt at all, so this is cheap.
+ */
+inline void resolveShipAsteroidContact(Ship& ship, const World& world)
+{
+    constexpr float reach = 3200.f; // largest rock radius plus the ship, with room to spare
+
+    for (const AsteroidBelt& belt : world.asteroidBelts)
+    {
+        procgen::forEachAsteroidNear(belt, ship.position, reach, [&](const Asteroid& rock)
+        {
+            const Vec3 offset = ship.position - rock.position;
+            const float distance = length(offset);
+            const float contactDistance = rock.collisionRadius() + ship.collisionRadius;
+
+            if (distance >= contactDistance)
+                return;
+
+            const Vec3 normal = distance > 0.f ? offset / distance : Vec3{0.f, 1.f, 0.f};
+            ship.position = rock.position + normal * contactDistance;
+
+            const float inwardSpeed = dot(ship.velocity, normal);
+
+            if (inwardSpeed < 0.f)
+                ship.velocity -= normal * inwardSpeed;
+
+            if (ship.cruiseEngaged)
+                disengageCruise(ship);
+        });
+    }
 }
 
 /** Advances every NPC's simple-reflex behaviour and physics for one frame. */
@@ -466,6 +518,8 @@ inline void updateWorldCollisions(World& world)
 /** Advances world objects that have physics or animation. Autopilots can take over the player ship. */
 inline void updateWorldPhysics(World& world, float dt, bool integratePlayerShip = true)
 {
+    world.elapsedTime += dt;
+
     // Refreshed even under autopilot, so the HUD always knows whether cruise is available.
     world.playerShip.cruiseMargin = cruiseMarginAt(world, world.playerShip.position);
 
@@ -474,6 +528,7 @@ inline void updateWorldPhysics(World& world, float dt, bool integratePlayerShip 
         const Vec3 shipGravity = gravityOnShip(world);
         integrateShipPhysics(world.playerShip, dt, shipGravity);
         resolveShipBodyContact(world.playerShip, world);
+        resolveShipAsteroidContact(world.playerShip, world);
     }
 
     orbital::integrateOrbitalPhysics(world.planets, world.star.position, world.star.mass, dt);

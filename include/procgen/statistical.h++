@@ -29,6 +29,9 @@ struct SystemInfo {
 
     /** Position on the galactic chart, in light years from the galactic core. Set by generateGalaxy(). */
     Vec2 mapPosition;
+
+    /** Asteroid belts the system is rolled to have; fewer may fit once its planets are laid out. */
+    int beltCount = 0;
 };
 
 /** Display name for an economy tier. */
@@ -221,6 +224,18 @@ inline int scaleNpcTraffic(std::mt19937& rng, int baseCount)
     return static_cast<int>(whole) + (unit(rng) < scaled - whole ? 1 : 0);
 }
 
+/** Rolls how many asteroid belts a system has: none (40%), one (45%) or two (15%). */
+inline int generateBeltCount(std::mt19937& rng)
+{
+    std::uniform_real_distribution<float> unit(0.f, 1.f);
+    const float roll = unit(rng);
+
+    if (roll < 0.40f)
+        return 0;
+
+    return roll < 0.85f ? 1 : 2;
+}
+
 inline SystemInfo generateSystemInfo(std::uint32_t systemSeed)
 {
     std::mt19937 rng(systemSeed);
@@ -236,6 +251,9 @@ inline SystemInfo generateSystemInfo(std::uint32_t systemSeed)
 
     // Drawn after every other roll, so names, economies, planets and stations are unchanged.
     info.npcShipCount = scaleNpcTraffic(rng, info.npcShipCount);
+
+    // Belts are rolled last of all for the same reason: every earlier roll stays as it was.
+    info.beltCount = generateBeltCount(rng);
 
     return info;
 }

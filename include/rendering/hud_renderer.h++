@@ -6,6 +6,7 @@
 #define DUSK_HUD_RENDERER_H
 
 #include "objects/ship.h++"
+#include "procgen/asteroid_generation.h++"
 #include "rendering/projector.h++"
 #include "systems/ship_physics.h++"
 #include "tools/camera.h++"
@@ -56,6 +57,7 @@ public:
         drawSpeedBlock(target, ship, viewport);
         drawScanner(target, world, viewport);
         drawAttitudeBlock(target, world, viewport);
+        drawFieldWarning(target, world, viewport);
     }
 
 private:
@@ -505,6 +507,32 @@ private:
             }
         };
 
+        // Rocks big enough to matter, as dim specks with faint stalks; drawn first so ships and
+        // the station stay on top.
+        const sf::Color rockColor(125, 118, 105);
+        const sf::Color rockStalk(70, 66, 60);
+
+        for (const AsteroidBelt& belt : world.asteroidBelts)
+        {
+            procgen::forEachAsteroidNear(belt, ship.position, scannerRange, [&](const Asteroid& rock)
+            {
+                if (rock.radius < 250.f)
+                    return;
+
+                const Vec3 local = toShipLocal(ship, rock.position);
+
+                if (std::hypot(local.x, local.z) > scannerRange || std::abs(local.y) > scannerRange)
+                    return;
+
+                const sf::Vector2f base = {centre.x + local.x / scannerRange * radii.x, centre.y - local.z / scannerRange * radii.y};
+                const sf::Vector2f tip = {base.x, base.y - local.y / scannerRange * radii.y * 1.6f};
+                drawLine(target, base, tip, rockStalk);
+
+                const float speck = rock.radius > 1400.f ? 3.f : 2.f;
+                drawRect(target, {tip.x - speck * 0.5f, tip.y - speck * 0.5f}, {speck, speck}, rockColor);
+            });
+        }
+
         for (const NpcShip& npc : world.npcShips)
         {
             if (npc.isVisible())
@@ -516,6 +544,15 @@ private:
 
         // Own ship at the centre.
         drawRect(target, {centre.x - 2.f, centre.y - 2.f}, {4.f, 4.f}, amber);
+    }
+
+    /** Amber warning above the scanner while the ship is inside an asteroid belt. */
+    void drawFieldWarning(sf::RenderTarget& target, const World& world, const Viewport& viewport) const
+    {
+        if (!insideAsteroidBelt(world, world.playerShip.position))
+            return;
+
+        drawText(target, "ASTEROID FIELD", {viewport.width * 0.5f, viewport.height - dashboardHeight - 24.f}, 17, amber, 0.5f);
     }
 
     /** Right block: heading and pitch, turn-rate bars, target compass and target readout. */

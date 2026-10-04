@@ -252,6 +252,15 @@ private:
         for (int planetIndex = 0; planetIndex < info.planetCount; ++planetIndex)
             world_.planets.push_back(procgen::generatePlanet(rng, planetIndex, world_.star));
 
+        // Belts come from their own RNG stream (keyed off the same system seed), so adding them
+        // left every planet, station and NPC exactly where it was.
+        world_.asteroidBelts = procgen::generateAsteroidBelts(
+            deriveSystemSeed(galaxy_.seed, systemIndex),
+            info.beltCount,
+            world_.star,
+            world_.planets
+        );
+
         world_.stationActive = info.stationCount > 0 && !world_.planets.empty();
 
         if (world_.stationActive)

@@ -46,7 +46,10 @@ add_executable(dusk src/main.cpp
         include/ui/menu_button.h++
         include/ui/format.h++
         include/ui/galaxy_map.h++
-        include/ui/system_map.h++)
+        include/ui/system_map.h++
+        include/objects/asteroid.h++
+        include/procgen/asteroid_generation.h++
+        include/rendering/asteroid_renderer.h++)
 
 # Copy assets on every build (not only at configure time), so newly added models are picked up.
 add_custom_command(TARGET dusk POST_BUILD
