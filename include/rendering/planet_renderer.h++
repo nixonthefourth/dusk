@@ -59,7 +59,16 @@ private:
         const Planet* planet = nullptr;
         ProjectedPoint projected;
         float screenRadius = 0.f;
+
+        /** Distance from the camera to the body's centre, used for back-to-front sorting. */
+        float distance = 0.f;
+
+        /** False when the centre is behind the camera but part of the sphere is still in front: grid only. */
+        bool centreVisible = true;
     };
+
+    /** Below this projected radius, a body is drawn as a marker dot instead of a sphere. */
+    static constexpr float dotThreshold = 2.f;
 
     Projector projector_;
 
@@ -92,19 +101,35 @@ private:
 
         for (const Planet* planet : bodies)
         {
+            if (planet->radius <= 0.f)
+                continue;
+
             const Vec3 cameraSpace = transformPoint(viewMatrix, planet->position);
+            const float distance = length(cameraSpace);
+
+            // Inside (or right on) the sphere there is no meaningful outline to draw.
+            if (distance <= planet->radius * 1.0005f)
+                continue;
+
+            // Angular radius of a sphere seen from distance d is asin(R / d); on screen that is
+            // f * R / sqrt(d^2 - R^2). The old f * R / z badly undersized planets seen up close.
+            const float screenRadius =
+                planet->radius * focalLength / std::sqrt(distance * distance - planet->radius * planet->radius);
 
             if (cameraSpace.z <= 1.f)
+            {
+                // Centre behind the camera, but a big sphere can still wrap around in front of it
+                // (skimming low over a planet). Draw its grid lines, which clip properly; skip the
+                // outline, which needs a projected centre.
+                if (!planet->isStar && cameraSpace.z > -planet->radius)
+                    visiblePlanets.push_back({planet, {}, screenRadius, distance, false});
+
                 continue;
+            }
 
             const auto projected = projector_.projectCameraSpace(cameraSpace, camera, viewport, planet->radius);
 
             if (!projected)
-                continue;
-
-            const float screenRadius = planet->radius * focalLength / cameraSpace.z;
-
-            if (screenRadius < 2.f)
                 continue;
 
             if (projected->position.x < -screenRadius ||
@@ -115,14 +140,14 @@ private:
                 continue;
             }
 
-            visiblePlanets.push_back({planet, *projected, screenRadius});
+            visiblePlanets.push_back({planet, *projected, screenRadius, distance, true});
         }
 
         std::sort(
             visiblePlanets.begin(),
             visiblePlanets.end(),
             [](const ProjectedPlanet& a, const ProjectedPlanet& b) {
-                return a.projected.depth > b.projected.depth;
+                return a.distance > b.distance;
             }
         );
 
@@ -146,6 +171,19 @@ private:
             projectedPlanet.projected.position.y
         };
 
+        if (!projectedPlanet.centreVisible)
+        {
+            drawSphereGrid(target, planet, camera, viewport, viewMatrix, radius);
+            return;
+        }
+
+        // Far-off bodies stay on screen as dots, so the whole system can be navigated by eye.
+        if (radius < dotThreshold)
+        {
+            drawMarkerDot(target, center, planet.isStar);
+            return;
+        }
+
         if (planet.isStar)
         {
             drawFilledStar(target, center, radius);
@@ -155,8 +193,19 @@ private:
         if (planet.hasRing)
             drawRing(target, planet, center, radius);
 
-        drawSphereGrid(target, planet, camera, viewport, viewMatrix, projectedPlanet.screenRadius);
+        drawSphereGrid(target, planet, camera, viewport, viewMatrix, radius);
         drawSilhouette(target, center, radius);
+    }
+
+    /** A small fixed-size dot standing in for a body too distant to resolve. */
+    static void drawMarkerDot(sf::RenderTarget& target, sf::Vector2f center, bool isStar)
+    {
+        const float dotRadius = isStar ? 2.f : 1.5f;
+        sf::CircleShape dot(dotRadius, 8);
+        dot.setOrigin({dotRadius, dotRadius});
+        dot.setPosition(center);
+        dot.setFillColor(isStar ? sf::Color::White : sf::Color(255, 255, 255, 200));
+        target.draw(dot);
     }
 
     void drawSphereGrid(
@@ -168,23 +217,33 @@ private:
         float screenRadius
     ) const
     {
-        const int segments = screenRadius > 80.f ? 72 : 48;
-        const int latitudeBands = screenRadius > 110.f ? 8 : 6;
-        const int meridianBands = screenRadius > 110.f ? 10 : 8;
+        // Up close a big planet fills the screen; a denser grid keeps its curvature (and the
+        // sense of speed over it) readable instead of a handful of long straight chords.
+        const bool close = screenRadius > 400.f;
+        const int segments = close ? 96 : (screenRadius > 80.f ? 72 : 48);
+        const int latitudeBands = close ? 12 : (screenRadius > 110.f ? 8 : 6);
+        const int meridianBands = close ? 16 : (screenRadius > 110.f ? 10 : 8);
+
+        // Every segment of this planet goes into one vertex batch and one draw call.
+        std::vector<sf::Vertex> lines;
+        lines.reserve(static_cast<std::size_t>((latitudeBands + meridianBands) * segments * 2));
 
         for (int latitudeIndex = 1; latitudeIndex < latitudeBands; ++latitudeIndex)
         {
             const float latitude =
                 -pi * 0.5f + static_cast<float>(latitudeIndex) * pi / static_cast<float>(latitudeBands);
-            drawLatitudeRing(target, planet, camera, viewport, viewMatrix, latitude, segments);
+            drawLatitudeRing(lines, planet, camera, viewport, viewMatrix, latitude, segments);
         }
 
         for (int meridianIndex = 0; meridianIndex < meridianBands; ++meridianIndex)
         {
             const float longitude =
                 static_cast<float>(meridianIndex) * pi / static_cast<float>(meridianBands);
-            drawMeridianRing(target, planet, camera, viewport, viewMatrix, longitude, segments);
+            drawMeridianRing(lines, planet, camera, viewport, viewMatrix, longitude, segments);
         }
+
+        if (!lines.empty())
+            target.draw(lines.data(), lines.size(), sf::PrimitiveType::Lines);
     }
 
     /** Draws the star as a solid white disc instead of the wire grid used for planets. */
@@ -198,7 +257,7 @@ private:
     }
 
     void drawLatitudeRing(
-        sf::RenderTarget& target,
+        std::vector<sf::Vertex>& lines,
         const Planet& planet,
         const Camera& camera,
         const Viewport& viewport,
@@ -213,13 +272,13 @@ private:
         {
             const float angle = static_cast<float>(segment) * 2.f * pi / static_cast<float>(segments);
             const Vec3 current = latitudePoint(planet, latitude, angle);
-            drawWireSegment(target, planet, camera, viewport, viewMatrix, previous, current, 0.86f);
+            drawWireSegment(lines, planet, camera, viewport, viewMatrix, previous, current, 0.86f);
             previous = current;
         }
     }
 
     void drawMeridianRing(
-        sf::RenderTarget& target,
+        std::vector<sf::Vertex>& lines,
         const Planet& planet,
         const Camera& camera,
         const Viewport& viewport,
@@ -234,13 +293,13 @@ private:
         {
             const float angle = static_cast<float>(segment) * 2.f * pi / static_cast<float>(segments);
             const Vec3 current = meridianPoint(planet, longitude, angle);
-            drawWireSegment(target, planet, camera, viewport, viewMatrix, previous, current, 1.f);
+            drawWireSegment(lines, planet, camera, viewport, viewMatrix, previous, current, 1.f);
             previous = current;
         }
     }
 
     void drawWireSegment(
-        sf::RenderTarget& target,
+        std::vector<sf::Vertex>& lines,
         const Planet& planet,
         const Camera& camera,
         const Viewport& viewport,
@@ -264,13 +323,8 @@ private:
             return;
 
         const sf::Color color = lineColorFor(planet, camera, startWorld, endWorld, alphaScale);
-        sf::Vertex vertices[] =
-        {
-            sf::Vertex({projectedStart->position.x, projectedStart->position.y}, color),
-            sf::Vertex({projectedEnd->position.x, projectedEnd->position.y}, color)
-        };
-
-        target.draw(vertices, 2, sf::PrimitiveType::Lines);
+        lines.push_back(sf::Vertex({projectedStart->position.x, projectedStart->position.y}, color));
+        lines.push_back(sf::Vertex({projectedEnd->position.x, projectedEnd->position.y}, color));
     }
 
     static Vec3 latitudePoint(const Planet& planet, float latitude, float angle)
@@ -320,7 +374,7 @@ private:
         silhouette.setPosition(center);
         silhouette.setFillColor(sf::Color::Transparent);
         silhouette.setOutlineColor(sf::Color(255, 255, 255, 240));
-        silhouette.setOutlineThickness(std::max(1.f, radius * 0.006f));
+        silhouette.setOutlineThickness(std::clamp(radius * 0.006f, 1.f, 3.f));
         target.draw(silhouette);
     }
 

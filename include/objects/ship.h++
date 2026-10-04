@@ -83,26 +83,102 @@ struct Ship {
     /** Roll around the forward axis in radians. Player controls leave this at zero; the docking computer uses it. */
     float roll = 0.f;
 
-    /** Current throttle amount in the range [0, 1]. */
+    /**
+     * Current throttle amount in the range [0, 1]. With flight assist on this is a speed demand
+     * (a fraction of maxSpeed, or of cruiseMaxSpeed while cruising); with it off, it is a direct
+     * fraction of main-engine thrust, exactly as in the original Newtonian model.
+     */
     float throttle = 0.f;
 
-    /** When true, thrust is applied opposite the ship's forward axis. */
+    /** When true, the ship flies (or thrusts) backwards along its forward axis. */
     bool reverseThrust = false;
 
-    /** Acceleration at full throttle in world units per second squared. */
-    float maxThrust = 800.f;
+    /* ---- Linear flight model --------------------------------------------------------------- */
+
+    /**
+     * Main engine force at full throttle. Acceleration is force / mass: 1050 / 15 = 70 u/s^2,
+     * roughly 16 seconds from rest to top speed.
+     */
+    float maxThrust = 1050.f;
+
+    /** Retro thrusters, used for braking and for flying in reverse (90 u/s^2 at mass 15). */
+    float retroThrust = 1350.f;
+
+    /**
+     * RCS force along the ship's right and up axes (200 u/s^2 at mass 15). Flight assist spends it
+     * cancelling sideways drift, which is what makes the velocity follow the nose through a turn.
+     * Deliberately stronger than the main engine: turning is crisp, straight-line speed builds slowly.
+     */
+    float lateralThrust = 3000.f;
+
+    /** Mass of the ship in tonnes. Every thruster's acceleration is its force divided by this. */
+    float mass = 15.f;
+
+    /** When true, the flight computer converts throttle into a velocity and fires thrusters to hold it. */
+    bool flightAssist = true;
+
+    /** Speed flight assist holds at full throttle in normal space, in world units per second. */
+    float maxSpeed = 1200.f;
+
+    /** Fraction of maxSpeed available while flying in reverse. */
+    float reverseSpeedFraction = 0.35f;
+
+    /** Seconds flight assist takes to close a small velocity error; larger errors are thrust-limited. */
+    float assistResponseTime = 0.3f;
 
     /** W/S throttle change speed per second. */
     float throttleChangeSpeed = 0.5f;
 
-    /** A/D turn speed in radians per second. */
-    float yawSpeed = 0.8f;
+    /* ---- Rotation ---------------------------------------------------------------------------- */
 
-    /** Q/E pitch speed in radians per second. */
-    float pitchSpeed = 0.8f;
+    /** Maximum yaw rate in radians per second. */
+    float yawSpeed = 1.35f;
 
-    /** Mass of the ship in tonnes. */
-    float mass = 15.f;
+    /** Maximum pitch rate in radians per second. */
+    float pitchSpeed = 1.35f;
+
+    /** Current yaw rate in radians per second (RCS-driven angular velocity). */
+    float yawRate = 0.f;
+
+    /** Current pitch rate in radians per second. */
+    float pitchRate = 0.f;
+
+    /** Seconds the yaw/pitch rate takes to spin up toward the commanded rate. */
+    float turnResponseTime = 0.12f;
+
+    /** Seconds the rate takes to die away once input is released or reversed, so the nose stops where it is aimed. */
+    float turnStopTime = 0.05f;
+
+    /** Turn-rate multiplier while the precision modifier is held. */
+    float precisionTurnScale = 0.35f;
+
+    /** Pilot intent written by the input layer each frame: yaw and pitch demands in [-1, 1]. */
+    float yawInput = 0.f;
+    float pitchInput = 0.f;
+
+    /** True while the pilot holds the precision modifier (reduced turn rates for fine aiming). */
+    bool precisionInput = false;
+
+    /* ---- In-system cruise ------------------------------------------------------------------ */
+
+    /** True while the in-system cruise drive is engaged. */
+    bool cruiseEngaged = false;
+
+    /** Cruise speed at full throttle, in world units per second. */
+    float cruiseMaxSpeed = 30000.f;
+
+    /** How quickly cruise speed builds, and how quickly it bleeds off, in u/s^2. */
+    float cruiseAcceleration = 2500.f;
+    float cruiseDeceleration = 9000.f;
+
+    /** Cruise speed limit gained per world unit of clearance beyond the nearest mass-lock boundary. */
+    float cruiseSlowdownRate = 0.5f;
+
+    /**
+     * Distance past the nearest mass-lock boundary, refreshed by World every physics step.
+     * Zero or below means the ship is mass-locked: cruise is unavailable and drops out.
+     */
+    float cruiseMargin = 0.f;
 
     /** Local-space vector model rendered for this ship. */
     VectorModel model = createDefaultShipModel();

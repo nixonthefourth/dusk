@@ -27,11 +27,15 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - A wireframe ship rendered from a vector model, with face culling and hidden-underside edges.
 - OBJ loading, so you can swap the built-in ship for any triangulated wireframe model — the project ships with a `banshee.obj` model, used for both the player ship and every NPC ship.
 - Velocity Verlet ship physics: real acceleration, real persistent velocity, and now real external gravity, all fed through the same integrator.
+- Flight assist on top of that physics: throttle sets a speed, and the main engine, retro thrusters and RCS fire (within their own force limits) to hold it, so the ship's velocity follows the nose through a turn. Switch it off for the raw Newtonian model.
+- Rate-controlled rotation: turn keys command a yaw/pitch rate that spins up smoothly and stops crisply, with a precision modifier for fine aiming.
+- An in-system cruise drive for crossing systems that are now hundreds of thousands of units across, with Elite-style mass locking near planets, the star and the station.
+- Planet-scale worlds: planets 20–70 ship-lengths in radius, a star bigger still, and orbits roughly 140,000 units apart.
 - Object-level collision detection (ship, station, planets) using swept and static spherical volumes.
 - A recycled, endless-feeling starfield.
 - Frustum clipping for both points and line segments, with a small side guard-band so things don't visibly pop in at the frustum edges.
 - A system's star drawn as a solid filled disc, and its planets drawn as gridded, optionally ringed wireframes — sorted and drawn back-to-front together, with per-edge visibility shading based on facing direction.
-- A minimalist, font-free HUD showing throttle and thrust direction.
+- A minimalist HUD showing throttle, actual speed and thrust direction, plus a boresight and a prograde (direction-of-travel) marker in the view.
 
 ## Roadmap
 
@@ -61,7 +65,9 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [~] Newtonian physics
   - [x] Ship thrust follows Newton's first law, integrated with velocity Verlet
   - [x] Objects act upon one another — the star and every planet exert real gravity on each other and on the ship
-  - [ ] Towed cargo mass affects ship handling
+  - [x] Flight assist: velocity-holding thruster control, switchable back to raw Newtonian flight
+  - [x] In-system cruise drive with mass locking
+  - [ ] Towed cargo mass affects ship handling (every thruster already divides by `mass`, so this is mostly bookkeeping)
 - [~] Phase-space warp between system nodes — `[`/`]` system cycling stands in for it today
 - [ ] Galactic map
 - [ ] System map
@@ -136,11 +142,15 @@ Flight controls:
 
 - `W`: increase throttle.
 - `S`: decrease throttle.
-- `Arrow Down`: toggle forward/reverse thrust and reset throttle to `0`.
+- `X`: cut throttle to `0` (with flight assist on, the ship brakes to a stop).
+- `Arrow Down`: toggle forward/reverse and reset throttle to `0`.
 - `A`: yaw ship left.
 - `D`: yaw ship right.
 - `Q`: pitch nose up.
 - `E`: pitch nose down.
+- `Shift` (hold): precision turning, about a third of the normal turn rate.
+- `F`: toggle flight assist.
+- `J`: engage/disengage the cruise drive (refused while mass-locked).
 - `Arrow Up`: hold to orbit the camera around the ship (showcase mode) instead of chasing it.
 - `Escape`: quit.
 
@@ -160,11 +170,11 @@ While docked:
 
 This is a deliberate stand-in for a proper warp/phase-space scene — it regenerates the destination system from its own seed and drops you in, instantly, so the orbital-mechanics and NPC-behavior work can be tested across many systems without a travel scene to build first.
 
-Because movement is velocity-based, easing off the throttle does not stop the ship. It only stops adding acceleration — the ship keeps drifting on whatever velocity it already built up. To brake:
+With flight assist on (the default), throttle is a speed demand: `W`/`S` choose how fast you want to go along the nose, and the thrusters get you there and hold it. Turning swings your velocity round with the nose, because the RCS cancels the sideways drift. `X` (or throttle to `0`) brings the ship to a stop; `Arrow Down` then lets you back up slowly.
 
-1. Tap `Arrow Down` to switch to reverse thrust (this also zeroes throttle).
-2. Hold `W` to build up reverse thrust.
-3. Ease off with `S`, or toggle direction again once you're near a stop.
+With flight assist off (`F`), movement is purely velocity-based, as before: throttle is a fraction of main-engine thrust, easing off it only stops adding acceleration, and the ship keeps drifting on whatever velocity it built up. To brake in that mode, tap `Arrow Down` to switch to reverse thrust, hold `W`, and ease off near a stop.
+
+To cross a system, fly clear of the nearest planet, star or station until the readout stops saying `MASS LOCKED`, then press `J`. Cruise speed follows throttle up to 30,000 units per second, tapers off automatically as you approach a body, and drops out at its mass-lock boundary near normal-space top speed. The HUD's prograde ring shows where you are actually travelling: put it on a target to fly straight at it.
 
 ## Project Layout
 
@@ -419,7 +429,7 @@ For a single point, clipping just checks whether `z` sits between the near and f
 
 ## The Ship
 
-Ship state lives in `include/objects/ship.h++`:
+Ship state lives in `include/objects/ship.h++` (abridged):
 
 ```cpp
 struct Ship {
@@ -431,18 +441,44 @@ struct Ship {
 
     float yaw;
     float pitch;
-    float throttle;
+    float roll;                         // docking computer only
+    float throttle;                     // speed demand with flight assist, thrust fraction without
     bool reverseThrust;
 
-    float maxThrust = 1000.f;
-    float throttleChangeSpeed = 0.5f;
-    float yawSpeed = 0.8f;
-    float pitchSpeed = 0.8f;
+    // Linear flight model: acceleration = force / mass
+    float maxThrust = 1050.f;           // main engine, 70 u/s^2
+    float retroThrust = 1350.f;         // braking and reverse, 90 u/s^2
+    float lateralThrust = 3000.f;       // RCS, 200 u/s^2, cancels sideways drift
     float mass = 15.f;
+    bool flightAssist = true;
+    float maxSpeed = 1200.f;
+    float reverseSpeedFraction = 0.35f;
+    float assistResponseTime = 0.3f;
+    float throttleChangeSpeed = 0.5f;
+
+    // Rotation: input commands a rate, the ship eases toward it
+    float yawSpeed = 1.35f;             // max rates, rad/s
+    float pitchSpeed = 1.35f;
+    float yawRate, pitchRate;           // current angular velocity
+    float turnResponseTime = 0.12f;     // spin-up
+    float turnStopTime = 0.05f;         // stop on release
+    float precisionTurnScale = 0.35f;
+    float yawInput, pitchInput;         // pilot intent in [-1, 1]
+    bool precisionInput;
+
+    // Cruise drive
+    bool cruiseEngaged;
+    float cruiseMaxSpeed = 30000.f;
+    float cruiseAcceleration = 2500.f;
+    float cruiseDeceleration = 9000.f;
+    float cruiseSlowdownRate = 0.5f;
+    float cruiseMargin;                 // refreshed by World; <= 0 means mass-locked
 
     VectorModel model = createDefaultShipModel();
 };
 ```
+
+These are the knobs to turn if the handling needs adjusting: `maxThrust` for how hard the ship pulls in a straight line, `lateralThrust` for how quickly it carves a turn, `maxSpeed` for top speed, and `yawSpeed`/`pitchSpeed` with the two time constants for how the nose feels.
 
 Orientation helpers keep physics and rendering agreeing about which way the ship is pointing:
 
@@ -459,47 +495,54 @@ If no OBJ is loaded, the ship falls back to a small built-in Sidewinder-inspired
 
 Physics lives in `include/systems/ship_physics.h++`, and the underlying integrator lives in `include/math/verlet.h++`.
 
-Thrust force comes straight from ship controls:
+Every force on the ship is still divided by mass and fed through velocity Verlet; what changed is how the thrust force is chosen.
+
+With **flight assist** on, throttle becomes a signed speed demand along the nose (`shipTargetSpeed()`). Each step, `flightAssistThrustForce()` works out the acceleration that would close the gap between the current velocity and that demand over `assistResponseTime`, subtracts external acceleration so gravity is cancelled, and splits the result along the ship's forward, right and up axes. Each part is then clamped to what the hardware can do: forward against `maxThrust` and `retroThrust`, and the two sideways parts together against one shared `lateralThrust` budget. Large errors are therefore thrust-limited (the ship visibly works to change direction), and small ones settle smoothly. Because the error is never closed by more than one step's worth, a long frame can't overshoot.
+
+With flight assist **off**, `manualThrustForce()` is the original model: throttle times `maxThrust` (or `retroThrust` in reverse) along the nose, and nothing else.
 
 ```cpp
-inline Vec3 shipThrustForce(const Ship& ship)
-{
-    const float thrustDirection = ship.reverseThrust ? -1.f : 1.f;
-    return shipForward(ship) * ship.maxThrust * ship.throttle * thrustDirection;
-}
-```
-
-Acceleration divides that by mass and adds in whatever external acceleration the caller passes — today, that's gravity from the system's star and planets:
-
-```cpp
-inline Vec3 shipAcceleration(const Ship& ship, const Vec3& externalAcceleration = {})
+inline Vec3 shipAcceleration(const Ship& ship, float dt = 0.f, const Vec3& externalAcceleration = {})
 {
     if (ship.mass <= 0.f)
         return externalAcceleration;
 
-    return shipThrustForce(ship) / ship.mass + externalAcceleration;
+    return shipThrustForce(ship, dt, externalAcceleration) / ship.mass + externalAcceleration;
 }
 ```
 
-Position and velocity are then advanced with velocity Verlet rather than explicit Euler, which keeps the integration closer to the true phase-space trajectory:
+**Rotation** is integrated in the same step. Input writes `yawInput`/`pitchInput`; `integrateShipRotation()` eases the actual rates toward `input × maxRate` with an exponential response (`turnResponseTime` spinning up, the shorter `turnStopTime` slowing down), then advances yaw and pitch. A 50 ms tap moves the nose about 2°, or about 0.7° with `Shift` held. NPCs and the docking computer still set yaw and pitch directly and leave the inputs at zero.
+
+**Cruise** is deliberately not Newtonian. While engaged, `integrateCruise()` sets speed along the nose, chasing `throttle × cruiseMaxSpeed` but hard-capped by `cruiseSpeedLimit()`: `maxSpeed + cruiseSlowdownRate × cruiseMargin`. `cruiseMargin` is the distance to the nearest mass-lock boundary (`cruiseMarginAt()` in `world.h++`: half a body's radius plus 5000 units above its surface, or 12000 units from the station). Heading straight at a planet, the cap shrinks with the distance, so speed decays smoothly and the drive drops out at the boundary at normal-space top speed. `disengageCruise()` clamps speed to `maxSpeed` and re-points throttle at it, so flight assist carries on instead of braking.
 
 ```cpp
 inline void integrateShipPhysics(Ship& ship, float dt, const Vec3& externalAcceleration = {})
 {
     ship.previousPosition = ship.position;
+    integrateShipRotation(ship, dt);
 
-    const Vec3 acceleration = shipAcceleration(ship, externalAcceleration);
+    if (ship.cruiseEngaged && shipMassLocked(ship))
+        disengageCruise(ship);
 
+    if (ship.cruiseEngaged)
+    {
+        integrateCruise(ship, dt);
+        return;
+    }
+
+    const Vec3 acceleration = shipAcceleration(ship, dt, externalAcceleration);
     ship.position = verlet::position_update(ship.position, ship.velocity, acceleration, dt);
     ship.velocity = verlet::velocity_update(ship.velocity, acceleration, acceleration, dt);
 }
 ```
 
+`main.cpp` runs physics in sub-steps of at most 1/120 s and caps a single frame at 0.1 s, so the flight computer and the integrators behave the same at any frame rate and a stalled frame can't fling anything.
+
 `World` computes that external acceleration once per frame via `gravityOnShip()`, which sums `orbital::gravitationalAcceleration()` contributions from the star and every planet at the ship's current position, and hands it straight to `integrateShipPhysics()`. NPC ships go through the same function with their own local gravity sample, so the player and every NPC share one physics code path.
 
 `verlet::position_update` and `verlet::velocity_update` are small, reusable, and not ship-specific — they only need a displacement/velocity/acceleration and a timestep, which is exactly why `orbital_physics.h++` reuses them directly for planet motion instead of writing a second integrator.
 
-There is intentionally no drag yet. If the ship gains velocity, it keeps that velocity until thrust (or gravity) changes it — see the Controls section above for how to actually stop.
+There is still no drag. With flight assist off, the ship keeps its velocity until thrust (or gravity) changes it; with it on, the thrusters are what slow it down.
 
 `ship.previousPosition` is also what makes swept collision detection possible: it's the "where was I a moment ago" needed to catch a fast-moving ship that tunnels through a thin collision volume between frames.
 
@@ -528,7 +571,9 @@ Every physics tick, `World::updateWorldPhysics()`:
 
 `Cube` and `Planet` each expose a `*CollisionRadius()` helper so the collision system doesn't need to know how their visual size maps to a collision volume. The procedurally generated station cube sets `collision.detectsCollisions = false` on itself, so today it's purely decorative furniture in orbit rather than something you can bump into — a natural hook for a future docking mechanic, but not wired up yet.
 
-NPC ships currently sit outside this system entirely: they steer around planets and the star through their own AI (see below), but they don't carry a `CollisionBody` and never appear in `updateWorldCollisions()`.
+Detection still only records hits. The one response that exists is `resolveShipBodyContact()`: a ship (player or visible NPC) that has sunk into a planet or the star is moved back to the surface and loses the inward part of its velocity relative to that body, and drops out of cruise. That stops the ship flying through worlds it should be skimming; proper rigid-body response is still on the roadmap.
+
+NPC ships currently sit outside the hit-recording system: they steer around planets and the star through their own AI (see below), but they don't carry a `CollisionBody` and never appear in `updateWorldCollisions()`.
 
 ## Orbital Physics And Gravity
 
@@ -537,8 +582,8 @@ Orbital mechanics live in `include/systems/orbital_physics.h++`, under the `orbi
 Gravity between any two bodies is a simple inverse-square pull, with a softening floor so it doesn't spike toward infinity at very close range:
 
 ```cpp
-constexpr float g = 600.f;          // tuned for this project's world-unit scale, not SI units
-constexpr float minDistance = 200.f;
+constexpr float g = 100.f;          // tuned for this project's world-unit scale, not SI units
+constexpr float minDistance = 250.f;
 
 inline Vec3 gravitationalAcceleration(const Vec3& from, const Vec3& toward, float towardMass)
 {
@@ -553,6 +598,8 @@ Every physics tick, `World::updateWorldPhysics()` calls `orbital::integrateOrbit
 
 The same `gravitationalAcceleration()` function is what `World::gravityOnShip()` uses to work out how hard the star and planets are currently pulling on the player, and it's what `npc_ai::updateNpcShip()` samples for each NPC before calling the shared `integrateShipPhysics()`. One gravity function, three different things being pulled around by it.
 
+Masses are set in `planet_generation.h++`. A star's mass is `750 × radius`, which puts first-shell planets on orbits of about 140–180 units per second (slow enough for the docking computer to chase a station down) and gives the star a surface pull of roughly 1 u/s². A planet's mass is `0.0005 × radius²`, keeping each one at about 0.5–2% of its star's mass so the N-body orbits stay well-behaved (radius drift of a few percent over two simulated hours) rather than planets tugging each other out of their shells. Flight assist cancels gravity automatically; with it off, the star's pull is noticeable over a minute or so.
+
 `circularOrbitVelocity()` is the other half of the picture — given a position, a center, and a central mass, it returns the tangential velocity needed for a (roughly) circular orbit at that distance. Procedural planet generation uses it to hand every new planet a starting velocity that won't immediately spiral it into the star or fling it out of the system.
 
 ## Procedural Galaxy Generation
@@ -561,7 +608,7 @@ Procedural generation lives in `include/procgen/`, split across three files with
 
 - `statistical.h++` generates the cheap, "on-paper" facts about a system — a pronounceable procedural name, an `EconomyTier` (Poor/Developing/Progressive, weighted toward Poor), a dominant occupation, 2–4 goods it best sells, and rolled counts for planets, stations, and NPC ships. All of this is packed into a `SystemInfo` and is cheap enough to generate and hold 1000 of at once, up front.
 - `galaxy.h++` derives a stable per-system seed from one galaxy seed plus a system index (`deriveSystemSeed()`), and calls `generateSystemInfo()` for every system to build the full `Galaxy` roster.
-- `planet_generation.h++` is where a `SystemInfo` actually becomes a playable `World`: it builds the star, places planets in outward, non-overlapping orbital shells with a real circular-orbit starting velocity, optionally places a station in orbit around a random planet, and works out a safe ship spawn point that won't drop you inside a planet or the star.
+- `planet_generation.h++` is where a `SystemInfo` actually becomes a playable `World`: it builds the star, places planets in outward, non-overlapping orbital shells with a real circular-orbit starting velocity, optionally places a station in orbit around a random planet, and works out a spawn pose (`shipSpawnPose()`): a few kilometres out from the station, facing it with its host planet filling the view behind, or facing the innermost planet in systems with no station.
 
 The key idea holding this together is **determinism**: `generateGalaxy(seed)` always produces the same 1000 `SystemInfo` entries for the same seed, and `deriveSystemSeed(seed, systemIndex)` always produces the same per-system seed — so `SystemScene::enterSystem(217)` rebuilds the exact same system every single time you visit it, without anything needing to be saved to disk.
 
@@ -623,7 +670,7 @@ Each tick, `npc_ai::updateNpcShip()`:
 
 1. Advances a per-NPC state timer.
 2. While `Inactive`, waits out a randomized `wakeDelay` before respawning the NPC at a safe point via `respawnNpc()` (the "warp in").
-3. While `Roaming` or `HeadingToStation`, computes a steering direction, turns the ship toward it at a limited rate (`steerToward()`), holds a cruise throttle, and integrates physics (gravity included) through the same `integrateShipPhysics()` the player uses.
+3. While `Roaming` or `HeadingToStation`, computes a steering direction, turns the ship toward it at a limited rate (`steerToward()`), engages the cruise drive for any leg longer than 40,000 units (dropping out within 8,000 or at a mass-lock boundary), sets a throttle that tapers as the target gets close, and integrates physics (gravity included) through the same `integrateShipPhysics()` the player uses. Flight assist is on for NPCs too, which is why they now arrive where they aim instead of drifting past.
 4. On arrival at its target, rolls whether to head to the station, warp out, or pick a fresh roam waypoint.
 5. While `Docked` or `WarpingOut`, waits out a randomized duration before transitioning onward.
 
@@ -660,9 +707,9 @@ There's a second, free-flying camera controller in `include/tools/camera_control
 
 ## The Starfield
 
-The starfield lives in `include/world/starfield.h++`. It doesn't create infinite stars — it keeps a fixed pool (`starCount = 3000`) scattered randomly through a cubic volume (`radius = 30000.f`) centered somewhere in world space.
+The starfield lives in `include/world/starfield.h++`. It doesn't create infinite stars — it keeps a fixed pool (`starCount = 3000`) scattered randomly through a cubic volume (`radius = 90000.f`) kept centred on the camera.
 
-When the camera drifts far enough from that center (past `radius * recycleThreshold`), the whole pool re-scatters around the camera's new position. Individual stars that drift outside the volume between recenters are recycled one at a time instead. The illusion of endless space comes from recycling, not from actually simulating an endless field.
+Rather than re-scattering, the field wraps: a star that falls more than one field radius behind the camera on any axis reappears the same distance ahead on that axis. Nothing ever pops in view, so the field stays seamless even at cruise speed, and the stars streaming past are the main sense of how fast you're going.
 
 ## The Ship And Cube Renderers
 
@@ -703,6 +750,8 @@ The station renderer (`include/rendering/station_renderer.h++`) follows the same
 ## The Planet Renderer
 
 `include/rendering/planet_renderer.h++` draws each planet as a latitude/longitude wireframe grid plus a solid silhouette outline, optionally with a flattened elliptical ring. Bodies are projected, culled if off-screen or too small, then depth-sorted and drawn back-to-front together so overlapping bodies composite correctly without a depth buffer. Grid line brightness is shaded per-segment based on how directly that patch of the sphere faces the camera, which is what gives the far side of a planet its dimmer, more silhouette-like look.
+
+Stellar bodies get their own projection config in `main.cpp`, with a 10,000,000-unit far plane, because a system's planets sit far beyond the starfield-sized far plane that ships and stations use. A body's on-screen radius is its true angular size, `f × R / sqrt(d² − R²)` with `d` the distance to its centre. (The older `f × R / z` undersized planets badly once you got close, leaving the grid lines spilling past the outline.) Bodies smaller than two pixels are drawn as marker dots instead of being culled, so every planet in a system stays visible for navigation. Up close, the grid gets denser so a planet's curvature still reads when it fills the screen, and when you skim so low that the planet's centre is behind the camera, its grid is still drawn without the outline. Each planet's grid is batched into a single draw call.
 
 `main.cpp` calls `planetRenderer.drawSystem(window, world.star, world.planets, camera)`, which folds the star into the same sorted draw pass as the planets — but any body with `isStar == true` skips the wireframe grid entirely and is drawn as a simple filled white disc instead (`drawFilledStar()`), which is what actually makes a system's sun read as a sun rather than another wire sphere. A plain `draw(window, planets, camera)` overload still exists for drawing planets alone, without a star.
 
@@ -898,9 +947,10 @@ The HUD lives in `include/rendering/hud_renderer.h++` and deliberately avoids lo
 - A thrust bar, filled proportionally to current throttle.
 - A throttle percentage rendered as seven-segment-style digits built from rectangles.
 - A percent sign made from two dots and a diagonal line.
+- A white tick on the thrust bar showing actual speed on the same scale, so with flight assist on, the bar is where you're heading and the tick is where you've got to.
 - Cyan for forward thrust, red for reverse — driven by `ship.reverseThrust`.
 
-Since the HUD is screen-space, it never touches the `Projector` or `Camera` — it just draws directly in pixel coordinates against the render target's current size.
+`drawFlightMarkers()` adds two in-view markers: a boresight cross where the nose points, and a prograde ring where the ship is actually travelling (a red retrograde cross when moving backwards). Each is the projected vanishing point of its direction, `camera.position + direction × 1000`, so these two are the only HUD elements that use a `Projector`. `SystemScene` draws a speed readout above the panel with the menu font, along with flight-assist state and cruise/mass-lock status.
 
 ## Adding Your Own World Object
 
@@ -1120,7 +1170,7 @@ This is still intentionally small:
 - There's no real warp/travel scene yet — `[`/`]` system cycling in `SystemScene` is a placeholder, and `EnterSystem` always enters system 0 regardless of which system you were last in.
 - The economy layer computes prices per system but has no trading UI, no inventory, and no supply/demand — it's generated data with nowhere to spend it yet.
 - Only one station gets built per system even when `SystemInfo::stationCount` rolls higher, and there's no dedicated `Station` type — it's the same `Cube` used for the old test object, repurposed.
-- No fixed time-step accumulator; physics runs directly off frame `dt`.
+- No true fixed time-step accumulator; physics is split into sub-steps of at most 1/120 s, but their size still follows the frame time.
 - No real asset-management system beyond loading a font and an OBJ file at scene construction.
 - The HUD uses primitive shapes instead of text; the menu and the in-system label are the only places using the bundled Jersey 15 font.
 

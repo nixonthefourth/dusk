@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <SFML/Graphics.hpp>
 #include "rendering/station_renderer.h++"
@@ -35,8 +37,13 @@ int main() {
     ShipCameraRig shipCameraRig;
 
     const ProjectionConfig projectionConfig = {1.f, sceneManager.world().starfield.radius()};
+
+    // Stars and planets are hundreds of thousands of units away, far past the starfield-sized far
+    // plane that ships and stations use; they get their own, covering the whole system.
+    const ProjectionConfig bodyProjectionConfig = {1.f, 10000000.f};
+
     const StarRenderer starRenderer({sceneManager.world().starfield.radius(), 1.f, 4.f}, projectionConfig);
-    const PlanetRenderer planetRenderer(projectionConfig);
+    const PlanetRenderer planetRenderer(bodyProjectionConfig);
     const StationRenderer stationRenderer(projectionConfig);
     const ShipRenderer shipRenderer(projectionConfig);
     const HudRenderer hudRenderer;
@@ -70,7 +77,10 @@ int main() {
 
     // Main update loop
     while (window.isOpen()) {
-        float dt = clock.restart().asSeconds();
+        // A stalled frame (window drag, breakpoint, alt-tab) is capped rather than simulated in one
+        // enormous step that would fling the ship or the planets.
+        constexpr float maxFrameTime = 0.1f;
+        const float dt = std::min(clock.restart().asSeconds(), maxFrameTime);
 
         while (const auto event = window.pollEvent())
         {
@@ -96,7 +106,14 @@ int main() {
         if (sceneManager.activeScene().acceptsShipInput())
             updateShipFromKeyboard(world.playerShip, dt, shipInputState);
 
-        sceneManager.activeScene().updatePhysics(dt);
+        // Physics runs in sub-steps no longer than maxPhysicsStep, so integration and the flight
+        // computer behave the same whatever the frame rate.
+        constexpr float maxPhysicsStep = 1.f / 120.f;
+        const int physicsSteps = std::max(1, static_cast<int>(std::ceil(dt / maxPhysicsStep)));
+        const float physicsDt = dt / static_cast<float>(physicsSteps);
+
+        for (int step = 0; step < physicsSteps; ++step)
+            sceneManager.activeScene().updatePhysics(physicsDt);
         sceneManager.activeScene().updateCamera(camera, dt, shipCameraRig);
         sceneManager.activeScene().updateStreaming(camera);
         applySceneTransition(sceneManager.activeScene().consumeTransition());
@@ -119,7 +136,10 @@ int main() {
         }
 
         if (sceneManager.activeScene().showsHud())
+        {
+            hudRenderer.drawFlightMarkers(window, renderWorld.playerShip, camera);
             hudRenderer.draw(window, renderWorld.playerShip);
+        }
 
         sceneManager.activeScene().drawOverlay(window);
         window.display();

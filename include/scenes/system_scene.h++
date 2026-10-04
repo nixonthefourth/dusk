@@ -13,6 +13,7 @@
 #include "ui/menu_button.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <random>
@@ -29,12 +30,14 @@ public:
           font_("assets/fonts/Jersey15-Regular.ttf"),
           label_(font_, "", 28),
           statusText_(font_, "", 24),
+          flightText_(font_, "", 22),
           messageText_(font_, "", 30),
           menuTitle_(font_, "", 40),
           stayText_(font_, "STAY", 42),
           leaveText_(font_, "LEAVE", 42)
     {
         statusText_.setFillColor(sf::Color(110, 220, 255));
+        flightText_.setFillColor(sf::Color(110, 220, 255));
         messageText_.setFillColor(sf::Color::White);
         messageText_.setStyle(sf::Text::Bold);
         menuTitle_.setFillColor(sf::Color::White);
@@ -140,6 +143,7 @@ public:
     void drawOverlay(sf::RenderTarget& target) override
     {
         target.draw(label_);
+        drawFlightStatus(target);
         drawDockingStatus(target);
 
         if (stationMenuOpen_)
@@ -154,6 +158,7 @@ private:
     sf::Font font_;
     sf::Text label_;
     sf::Text statusText_;
+    sf::Text flightText_;
     sf::Text messageText_;
     sf::Text menuTitle_;
     sf::Text stayText_;
@@ -204,7 +209,7 @@ private:
         for (const Planet& planet : world_.planets)
             outerRadius = std::max(outerRadius, length(planet.position) + planet.radius);
 
-        world_.systemOuterRadius = outerRadius + 5000.f;
+        world_.systemOuterRadius = outerRadius + 60000.f;
 
         world_.npcShips.assign(static_cast<std::size_t>(info.npcShipCount), NpcShip{});
 
@@ -213,7 +218,7 @@ private:
         for (NpcShip& npc : world_.npcShips)
         {
             ObjLoadOptions npcOptions;
-            npcOptions.scale = 200.f;
+            npcOptions.scale = 100.f; // same scale as the player's banshee, so ship-to-world proportions agree
             npcOptions.rotationDegrees = {0.f, -90.f, -90.f};
             npcOptions.centerOnOrigin = true;
             npc.ship.loadObjModel("assets/objects/ships/banshee.obj", npcOptions);
@@ -223,10 +228,20 @@ private:
             npc.wakeDelay = initialStaggerDist(world_.npcRng);
         }
 
-        world_.playerShip.position = procgen::shipSpawnPosition(world_.star, world_.planets);
+        const procgen::SpawnPose spawn = procgen::shipSpawnPose(
+            world_.star,
+            world_.planets,
+            world_.stationActive,
+            world_.station.position,
+            world_.stationHostPlanetIndex
+        );
+
+        world_.playerShip.position = spawn.position;
+        world_.playerShip.previousPosition = spawn.position;
         world_.playerShip.velocity = {};
-        world_.playerShip.yaw = 0.f;
-        world_.playerShip.pitch = 0.f;
+        world_.playerShip.yaw = std::atan2(spawn.facing.x, spawn.facing.z);
+        world_.playerShip.pitch = std::asin(std::clamp(spawn.facing.y, -1.f, 1.f));
+        clampShipPitch(world_.playerShip);
         world_.playerShip.throttle = 0.f;
         world_.playerShip.reverseThrust = false;
 
@@ -352,6 +367,34 @@ private:
                 }
             }
         }
+    }
+
+    /** Speed readout and flight-mode flags, just above the throttle panel. */
+    void drawFlightStatus(sf::RenderTarget& target)
+    {
+        if (docking::controlsShip(docking_))
+            return;
+
+        const Ship& ship = world_.playerShip;
+        const int speed = static_cast<int>(std::round(shipSpeed(ship)));
+
+        std::string status = (ship.cruiseEngaged ? "CRUISE " : "SPEED ") + std::to_string(speed);
+        status += ship.flightAssist ? "   FA ON" : "   FA OFF";
+
+        if (ship.cruiseEngaged)
+            status += "   [J] DROP";
+        else if (shipMassLocked(ship))
+            status += "   MASS LOCKED";
+        else
+            status += "   [J] CRUISE";
+
+        flightText_.setString(status);
+        flightText_.setFillColor(ship.flightAssist ? sf::Color(110, 220, 255) : sf::Color(255, 190, 90));
+
+        const sf::FloatRect bounds = flightText_.getLocalBounds();
+        flightText_.setOrigin({bounds.position.x, bounds.position.y + bounds.size.y});
+        flightText_.setPosition({18.f, static_cast<float>(target.getSize().y) - 78.f});
+        target.draw(flightText_);
     }
 
     void drawDockingStatus(sf::RenderTarget& target)

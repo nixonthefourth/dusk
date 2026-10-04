@@ -6,10 +6,13 @@
 #define DUSK_HUD_RENDERER_H
 
 #include "objects/ship.h++"
+#include "rendering/projector.h++"
+#include "tools/camera.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
 #include <vector>
 
 /** Minimal ship HUD drawn with primitive rectangles and lines. */
@@ -31,12 +34,82 @@ public:
         drawRect(target, {x + 12.f, y + 24.f}, {72.f * thrust, 5.f}, accent);
         drawRect(target, {x + 91.f, y + 23.f}, {8.f, 8.f}, accent);
 
+        // Actual speed, on the same scale as the throttle demand: with flight assist on, the bar
+        // shows where the ship is heading and the tick shows where it has got to.
+        const float speedScale = ship.cruiseEngaged
+            ? ship.cruiseMaxSpeed
+            : ship.maxSpeed * (ship.reverseThrust ? ship.reverseSpeedFraction : 1.f);
+        const float speed01 = speedScale > 0.f ? std::clamp(length(ship.velocity) / speedScale, 0.f, 1.f) : 0.f;
+        drawRect(target, {x + 12.f + 72.f * speed01 - 1.f, y + 20.f}, {2.f, 13.f}, sf::Color::White);
+
         const int percent = static_cast<int>(std::round(thrust * 100.f));
         drawNumber(target, percent, {x + 12.f, y + 6.f}, accent);
         drawPercentSign(target, {x + 67.f, y + 8.f}, accent);
     }
 
+    /**
+     * Draws two flight markers in world-space directions: a boresight cross where the nose points,
+     * and a prograde ring where the ship is actually travelling (or a retrograde cross when moving
+     * backwards). Putting the ring on the target is how you fly straight at it; when the two
+     * markers sit on top of each other, the ship is moving exactly where it is aimed.
+     */
+    void drawFlightMarkers(sf::RenderTarget& target, const Ship& ship, const Camera& camera) const
+    {
+        const sf::Vector2u size = target.getSize();
+        const Viewport viewport = {static_cast<float>(size.x), static_cast<float>(size.y)};
+        const sf::Color markerColor(110, 220, 255, 220);
+
+        // A direction's vanishing point is where a point far along it, from the camera, projects.
+        const auto directionOnScreen = [&](const Vec3& direction) -> std::optional<sf::Vector2f>
+        {
+            const auto projected = projector_.project(camera.position + direction * 1000.f, camera, viewport);
+
+            if (!projected)
+                return std::nullopt;
+
+            return sf::Vector2f{projected->position.x, projected->position.y};
+        };
+
+        if (const auto nose = directionOnScreen(shipForward(ship)))
+        {
+            drawLine(target, {nose->x - 9.f, nose->y}, {nose->x - 3.f, nose->y}, markerColor);
+            drawLine(target, {nose->x + 3.f, nose->y}, {nose->x + 9.f, nose->y}, markerColor);
+            drawLine(target, {nose->x, nose->y - 9.f}, {nose->x, nose->y - 3.f}, markerColor);
+            drawLine(target, {nose->x, nose->y + 3.f}, {nose->x, nose->y + 9.f}, markerColor);
+        }
+
+        const float speed = length(ship.velocity);
+
+        if (speed < 5.f)
+            return;
+
+        const Vec3 travel = ship.velocity / speed;
+
+        if (const auto prograde = directionOnScreen(travel))
+        {
+            sf::CircleShape ring(6.f, 20);
+            ring.setOrigin({6.f, 6.f});
+            ring.setPosition(*prograde);
+            ring.setFillColor(sf::Color::Transparent);
+            ring.setOutlineColor(markerColor);
+            ring.setOutlineThickness(1.5f);
+            target.draw(ring);
+
+            drawLine(target, {prograde->x - 13.f, prograde->y}, {prograde->x - 7.f, prograde->y}, markerColor);
+            drawLine(target, {prograde->x + 7.f, prograde->y}, {prograde->x + 13.f, prograde->y}, markerColor);
+            drawLine(target, {prograde->x, prograde->y - 13.f}, {prograde->x, prograde->y - 7.f}, markerColor);
+        }
+        else if (const auto retrograde = directionOnScreen(travel * -1.f))
+        {
+            const sf::Color retroColor(240, 90, 90, 220);
+            drawLine(target, {retrograde->x - 6.f, retrograde->y - 6.f}, {retrograde->x + 6.f, retrograde->y + 6.f}, retroColor);
+            drawLine(target, {retrograde->x - 6.f, retrograde->y + 6.f}, {retrograde->x + 6.f, retrograde->y - 6.f}, retroColor);
+        }
+    }
+
 private:
+    Projector projector_;
+
     static constexpr std::array<unsigned char, 10> digitMasks =
     {
         0x3F, 0x06, 0x5B, 0x4F, 0x66,

@@ -66,8 +66,12 @@ constexpr float pi = 3.14159265358979323846f;
 /** Distance in front of the slot where the ship lines up before entering. */
 constexpr float approachDistance = 1600.f;
 
-/** Top speed relative to the station while approaching, in world units per second. */
-constexpr float maxApproachSpeed = 3000.f;
+/**
+ * Top speed relative to the station while approaching, in world units per second. Systems are
+ * now hundreds of thousands of units across, so the far leg runs at cruise-like speed; distance,
+ * surface clearance and the station's own motion still throttle it right down near the end.
+ */
+constexpr float maxApproachSpeed = 20000.f;
 
 /** Approach speed per unit of remaining distance; gives a smooth slowdown on arrival. */
 constexpr float approachSpeedGain = 0.9f;
@@ -442,6 +446,12 @@ inline void releaseControl(DockingComputer& computer, Ship& ship, const Vec3& ve
     ship.reverseThrust = false;
     ship.roll = 0.f;
     clampShipPitch(ship);
+    resetShipRotationState(ship);
+
+    // With flight assist on, keep the speed the computer handed over instead of braking to a stop.
+    if (ship.flightAssist)
+        matchThrottleToVelocity(ship);
+
     setPhase(computer, DockingPhase::Idle);
 }
 
@@ -471,6 +481,7 @@ inline void update(DockingComputer& computer, World& world, float dt)
         return;
 
     Ship& ship = world.playerShip;
+    disengageCruise(ship);
     ship.previousPosition = ship.position;
     ship.throttle = 0.f;
     ship.reverseThrust = false;

@@ -15,7 +15,6 @@
 struct StarfieldConfig {
     int starCount = 3000;
     float radius = 90000.f; // was 30000.f
-    float recycleThreshold = 0.5f;
 };
 
 /** Maintains an endless-looking starfield without allocating millions of stars. */
@@ -31,28 +30,30 @@ public:
             stars_.push_back({randomPositionAround(center_)});
     }
 
-    /** Recenters and recycles the star pool around the camera when needed. */
+    /**
+     * Keeps the star volume centred on the camera by wrapping: a star that falls more than one
+     * field radius behind on any axis reappears the same distance ahead on that axis. Nothing is
+     * ever re-scattered in view, so the field stays seamless even at cruise speed, and stars keep
+     * streaming past to show how fast the ship is going.
+     */
     void update(const Vec3& cameraPosition)
     {
-        const Vec3 cameraOffset = cameraPosition - center_;
-        const float triggerDistance = config_.radius * config_.recycleThreshold;
+        center_ = cameraPosition;
+        const float span = config_.radius * 2.f;
 
-        if (std::abs(cameraOffset.x) > triggerDistance ||
-            std::abs(cameraOffset.y) > triggerDistance ||
-            std::abs(cameraOffset.z) > triggerDistance)
+        const auto wrapAxis = [&](float& value, float centre)
         {
-            center_ = cameraPosition;
+            const float offset = value - centre;
 
-            for (Star& star : stars_)
-                star.position = randomPositionAround(center_);
-
-            return;
-        }
+            if (offset > config_.radius || offset < -config_.radius)
+                value -= span * std::floor((offset + config_.radius) / span);
+        };
 
         for (Star& star : stars_)
         {
-            if (isOutsideField(star.position, center_))
-                star.position = randomPositionAround(center_);
+            wrapAxis(star.position.x, center_.x);
+            wrapAxis(star.position.y, center_.y);
+            wrapAxis(star.position.z, center_.z);
         }
     }
 
@@ -90,15 +91,6 @@ private:
             center.y + randomOffset(),
             center.z + randomOffset()
         };
-    }
-
-    /** Checks whether a star has drifted outside the current recycled volume. */
-    bool isOutsideField(const Vec3& position, const Vec3& center) const
-    {
-        return
-            std::abs(position.x - center.x) > config_.radius ||
-            std::abs(position.y - center.y) > config_.radius ||
-            std::abs(position.z - center.z) > config_.radius;
     }
 
 };

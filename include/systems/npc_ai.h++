@@ -20,9 +20,20 @@ namespace npc_ai {
 
 constexpr float pi = 3.14159265358979323846f;
 
+/** Throttle NPCs hold; with flight assist this is a speed demand (fraction of maxSpeed, or of cruiseMaxSpeed). */
 constexpr float cruiseThrottle = 0.45f;
 constexpr float turnRate = 0.6f; // radians per second
 constexpr float arrivalRadius = 900.f;
+
+/** NPCs use the cruise drive for any leg longer than this, and drop out once they get this close. */
+constexpr float cruiseEngageDistance = 40000.f;
+constexpr float cruiseDropDistance = 8000.f;
+
+/** In cruise, NPCs aim for this many units per second for every unit of remaining distance, so they arrive rather than overshoot. */
+constexpr float cruiseArrivalGain = 0.5f;
+
+/** Within this distance of the target, normal-space throttle tapers off so the NPC lands inside the arrival radius. */
+constexpr float slowdownDistance = 6000.f;
 
 constexpr float minWarpOutDuration = 6.f;
 constexpr float maxWarpOutDuration = 18.f;
@@ -97,7 +108,8 @@ inline Vec3 desiredDirection(
     {
         const Vec3 offset = position - body.position;
         const float distance = length(offset);
-        const float safeDistance = body.radius * 2.5f;
+        // Scaled for large bodies: a giant's avoidance zone shouldn't swallow half its orbit.
+        const float safeDistance = body.radius * 1.5f + 6000.f;
 
         if (distance < safeDistance && distance > 0.f)
         {
@@ -144,6 +156,7 @@ inline void respawnNpc(
     npc.ship.velocity = {};
     npc.ship.throttle = cruiseThrottle;
     npc.ship.reverseThrust = false;
+    npc.ship.cruiseEngaged = false;
 
     npc.roamTarget = pickSafeSystemPoint(rng, star, planets, star.radius * 3.f, systemOuterRadius);
     npc.state = NpcState::Roaming;
@@ -204,7 +217,25 @@ inline void updateNpcShip(
     const Vec3 direction = desiredDirection(npc.ship.position, target, star, planets);
 
     steerToward(npc.ship, direction, dt);
-    npc.ship.throttle = cruiseThrottle;
+
+    // Long legs go by cruise drive; the physics step drops it automatically inside mass-lock zones.
+    const float distanceAhead = length(target - npc.ship.position);
+
+    if (!npc.ship.cruiseEngaged && distanceAhead > cruiseEngageDistance)
+        engageCruise(npc.ship);
+    else if (npc.ship.cruiseEngaged && distanceAhead < cruiseDropDistance)
+        disengageCruise(npc.ship);
+
+    if (npc.ship.cruiseEngaged)
+    {
+        const float arrivalThrottle = distanceAhead * cruiseArrivalGain / npc.ship.cruiseMaxSpeed;
+        npc.ship.throttle = std::min(cruiseThrottle, arrivalThrottle);
+    }
+    else
+    {
+        const float taper = std::clamp(distanceAhead / slowdownDistance, 0.25f, 1.f);
+        npc.ship.throttle = cruiseThrottle * taper;
+    }
 
     integrateShipPhysics(npc.ship, dt, gravity);
 

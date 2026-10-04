@@ -65,12 +65,92 @@ inline Vec3 gravityOnShip(const World& world)
     return gravityAt(world, world.playerShip.position);
 }
 
+/** Mass-lock zone around a planet or star: this fraction of its radius, plus a fixed pad, above the surface. */
+constexpr float massLockRadiusFraction = 0.5f;
+constexpr float massLockPadding = 5000.f;
+
+/** Mass-lock radius around the station, measured from its centre. */
+constexpr float stationMassLockRadius = 12000.f;
+
+/**
+ * Distance from `position` to the nearest mass-lock boundary (star, planets, station). Positive
+ * means clear of every zone; zero or negative means mass-locked. This also sets how fast cruise
+ * may go, so ships slow down smoothly on approach instead of slamming into the boundary.
+ */
+inline float cruiseMarginAt(const World& world, const Vec3& position)
+{
+    float margin = 1e30f;
+
+    const auto checkBody = [&](const Planet& body)
+    {
+        if (body.radius <= 0.f)
+            return;
+
+        const float lockRadius = body.radius * (1.f + massLockRadiusFraction) + massLockPadding;
+        margin = std::min(margin, length(position - body.position) - lockRadius);
+    };
+
+    if (world.star.isStar)
+        checkBody(world.star);
+
+    for (const Planet& planet : world.planets)
+        checkBody(planet);
+
+    if (world.stationActive)
+        margin = std::min(margin, length(position - world.station.position) - stationMassLockRadius);
+
+    return margin;
+}
+
+/**
+ * Keeps a ship on the outside of planets and the star: if it has sunk into one, it is moved back
+ * to the surface and loses the part of its velocity (relative to the body) that points inward.
+ * Collision hits are still only recorded by updateWorldCollisions(); this is the minimal response
+ * that stops the ship flying through a world it should be skimming.
+ */
+inline void resolveShipBodyContact(Ship& ship, const World& world)
+{
+    const auto resolve = [&](const Planet& body)
+    {
+        if (body.radius <= 0.f)
+            return;
+
+        const Vec3 offset = ship.position - body.position;
+        const float distance = length(offset);
+        const float contactDistance = body.radius + ship.collisionRadius;
+
+        if (distance >= contactDistance)
+            return;
+
+        const Vec3 normal = distance > 0.f ? offset / distance : Vec3{0.f, 1.f, 0.f};
+        ship.position = body.position + normal * contactDistance;
+
+        const Vec3 relativeVelocity = ship.velocity - body.velocity;
+        const float inwardSpeed = dot(relativeVelocity, normal);
+
+        if (inwardSpeed < 0.f)
+            ship.velocity -= normal * inwardSpeed;
+
+        if (ship.cruiseEngaged)
+            disengageCruise(ship);
+    };
+
+    // The default-constructed World carries a placeholder star (the menu scene uses it as a
+    // backdrop around the ship); only a generated star is a solid body.
+    if (world.star.isStar)
+        resolve(world.star);
+
+    for (const Planet& planet : world.planets)
+        resolve(planet);
+}
+
 /** Advances every NPC's simple-reflex behaviour and physics for one frame. */
 inline void updateNpcShips(World& world, float dt)
 {
     for (NpcShip& npc : world.npcShips)
     {
         const Vec3 gravity = gravityAt(world, npc.ship.position);
+        npc.ship.cruiseMargin = cruiseMarginAt(world, npc.ship.position);
 
         npc_ai::updateNpcShip(
             npc,
@@ -83,6 +163,9 @@ inline void updateNpcShips(World& world, float dt)
             world.systemOuterRadius,
             gravity
         );
+
+        if (npc.isVisible())
+            resolveShipBodyContact(npc.ship, world);
     }
 }
 
@@ -315,10 +398,14 @@ inline void updateWorldCollisions(World& world)
 /** Advances world objects that have physics or animation. Autopilots can take over the player ship. */
 inline void updateWorldPhysics(World& world, float dt, bool integratePlayerShip = true)
 {
+    // Refreshed even under autopilot, so the HUD always knows whether cruise is available.
+    world.playerShip.cruiseMargin = cruiseMarginAt(world, world.playerShip.position);
+
     if (integratePlayerShip)
     {
         const Vec3 shipGravity = gravityOnShip(world);
         integrateShipPhysics(world.playerShip, dt, shipGravity);
+        resolveShipBodyContact(world.playerShip, world);
     }
 
     orbital::integrateOrbitalPhysics(world.planets, world.star.position, world.star.mass, dt);
