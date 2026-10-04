@@ -19,6 +19,7 @@ namespace orbital {
     /** Softening distance so acceleration doesn't spike toward infinity at very close range. */
     constexpr float minDistance = 250.f;
 
+
     /** Returns the acceleration exerted on a point at `from`, by a mass `towardMass` at `toward`. */
     inline Vec3 gravitationalAcceleration(const Vec3& from, const Vec3& toward, float towardMass)
     {
