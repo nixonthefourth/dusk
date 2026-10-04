@@ -625,7 +625,7 @@ Masses are set in `planet_generation.h++`. A star's mass is `750 × radius`, whi
 
 Procedural generation lives in `include/procgen/`, split across three files with very different jobs:
 
-- `statistical.h++` generates the cheap, "on-paper" facts about a system — a pronounceable procedural name, an `EconomyTier` (Poor/Developing/Progressive, weighted toward Poor), a dominant occupation, 2–4 goods it best sells, and rolled counts for planets, stations, and NPC ships. All of this is packed into a `SystemInfo` and is cheap enough to generate and hold 1000 of at once, up front.
+- `statistical.h++` generates the cheap, "on-paper" facts about a system — a pronounceable procedural name, an `EconomyTier` (Poor/Developing/Progressive, weighted toward Poor), a dominant occupation, 2–4 goods it best sells, and rolled counts for planets, stations, and NPC ships. NPC counts are then scaled by `npcTrafficMultiplier` (currently 1.05, i.e. 5% more traffic); because counts are small whole numbers, the fractional ship is settled by a dice roll drawn after every other roll, so the galaxy-wide average rises by exactly that factor without changing anything else about any system. All of this is packed into a `SystemInfo` and is cheap enough to generate and hold 1000 of at once, up front.
 - `galaxy.h++` derives a stable per-system seed from one galaxy seed plus a system index (`deriveSystemSeed()`), and calls `generateSystemInfo()` for every system to build the full `Galaxy` roster.
 - `planet_generation.h++` is where a `SystemInfo` actually becomes a playable `World`: it builds the star, places planets in outward, non-overlapping orbital shells with a real circular-orbit starting velocity, optionally places a station in orbit around a random planet, and works out a spawn pose (`shipSpawnPose()`): a few kilometres out from the station, facing it with its host planet filling the view behind, or facing the innermost planet in systems with no station.
 
@@ -713,9 +713,17 @@ updateShipCamera(camera, world.playerShip, dt, shipCameraRig);
 
 Normal ("chase") mode:
 
-- Camera sits behind the ship along `-shipForward`.
-- Camera sits above the ship along world up.
-- Camera looks at a point ahead of the ship.
+- The camera rides in the ship's own frame: 470 units behind along `-shipForward` and 190 above along the ship's (unrolled) up axis. It looks along the nose, tilted down by `lookDownDegrees = 15`. Because it pitches with the ship, the ship holds the same place on screen whether you're flying level, climbing or diving. It sits just below the middle of the view, above the HUD dashboard, rather than half-hidden behind it.
+- The camera hangs on a damped spring driven by the ship's acceleration, as a loosely mounted camera would be. The ship's acceleration, measured from frame to frame and taken in ship-local axes, acts on the camera as an opposite pseudo-force: throttle up and it falls back, brake and it surges in, carve a turn and it swings out, and then it bounces back to rest. Stretch and compression slide the camera along its boom (the line from the ship to the rest position), so the viewing angle never changes; only the ship's apparent size does. Sideways and vertical sway are added on top.
+- Tuning lives in `ShipCameraSettings`:
+  - `springFrequency` (3.2 rad/s) sets stiffness.
+  - `springDamping` (0.45; below 1 bounces, 1 settles without overshoot) sets how springy it feels.
+  - `accelerationGain` sets how far a given acceleration moves the camera (about 100 units back at full main-engine thrust).
+  - `maxStretch`, `maxCompress` and `maxSway` limit the travel.
+  - The driving force is soft-limited (`tanh`), so even cruise spool-up settles inside the limits.
+  - Driving acceleration is capped at `maxDrivingAcceleration`, so a jump or a cruise drop gives a lurch rather than a teleport.
+  - The spring is sub-stepped at 1/120 s, so it feels the same at any frame rate.
+- The spring's state lives in `ShipCameraRig`, which `main.cpp` resets on every scene transition.
 
 Showcase mode (hold `Arrow Up`):
 

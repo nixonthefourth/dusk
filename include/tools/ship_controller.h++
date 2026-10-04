@@ -12,16 +12,52 @@
 #include <algorithm>
 #include <cmath>
 
-/** Third-person camera offset relative to the ship. */
+/**
+ * Chase-camera framing and spring tuning.
+ *
+ * The camera rides in the ship's own frame (it pitches with the ship, so the ship holds the same
+ * place on screen at any attitude) and sits on a damped spring. The spring is driven by the
+ * ship's acceleration, exactly as a loosely mounted camera would be: throttle up and it falls
+ * back, brake and it surges in, carve a turn and it swings out, then it bounces back to rest.
+ */
 struct ShipCameraSettings {
-    /** Distance behind the ship along its local forward axis. */
-    float followDistance = 500.f;
+    /** Rest distance behind the ship along its forward axis. */
+    float followDistance = 470.f;
 
-    /** Height above the ship in world space, keeping the view upright. */
-    float followHeight = 500.f;
+    /** Rest height above the ship, along the ship's (unrolled) up axis. */
+    float followHeight = 190.f;
 
-    /** Point ahead of the ship that the camera looks toward. */
-    float lookAhead = 700.f;
+    /**
+     * How far the camera looks down relative to the ship's nose, in degrees. Together with the
+     * distance and height this puts the ship just below the middle of the view above the HUD
+     * dashboard, rather than half-hidden behind it.
+     */
+    float lookDownDegrees = 15.f;
+
+    /** Spring natural frequency in radians per second: higher is stiffer and quicker to settle. */
+    float springFrequency = 3.2f;
+
+    /** Damping ratio: 1 settles without overshoot; below 1 bounces. 0.45 gives one or two soft bounces. */
+    float springDamping = 0.7f;
+
+    /**
+     * Offset acceleration per unit of ship acceleration. At the spring's stiffness this moves the
+     * camera about 100 units back at full main-engine thrust (70 u/s^2).
+     */
+    float accelerationGain = 14.f;
+
+    /**
+     * Furthest the camera may stretch back from, or compress toward, its rest distance (measured
+     * along the forward axis; the whole boom scales, so the viewing angle never changes).
+     */
+    float maxStretch = 420.f;
+    float maxCompress = 120.f;
+
+    /** Furthest the camera may sway sideways or vertically from rest. */
+    float maxSway = 150.f;
+
+    /** Ship acceleration is capped at this before driving the spring, so jumps and cruise drops give a lurch, not a teleport. */
+    float maxDrivingAcceleration = 20000.f;
 
     /** Distance used by the showcase orbit camera. */
     float showcaseDistance = 1400.f;
@@ -37,6 +73,18 @@ struct ShipCameraSettings {
 struct ShipCameraRig {
     /** Current orbit angle for the showcase camera. */
     float showcaseAngle = 0.f;
+
+    /** Spring displacement from the rest offset, in ship-local axes (x right, y up, z forward). */
+    Vec3 springOffset;
+
+    /** Rate of change of springOffset. */
+    Vec3 springVelocity;
+
+    /** Ship velocity on the previous camera update, for measuring acceleration. */
+    Vec3 previousShipVelocity;
+
+    /** False until the first update, so the camera doesn't start with a lurch. */
+    bool primed = false;
 };
 
 /** Tracks edge-triggered ship input such as reverse-thrust, flight-assist and cruise toggling. */
@@ -140,23 +188,127 @@ inline void pointCameraAt(Camera& camera, const Vec3& target)
     camera.roll = 0.f;
 }
 
-/** Places the camera slightly above and behind the ship, looking forward over it. */
+/** Soft limit: passes small values through unchanged and eases large ones toward +/- limit. */
+inline float softLimit(float value, float limit)
+{
+    return limit > 0.f ? limit * std::tanh(value / limit) : 0.f;
+}
+
+/**
+ * Advances the camera spring by one frame. The ship's acceleration, seen from the ship, acts on
+ * the camera as an opposite pseudo-force; the spring pulls it back to rest and the damper bleeds
+ * off the bounce. The pseudo-force is soft-limited so that even cruise-drive accelerations settle
+ * inside the stretch limits, and integration is sub-stepped so it behaves the same at any frame rate.
+ */
+inline void updateCameraSpring(const Ship& ship, float dt, ShipCameraRig& rig, const ShipCameraSettings& settings)
+{
+    if (!rig.primed)
+    {
+        rig.previousShipVelocity = ship.velocity;
+        rig.springOffset = {};
+        rig.springVelocity = {};
+        rig.primed = true;
+        return;
+    }
+
+    if (dt <= 0.f)
+        return;
+
+    Vec3 acceleration = (ship.velocity - rig.previousShipVelocity) / dt;
+    rig.previousShipVelocity = ship.velocity;
+
+    const float accelerationMagnitude = length(acceleration);
+
+    if (accelerationMagnitude > settings.maxDrivingAcceleration)
+        acceleration = acceleration * (settings.maxDrivingAcceleration / accelerationMagnitude);
+
+    // Ship-local acceleration, using the unrolled axes so the docking computer's roll doesn't
+    // swing the camera around the ship.
+    const Vec3 right = shipUnrolledRight(ship);
+    const Vec3 up = shipUnrolledUp(ship);
+    const Vec3 forward = shipForward(ship);
+    const Vec3 local = {dot(acceleration, right), dot(acceleration, up), dot(acceleration, forward)};
+
+    const float stiffness = settings.springFrequency * settings.springFrequency;
+    const float damping = 2.f * settings.springDamping * settings.springFrequency;
+
+    // A camera that lags behind an accelerating ship drifts the opposite way: forward thrust
+    // pushes it back (negative z), braking pushes it in. Limits are expressed as spring force so
+    // the resting displacement can never exceed them.
+    const Vec3 push =
+    {
+        softLimit(-local.x * settings.accelerationGain, stiffness * settings.maxSway),
+        softLimit(-local.y * settings.accelerationGain, stiffness * settings.maxSway),
+        -local.z * settings.accelerationGain < 0.f
+            ? softLimit(-local.z * settings.accelerationGain, stiffness * settings.maxStretch)
+            : softLimit(-local.z * settings.accelerationGain, stiffness * settings.maxCompress)
+    };
+
+    constexpr float maxStep = 1.f / 120.f;
+    const int steps = std::max(1, static_cast<int>(std::ceil(dt / maxStep)));
+    const float step = dt / static_cast<float>(steps);
+
+    for (int i = 0; i < steps; ++i)
+    {
+        const Vec3 springAcceleration = push - rig.springOffset * stiffness - rig.springVelocity * damping;
+        rig.springVelocity += springAcceleration * step;
+        rig.springOffset += rig.springVelocity * step;
+    }
+
+    // Hard stops as a backstop (a bounce can overshoot the soft limits); hitting one kills the
+    // velocity into it rather than letting the camera stick there.
+    const auto stop = [](float& offset, float& velocity, float low, float high)
+    {
+        if (offset < low) { offset = low; velocity = std::max(0.f, velocity); }
+        if (offset > high) { offset = high; velocity = std::min(0.f, velocity); }
+    };
+
+    stop(rig.springOffset.x, rig.springVelocity.x, -settings.maxSway, settings.maxSway);
+    stop(rig.springOffset.y, rig.springVelocity.y, -settings.maxSway, settings.maxSway);
+    stop(rig.springOffset.z, rig.springVelocity.z, -settings.maxStretch, settings.maxCompress);
+}
+
+/**
+ * Chase camera: behind and above the ship in the ship's own frame, displaced by the spring, and
+ * looking along the nose tilted down by lookDownDegrees. Because the camera pitches with the
+ * ship, the ship keeps its place on screen whether flying level, climbing or diving.
+ */
 inline void updateCameraToFollowShip(
     Camera& camera,
     const Ship& ship,
+    float dt,
+    ShipCameraRig& rig,
     const ShipCameraSettings& settings = {}
 )
 {
+    updateCameraSpring(ship, dt, rig, settings);
+
+    const Vec3 right = shipUnrolledRight(ship);
+    const Vec3 up = shipUnrolledUp(ship);
     const Vec3 forward = shipForward(ship);
-    const Vec3 worldUp = {0.f, 1.f, 0.f};
-    const Vec3 target = ship.position + forward * settings.lookAhead;
 
-    camera.position =
-        ship.position -
-        forward * settings.followDistance +
-        worldUp * settings.followHeight;
+    // Stretch and compression slide the camera along its boom (the line from the ship to the
+    // rest position), so the ship stays put on screen and only its apparent size changes. Sway
+    // is added on top, in the ship's right/up axes.
+    const float boomScale = settings.followDistance > 0.f
+        ? std::max(0.1f, (settings.followDistance - rig.springOffset.z) / settings.followDistance)
+        : 1.f;
 
-    pointCameraAt(camera, target);
+    const Vec3 offset =
+    {
+        rig.springOffset.x,
+        settings.followHeight * boomScale + rig.springOffset.y,
+        -settings.followDistance * boomScale
+    };
+
+    camera.position = ship.position + right * offset.x + up * offset.y + forward * offset.z;
+
+    constexpr float degreesToRadians = 3.14159265358979323846f / 180.f;
+    constexpr float maxCameraPitch = 1.5f;
+
+    camera.yaw = ship.yaw;
+    camera.pitch = std::clamp(ship.pitch - settings.lookDownDegrees * degreesToRadians, -maxCameraPitch, maxCameraPitch);
+    camera.roll = 0.f;
 }
 
 /** Orbits the camera around the ship to show off its wireframe model. */
@@ -194,11 +346,14 @@ inline void updateShipCamera(
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Up))
     {
         updateCameraToShowcaseShip(camera, ship, dt, rig, settings);
+
+        // Keep the spring's velocity history current, so letting go of Up doesn't cause a lurch.
+        rig.previousShipVelocity = ship.velocity;
         return;
     }
 
     rig.showcaseAngle = ship.yaw;
-    updateCameraToFollowShip(camera, ship, settings);
+    updateCameraToFollowShip(camera, ship, dt, rig, settings);
 }
 
 #endif //DUSK_SHIP_CONTROLLER_H

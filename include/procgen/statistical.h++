@@ -8,6 +8,7 @@
 #include "math/Vec2.h++"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <random>
 #include <string>
@@ -204,6 +205,22 @@ inline int generateNpcShipCount(std::mt19937& rng, EconomyTier economyTier)
 /* Top-level generation */
 
 /** Pure function: the same seed always produces the same SystemInfo. */
+/**
+ * Galaxy-wide multiplier on NPC traffic. Counts are small whole numbers, so the fractional part
+ * of each scaled count is settled by a dice roll: on average, systems carry exactly this many
+ * times as many ships as the base rolls give.
+ */
+constexpr float npcTrafficMultiplier = 1.2f;
+
+/** Scales a base ship count by npcTrafficMultiplier, rolling for the fractional ship. */
+inline int scaleNpcTraffic(std::mt19937& rng, int baseCount)
+{
+    const float scaled = static_cast<float>(baseCount) * npcTrafficMultiplier;
+    const float whole = std::floor(scaled);
+    std::uniform_real_distribution<float> unit(0.f, 1.f);
+    return static_cast<int>(whole) + (unit(rng) < scaled - whole ? 1 : 0);
+}
+
 inline SystemInfo generateSystemInfo(std::uint32_t systemSeed)
 {
     std::mt19937 rng(systemSeed);
@@ -216,6 +233,9 @@ inline SystemInfo generateSystemInfo(std::uint32_t systemSeed)
     info.goods = generateGoods(rng, info.occupation);
     info.planetCount = generatePlanetCount(rng);
     info.stationCount = generateStationCount(rng, info.economyTier);
+
+    // Drawn after every other roll, so names, economies, planets and stations are unchanged.
+    info.npcShipCount = scaleNpcTraffic(rng, info.npcShipCount);
 
     return info;
 }
