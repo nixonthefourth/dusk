@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <random>
 
 /** What kind of object the player has locked as a target. Only the station can be targeted for now. */
 enum class TargetType { None, Station };
@@ -60,11 +61,25 @@ struct World {
     /** What the player has targeted, shown on the scanner, compass and in-view brackets. */
     TargetLock target;
 
-    /** Asteroid belts in this system. Rocks are streamed from each belt's seed on demand. */
+    /** Asteroid belts in this system: the star's belts, then planets' debris belts. Rocks are streamed on demand. */
     std::vector<AsteroidBelt> asteroidBelts;
 
-    /** Seconds of simulated time in this system; drives cosmetic motion such as tumbling rocks. */
-    float elapsedTime = 0.f;
+    /** Lone rocks drifting through space near the player, spawned and recycled as you fly. */
+    std::vector<Asteroid> driftingAsteroids;
+
+    /** Shape templates for the drifting rocks: coarse ones first, then fine ones for boulders. */
+    std::vector<AsteroidShape> looseRockShapes;
+    int looseCoarseShapeCount = 0;
+
+    /** Randomness for drifting-rock spawns (cosmetic, so not tied to the system seed). */
+    std::mt19937 driftRng{0x5EEDu};
+
+    /**
+     * Seconds of simulated time in this system; drives belt orbits and tumbling rocks. A double,
+     * because belt angles are recomputed from it every step and a float would start to step
+     * visibly after a few hours.
+     */
+    double elapsedTime = 0.0;
 };
 
 
@@ -175,9 +190,34 @@ inline bool insideAsteroidBelt(const World& world, const Vec3& position)
 }
 
 /**
- * Keeps a ship outside every asteroid near it: like resolveShipBodyContact(), it is pushed back
- * to the rock's surface, loses the velocity pointing into it, and drops out of cruise. Only rocks
- * within reach are generated, and only when the ship is near a belt at all, so this is cheap.
+ * Pushes a ship out of one rock and removes the part of its velocity, relative to the rock, that
+ * points into it, so a moving rock shoves the ship along rather than passing through it. Rocks are
+ * treated as far heavier than the ship. Contact drops the ship out of cruise.
+ */
+inline void resolveShipRockContact(Ship& ship, const Asteroid& rock)
+{
+    const Vec3 offset = ship.position - rock.position;
+    const float distance = length(offset);
+    const float contactDistance = rock.collisionRadius() + ship.collisionRadius;
+
+    if (distance >= contactDistance)
+        return;
+
+    const Vec3 normal = distance > 0.f ? offset / distance : Vec3{0.f, 1.f, 0.f};
+    ship.position = rock.position + normal * contactDistance;
+
+    const float inwardSpeed = dot(ship.velocity - rock.velocity, normal);
+
+    if (inwardSpeed < 0.f)
+        ship.velocity -= normal * inwardSpeed;
+
+    if (ship.cruiseEngaged)
+        disengageCruise(ship);
+}
+
+/**
+ * Keeps a ship outside every asteroid near it, belt rocks and drifting rocks alike. Belt rocks are
+ * only generated within reach, and only when the ship is near a belt at all, so this is cheap.
  */
 inline void resolveShipAsteroidContact(Ship& ship, const World& world)
 {
@@ -187,26 +227,183 @@ inline void resolveShipAsteroidContact(Ship& ship, const World& world)
     {
         procgen::forEachAsteroidNear(belt, ship.position, reach, [&](const Asteroid& rock)
         {
-            const Vec3 offset = ship.position - rock.position;
-            const float distance = length(offset);
-            const float contactDistance = rock.collisionRadius() + ship.collisionRadius;
-
-            if (distance >= contactDistance)
-                return;
-
-            const Vec3 normal = distance > 0.f ? offset / distance : Vec3{0.f, 1.f, 0.f};
-            ship.position = rock.position + normal * contactDistance;
-
-            const float inwardSpeed = dot(ship.velocity, normal);
-
-            if (inwardSpeed < 0.f)
-                ship.velocity -= normal * inwardSpeed;
-
-            if (ship.cruiseEngaged)
-                disengageCruise(ship);
+            resolveShipRockContact(ship, rock);
         });
     }
+
+    for (const Asteroid& rock : world.driftingAsteroids)
+    {
+        if (length(rock.position - ship.position) < reach)
+            resolveShipRockContact(ship, rock);
+    }
 }
+
+/** Moves each belt's centre to its star or host planet and turns it to its current orbital angle. */
+inline void updateAsteroidBelts(World& world)
+{
+    constexpr double fullTurn = 6.283185307179586;
+
+    for (AsteroidBelt& belt : world.asteroidBelts)
+    {
+        const bool onPlanet =
+            belt.hostPlanetIndex >= 0 &&
+            static_cast<std::size_t>(belt.hostPlanetIndex) < world.planets.size();
+
+        const Planet& host = onPlanet ? world.planets[static_cast<std::size_t>(belt.hostPlanetIndex)] : world.star;
+        belt.centre = host.position;
+        belt.centreVelocity = host.velocity;
+
+        // Recomputed from total elapsed time (not accumulated), so the angle never drifts.
+        belt.rotation = static_cast<float>(std::fmod(static_cast<double>(belt.angularSpeed) * world.elapsedTime, fullTurn));
+    }
+}
+
+/* ---- Drifting asteroids ------------------------------------------------------------------- */
+
+/** How many lone rocks drift around the player, and the shell they live in. */
+constexpr int driftingAsteroidCount = 40;
+constexpr float driftInitialMinDistance = 8000.f;
+constexpr float driftSpawnMinDistance = 33000.f; // just past the rock draw distance, so they fade in
+constexpr float driftSpawnMaxDistance = 50000.f;
+constexpr float driftRecycleDistance = 56000.f;
+
+/** True if a rock of this radius could sit at `position` without being inside a body, a belt or the station. */
+inline bool driftSpawnIsClear(const World& world, const Vec3& position, float radius)
+{
+    const auto clearOf = [&](const Planet& body)
+    {
+        return body.radius <= 0.f || length(position - body.position) > body.radius + radius + 6000.f;
+    };
+
+    if (world.star.isStar && !clearOf(world.star))
+        return false;
+
+    if (!std::all_of(world.planets.begin(), world.planets.end(), clearOf))
+        return false;
+
+    if (world.stationActive && length(position - world.station.position) < 8000.f)
+        return false;
+
+    return std::none_of(world.asteroidBelts.begin(), world.asteroidBelts.end(), [&](const AsteroidBelt& belt)
+    {
+        return procgen::distanceToBelt(belt, position) < 3000.f;
+    });
+}
+
+/**
+ * Spawns one drifting rock somewhere in the shell around the player. At normal speeds it is aimed
+ * to pass by the player at a few thousand units, so lone rocks regularly sail across the view. In
+ * cruise, rocks are seeded ahead along the flight path but kept off it, so they stream past
+ * without being a hazard every few seconds.
+ */
+inline bool spawnDriftingAsteroid(World& world, Asteroid& rock, bool initial)
+{
+    std::mt19937& rng = world.driftRng;
+    std::uniform_real_distribution<float> unit(0.f, 1.f);
+    std::normal_distribution<float> gauss(0.f, 1.f);
+
+    const Ship& ship = world.playerShip;
+    const float shipSpeed = length(ship.velocity);
+    const bool fast = shipSpeed > 2500.f;
+    const Vec3 travel = shipSpeed > 0.f ? ship.velocity / shipSpeed : shipForward(ship);
+
+    rock.radius = unit(rng) < 0.03f ? 1200.f + 800.f * unit(rng) : 70.f + 900.f * std::pow(unit(rng), 2.5f);
+
+    for (int attempt = 0; attempt < 12; ++attempt)
+    {
+        Vec3 direction = normalized(Vec3{gauss(rng), gauss(rng) * 0.6f, gauss(rng)});
+
+        if (fast)
+        {
+            direction = normalized(travel * 1.6f + direction);
+
+            if (dot(direction, travel) < 0.4f)
+                continue;
+        }
+
+        const float minDistance = initial ? driftInitialMinDistance : driftSpawnMinDistance;
+        const float distance = minDistance + (driftSpawnMaxDistance - minDistance) * unit(rng);
+        const Vec3 position = ship.position + direction * distance;
+
+        if (!driftSpawnIsClear(world, position, rock.radius))
+            continue;
+
+        rock.position = position;
+
+        const float speed = 30.f + 210.f * unit(rng);
+        Vec3 heading;
+
+        if (fast)
+        {
+            heading = normalized(Vec3{gauss(rng), gauss(rng) * 0.3f, gauss(rng)});
+        }
+        else
+        {
+            // Aim at a point a few thousand units off to one side of the player.
+            Vec3 side = cross(ship.position - position, Vec3{gauss(rng), gauss(rng), gauss(rng)});
+            side = length(side) > 0.f ? normalized(side) : Vec3{1.f, 0.f, 0.f};
+            const Vec3 aim = ship.position + side * (3000.f + 12000.f * unit(rng));
+            heading = normalized(aim - position);
+        }
+
+        rock.velocity = heading * speed;
+        rock.shape = procgen::pickRockShape(
+            rng,
+            rock.radius,
+            world.looseCoarseShapeCount,
+            static_cast<int>(world.looseRockShapes.size())
+        );
+        procgen::rollRockSpin(rng, rock);
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Keeps a population of lone rocks drifting around the player: tops it up, moves each one along
+ * its heading, and recycles any that wander out of range or into a planet or the star.
+ */
+inline void updateDriftingAsteroids(World& world, float dt)
+{
+    if (world.looseRockShapes.empty())
+        return;
+
+    const bool firstFill = world.driftingAsteroids.empty();
+
+    while (static_cast<int>(world.driftingAsteroids.size()) < driftingAsteroidCount)
+    {
+        Asteroid rock;
+
+        if (!spawnDriftingAsteroid(world, rock, firstFill))
+            break;
+
+        world.driftingAsteroids.push_back(rock);
+    }
+
+    for (Asteroid& rock : world.driftingAsteroids)
+    {
+        rock.position += rock.velocity * dt;
+
+        const bool outOfRange = length(rock.position - world.playerShip.position) > driftRecycleDistance;
+
+        // A rock that drifts into a planet or the star is gone; it is otherwise free to sail
+        // through belts and past the station like anything else.
+        const auto inside = [&](const Planet& body)
+        {
+            return body.radius > 0.f && length(rock.position - body.position) < body.radius + rock.radius;
+        };
+
+        const bool hitBody =
+            (world.star.isStar && inside(world.star)) ||
+            std::any_of(world.planets.begin(), world.planets.end(), inside);
+
+        if (outOfRange || hitBody)
+            spawnDriftingAsteroid(world, rock, false);
+    }
+}
+
+
 
 /** Advances every NPC's simple-reflex behaviour and physics for one frame. */
 inline void updateNpcShips(World& world, float dt)
@@ -528,10 +725,17 @@ inline void updateWorldPhysics(World& world, float dt, bool integratePlayerShip 
         const Vec3 shipGravity = gravityOnShip(world);
         integrateShipPhysics(world.playerShip, dt, shipGravity);
         resolveShipBodyContact(world.playerShip, world);
-        resolveShipAsteroidContact(world.playerShip, world);
     }
 
     orbital::integrateOrbitalPhysics(world.planets, world.star.position, world.star.mass, dt);
+
+    // Belts ride with their star or planet; rocks are then resolved against the ship where they
+    // actually are this step.
+    updateAsteroidBelts(world);
+    updateDriftingAsteroids(world, dt);
+
+    if (integratePlayerShip)
+        resolveShipAsteroidContact(world.playerShip, world);
     updateStationOrbit(world, dt);
     updateNpcShips(world, dt);
 

@@ -31,7 +31,9 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - Rate-controlled rotation: turn keys command a yaw/pitch rate that spins up smoothly and stops crisply, with a precision modifier for fine aiming.
 - An in-system cruise drive for crossing systems that are now hundreds of thousands of units across, with Elite-style mass locking near planets, the star and the station.
 - Planet-scale worlds: planets 20–70 ship-lengths in radius, a star bigger still, and orbits roughly 140,000 units apart.
-- Asteroid belts in about 60% of systems: dense fields of tumbling wireframe rocks streamed around you from the belt's seed, a dust ring visible from across the system, and rocks you can actually hit.
+- Asteroid belts in about 60% of systems: dense fields of tumbling wireframe rocks streamed around you from the belt's seed, orbiting the star at their real orbital speed, with a dust ring visible from across the system, and rocks you can actually hit.
+- Little debris belts circling about one planet in five, carried along their planet's orbit.
+- Lone rocks drifting through space around you wherever you fly, so the void between planets isn't empty.
 - Object-level collision detection (ship, station, planets) using swept and static spherical volumes.
 - A recycled, endless-feeling starfield.
 - Frustum clipping for both points and line segments, with a small side guard-band so things don't visibly pop in at the frustum edges.
@@ -629,7 +631,7 @@ Masses are set in `planet_generation.h++`. A star's mass is `750 × radius`, whi
 
 Procedural generation lives in `include/procgen/`, split across three files with very different jobs:
 
-- `statistical.h++` generates the cheap, "on-paper" facts about a system — a pronounceable procedural name, an `EconomyTier` (Poor/Developing/Progressive, weighted toward Poor), a dominant occupation, 2–4 goods it best sells, and rolled counts for planets, stations, NPC ships and asteroid belts. NPC counts are then scaled by `npcTrafficMultiplier` (currently 1.2, i.e. 20% more traffic); because counts are small whole numbers, the fractional ship is settled by a dice roll drawn after every other roll, so the galaxy-wide average rises by exactly that factor without changing anything else about any system. All of this is packed into a `SystemInfo` and is cheap enough to generate and hold 1000 of at once, up front.
+- `statistical.h++` generates the cheap, "on-paper" facts about a system — a pronounceable procedural name, an `EconomyTier` (Poor/Developing/Progressive, weighted toward Poor), a dominant occupation, 2–4 goods it best sells, and rolled counts for planets, stations, NPC ships and asteroid belts. NPC counts are then scaled by `npcTrafficMultiplier` (currently 2.0, i.e. double the base traffic); because counts are small whole numbers, the fractional ship is settled by a dice roll drawn after every other roll, so the galaxy-wide average rises by exactly that factor without changing anything else about any system. All of this is packed into a `SystemInfo` and is cheap enough to generate and hold 1000 of at once, up front.
 - `galaxy.h++` derives a stable per-system seed from one galaxy seed plus a system index (`deriveSystemSeed()`), and calls `generateSystemInfo()` for every system to build the full `Galaxy` roster.
 - `planet_generation.h++` is where a `SystemInfo` actually becomes a playable `World`: it builds the star, places planets in outward, non-overlapping orbital shells with a real circular-orbit starting velocity, optionally places a station in orbit around a random planet, and works out a spawn pose (`shipSpawnPose()`): a few kilometres out from the station, facing it with its host planet filling the view behind, or facing the innermost planet in systems with no station.
 
@@ -738,9 +740,15 @@ There's a second, free-flying camera controller in `include/tools/camera_control
 
 ## Asteroid Belts
 
-About 60% of systems have an asteroid belt, and some have two. `SystemInfo::beltCount` is rolled last in `generateSystemInfo()`, after every other roll, so adding belts changed nothing else about any existing system. The galactic chart and system map both show the count.
+There are three kinds of rock in a system:
 
-### Placement
+- **Star belts.** About 60% of systems have one, and some have two.
+- **Planet debris belts.** Smaller rings of rubble circling some planets.
+- **Drifting rocks.** Lone rocks that float around the player wherever they fly.
+
+`SystemInfo::beltCount` (star belts) is rolled last in `generateSystemInfo()`. Planet belts and drifting rocks come from their own RNG streams. So none of this changed anything else about any existing system: names, planets, stations and traffic rolls are all as before.
+
+### Star belts
 
 `procgen::generateAsteroidBelts()` (`include/procgen/asteroid_generation.h++`) looks at the system's actual planet orbits and lists the gaps:
 
@@ -748,41 +756,66 @@ About 60% of systems have an asteroid belt, and some have two. `SystemInfo::belt
 - between each pair of neighbouring planets;
 - beyond the outermost planet.
 
-It places each belt in a randomly chosen gap that leaves at least 14,000 units between the belt's edge and the nearest planet surface, allowing for orbital drift. Across all 1000 systems, every rolled belt fits.
+It places each belt in a randomly chosen gap that leaves at least 14,000 units between the belt's edge and the nearest planet surface. Across all 1000 systems, every rolled belt fits.
 
-Each belt is a band in the system plane around the star, defined by its `centreRadius`, its `halfWidth` (10,000–17,000) and its `halfThickness` (3,000–5,500). Rock density peaks on the band's centre line and falls to zero at its edges (`beltDensityAt()`). Belts use their own RNG stream keyed off the system seed, so planets, stations and NPCs are untouched.
+A belt is a band defined by its `centreRadius`, its `halfWidth` (10,000–17,000) and its `halfThickness` (3,000–5,500). Rock density peaks on its centre line and falls to zero at its edges (`beltDensityAt()`).
+
+Every belt **orbits**. A star belt turns about the star at the Keplerian rate for its radius (`sqrt(g·M/r³)`), so its rocks move at about 150–190 u/s, the same way the planets go, and a full turn takes over an hour. Hover in a belt and you'll watch the rocks drift past, with the odd one shoving you aside.
+
+### Planet debris belts
+
+`procgen::generatePlanetBelts()` gives about 35% of planets a narrow, thin band of smaller rubble (`rockScale = 0.55`) circling just outside the planet. Across the galaxy that comes to about one planet in five. Each band is centred at 1.75–2× the planet's radius and carried along the planet's orbit.
+
+The station's host never gets one, since the station's orbit would run through it. Each belt is shrunk, or dropped, to stay at least 10,000–12,000 units clear of neighbouring planets, the star's lock zone and the star belts.
+
+Planet gravity is deliberately tiny for N-body stability, so a true orbit would barely move. The rubble is given a brisk 60–110 u/s instead.
 
 ### Streaming
 
-A belt never stores its rocks. `procgen::forEachAsteroidNear(belt, centre, radius, visit)` walks the 5,000-unit cells overlapping a sphere and works out each cell's rocks from scratch:
+A belt never stores its rocks. Each belt has a `centre` (the star, or its host planet, moved there every step by `updateAsteroidBelts()`) and a `rotation` angle. The angle is recomputed every step from `World::elapsedTime`, a double, so it never drifts.
 
-- each cell gets its own seed from the belt seed and the cell coordinates;
-- a Poisson-distributed count follows the local density;
-- each rock gets a position, a size (mostly 70–1,100 units, with about 1% giants of 1,500–2,600 to steer around), a shape, a spin axis and a tumble rate.
+`procgen::forEachAsteroidNear(belt, centre, radius, visit)` works like this:
 
-The same rocks come back every time you return. Generation costs about 0.2 ms per call whatever the density, because walking the cells dominates, and nothing at all is spent while you're away from a belt.
+1. It moves the query point into the belt's own rotating frame (`worldToBelt()`).
+2. It walks the 5,000-unit cells overlapping the query sphere in that frame and regenerates each cell's rocks from its seed: a Poisson-distributed count following the local density, then each rock's position, size (mostly 70–1,100 units, about 1% giants of 1,500–2,600), shape, spin axis and tumble.
+3. It hands each rock back in world space (`beltToWorld()`), with its orbital velocity (`beltVelocityAt()`).
+
+Because the cells ride the belt, the same rocks come round every orbit. Generation costs about 0.2 ms per call whatever the density, because walking the cells dominates, and nothing at all is spent while you're away from a belt.
+
+### Drifting rocks
+
+`World::driftingAsteroids` holds 40 lone rocks around the player. They're kept up by `updateDriftingAsteroids()`, the one kind of rock that is stored and moved rather than streamed:
+
+- **Spawning.** Each rock spawns 33,000–50,000 units out, just beyond the rock draw distance, so it fades in rather than popping. It's clear of planets, the star, belts and the station.
+- **Normal speeds.** A rock is aimed to pass 3,000–15,000 units to one side of you at 30–240 u/s, so lone rocks regularly sail across the view.
+- **In cruise.** Rocks are seeded ahead along your flight path but sent off on their own headings, so they stream past without being a hazard every few seconds. Two minutes of test cruising saw about 22 in view on average and no hits.
+- **Recycling.** A rock is recycled once it is more than 56,000 units away or drifts into a planet or the star.
+
+On average about 29 drifting rocks are within draw distance while you hover, and about 14 at full normal speed. They share one small set of shapes (`World::looseRockShapes`).
 
 ### Shapes
 
-`objects/asteroid.h++` builds the rock templates. Each is an icosahedron (12 vertices) or a once-subdivided icosphere (42 vertices) with lumpy radii and a random squash. Faces are kept outward-wound, and each edge records the two faces it borders. Each belt makes 7 coarse and 4 fine shapes; boulders of 450 units and up use the fine ones.
+`objects/asteroid.h++` builds the rock templates. Each is an icosahedron (12 vertices) or a once-subdivided icosphere (42 vertices) with lumpy radii and a random squash. Faces are kept outward-wound, and each edge records the two faces it borders. Boulders of 450 units and up use the fine shapes.
 
 ### Rendering
 
 `AsteroidRenderer` (`rendering/asteroid_renderer.h++`) draws two layers:
 
-- **Dust.** 2,600 fixed points through each band, projected with the bodies' far plane, so a belt reads as a faint ring from anywhere in the system.
-- **Rocks.** Everything within 32,000 units of the camera (roughly 150–230 rocks in the middle of a belt). Each rock tumbles around its own axis, driven by `World::elapsedTime`, and is drawn as a single batch.
+- **Dust.** A fixed scatter of points through each band (2,600 per star belt, 900 per planet belt), turning with the belt, so a belt reads as a faint ring from anywhere in the system.
+- **Rocks.** Every belt rock within 32,000 units of the camera, plus the drifting rocks, drawn by one shared routine into one batch. Each rock tumbles about its own axis.
   - Its far side is hidden: an edge is drawn only if a face it borders faces the camera.
   - Rocks fade in over the last third of the draw distance instead of popping.
-  - Ones under 1.5 pixels become dots, and ones under 6 pixels fall back to the coarse shapes.
+  - Tiny rocks become dots, and small ones use coarse shapes.
 
-There's no depth buffer, so both layers skip any point whose line of sight passes through the star or a planet in front of it.
+There's no depth buffer, so both layers skip anything whose line of sight passes through the star or a planet in front of it.
 
-### Physics and HUD
+### Physics, HUD and maps
 
-`resolveShipAsteroidContact()` treats each nearby rock as a sphere slightly inside its jagged outline, so grazing a spike doesn't snag you. It pushes the ship back to the surface, removes the velocity pointing into the rock, and drops you out of cruise. Belts don't mass-lock: you can cruise straight across one, but hitting a rock at cruise speed ends the cruise.
+`resolveShipAsteroidContact()` treats each nearby rock (belt or drifting) as a sphere slightly inside its jagged outline. It pushes the ship back to the surface, removes the part of the ship's velocity relative to the rock that points into it (so a moving rock shoves you along), and drops you out of cruise. Belts don't mass-lock: you can cruise across one, but hitting a rock at cruise speed ends the cruise.
 
-On the HUD, rocks of 250 units and up appear on the scanner as dim specks with faint stalks, and an amber `ASTEROID FIELD` warning appears above the scanner while you're inside a belt.
+Rocks of 250 units and up appear on the scanner as dim specks with faint stalks, and an amber `ASTEROID FIELD` warning shows while you're inside any belt.
+
+On the system map, star belts are drawn as turning speckled bands. A planet with a debris belt gets a dotted halo, and its details show `DEBRIS BELT: YES`. The galactic chart lists each system's star belts.
 
 ## The Starfield
 
@@ -1281,6 +1314,7 @@ This is still intentionally small:
 - No true fixed time-step accumulator; physics is split into sub-steps of at most 1/120 s, but their size still follows the frame time.
 - No real asset-management system beyond loading a font and an OBJ file at scene construction.
 - Only the station can be targeted; NPC ships and planets show on the scanner and maps but can't be locked yet.
-- Asteroid belts don't orbit, and NPC ships ignore asteroids (they fly straight through rocks). Rocks can't be mined or shot yet.
+- NPC ships ignore asteroids (they fly straight through rocks), and rocks can't be mined or shot yet.
+- Drifting rocks only exist around the player: they are a population kept topped up within about 50,000 units of you, not objects with a life of their own across the system.
 
 That's still enough surface area to play with fake-3D projection, starfields, procedural galaxy generation, orbital mechanics, simple-reflex NPC behavior, planet rendering, and wireframe Newtonian space flight — and enough structure that adding the next object, physics rule, or scene should feel like following a pattern, not fighting one.

@@ -35,9 +35,16 @@ struct AsteroidShape {
     std::vector<Edge> edges;
 };
 
-/** One asteroid instance, produced on demand by the belt streamer (never stored long-term). */
+/**
+ * One asteroid. Belt rocks are produced on demand by the belt streamer and never stored;
+ * free-drifting rocks (World::driftingAsteroids) are the same type, kept and moved each step.
+ */
 struct Asteroid {
     Vec3 position;
+
+    /** World-space velocity: a belt rock's orbital motion, or a drifting rock's own heading. */
+    Vec3 velocity;
+
     float radius = 100.f;
     int shape = 0;
 
@@ -54,12 +61,30 @@ struct Asteroid {
 };
 
 /**
- * A ring of rocks around the star in the system plane. The belt is a band of radius
- * `centreRadius`, `halfWidth` across radially and `halfThickness` vertically; asteroid density
- * falls off smoothly to zero at its edges. Individual rocks aren't stored: they are regenerated
- * deterministically from `seed` for whatever part of the belt is near the camera or the ship.
+ * A ring of rocks around a centre — the star for a system belt, or a planet for a planet's
+ * little debris belt — in a plane parallel to the system plane. The band has radius
+ * `centreRadius`, is `halfWidth` across radially and `halfThickness` vertically, and its density
+ * falls off smoothly to zero at its edges.
+ *
+ * Individual rocks aren't stored: they are regenerated deterministically from `seed`, in the
+ * belt's own rotating frame, for whatever part of the belt is near the camera or the ship. The
+ * whole belt turns about its centre at `angularSpeed`, so every rock orbits.
  */
 struct AsteroidBelt {
+    /** Index of the planet this belt circles, or -1 for a belt around the star. */
+    int hostPlanetIndex = -1;
+
+    /** World position and velocity of the belt's centre (the star, or the host planet), refreshed every step. */
+    Vec3 centre;
+    Vec3 centreVelocity;
+
+    /** Orbital angular speed about +Y (rad/s; positive matches the planets) and the current angle. */
+    float angularSpeed = 0.f;
+    float rotation = 0.f;
+
+    /** Multiplier on rock sizes: planet belts are made of smaller rubble. */
+    float rockScale = 1.f;
+
     float centreRadius = 300000.f;
     float halfWidth = 14000.f;
     float halfThickness = 4000.f;
@@ -73,9 +98,36 @@ struct AsteroidBelt {
     std::vector<AsteroidShape> shapes;
     int coarseShapeCount = 0;
 
-    /** Static dust points spread through the whole band, so the belt reads as a ring from afar. */
+    /** Dust points through the whole band, in the belt's own frame (relative to its centre, before rotation). */
     std::vector<Vec3> dust;
 };
+
+/** Rotates a vector about +Y by `angle`, in the same sense the planets orbit. */
+inline Vec3 rotateAboutY(const Vec3& v, float angle)
+{
+    const float c = std::cos(angle);
+    const float s = std::sin(angle);
+    return {v.x * c + v.z * s, v.y, -v.x * s + v.z * c};
+}
+
+/** Belt-frame position to world position, at the belt's current rotation. */
+inline Vec3 beltToWorld(const AsteroidBelt& belt, const Vec3& local)
+{
+    return belt.centre + rotateAboutY(local, belt.rotation);
+}
+
+/** World position to belt-frame position. */
+inline Vec3 worldToBelt(const AsteroidBelt& belt, const Vec3& world)
+{
+    return rotateAboutY(world - belt.centre, -belt.rotation);
+}
+
+/** World velocity of a point riding the belt at world position `world`. */
+inline Vec3 beltVelocityAt(const AsteroidBelt& belt, const Vec3& world)
+{
+    const Vec3 r = world - belt.centre;
+    return belt.centreVelocity + Vec3{r.z, 0.f, -r.x} * belt.angularSpeed;
+}
 
 /* ---- Shape generation ------------------------------------------------------------------------- */
 

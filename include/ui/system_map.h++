@@ -149,7 +149,10 @@ private:
         float extent = world.star.radius * 2.f;
 
         for (const AsteroidBelt& belt : world.asteroidBelts)
-            extent = std::max(extent, belt.centreRadius + belt.halfWidth);
+        {
+            if (belt.hostPlanetIndex < 0)
+                extent = std::max(extent, belt.centreRadius + belt.halfWidth);
+        }
 
         for (const Planet& planet : world.planets)
             extent = std::max(extent, std::hypot(planet.position.x, planet.position.z) + planet.radius);
@@ -275,6 +278,28 @@ private:
 
         for (const AsteroidBelt& belt : world.asteroidBelts)
         {
+            // A planet's debris belt is far too small to show at map scale: a dotted halo round the planet stands in.
+            if (belt.hostPlanetIndex >= 0 && static_cast<std::size_t>(belt.hostPlanetIndex) < world.planets.size())
+            {
+                const Planet& host = world.planets[static_cast<std::size_t>(belt.hostPlanetIndex)];
+                const sf::Vector2f hostScreen = toScreen(host.position, world, size);
+                const float halo = planetPixelRadius(host) + 5.f;
+                const sf::Color haloColor(200, 185, 150);
+                std::vector<sf::Vertex> haloPoints;
+
+                for (const float ring : {halo, halo + 2.5f})
+                {
+                    for (int i = 0; i < 40; ++i)
+                    {
+                        const float angle = (static_cast<float>(i) + (ring > halo ? 0.5f : 0.f)) / 40.f * 6.2831853f + belt.rotation;
+                        haloPoints.push_back(sf::Vertex({hostScreen.x + std::sin(angle) * ring, hostScreen.y - std::cos(angle) * ring}, haloColor));
+                    }
+                }
+
+                target.draw(haloPoints.data(), haloPoints.size(), sf::PrimitiveType::Points);
+                continue;
+            }
+
             std::vector<sf::Vertex> points;
 
             // Dotted inner and outer edges.
@@ -292,7 +317,7 @@ private:
             // A sample of the belt's own dust, flattened onto the map.
             for (std::size_t i = 0; i < belt.dust.size(); i += 2)
             {
-                const Vec3& mote = belt.dust[i];
+                const Vec3 mote = beltToWorld(belt, belt.dust[i]) - world.star.position;
                 points.push_back(sf::Vertex({star.x + mote.x * scale, star.y - mote.z * scale}, speck));
             }
 
@@ -507,7 +532,14 @@ private:
         row("RADIUS", formatWorldDistance(body.radius));
 
         if (highlighted_ < 0)
-            row("BELTS", world.asteroidBelts.empty() ? "NONE" : std::to_string(world.asteroidBelts.size()));
+        {
+            const auto starBelts = std::count_if(world.asteroidBelts.begin(), world.asteroidBelts.end(), [](const AsteroidBelt& belt)
+            {
+                return belt.hostPlanetIndex < 0;
+            });
+
+            row("BELTS", starBelts == 0 ? "NONE" : std::to_string(starBelts));
+        }
 
         if (highlighted_ >= 0)
         {
@@ -517,6 +549,13 @@ private:
             std::snprintf(speed, sizeof(speed), "%.0f u/s", length(body.velocity));
             row("ORBIT SPEED", speed);
             row("RINGS", body.hasRing ? "YES" : "NO");
+
+            const bool hasDebrisBelt = std::any_of(world.asteroidBelts.begin(), world.asteroidBelts.end(), [&](const AsteroidBelt& belt)
+            {
+                return belt.hostPlanetIndex == highlighted_;
+            });
+
+            row("DEBRIS BELT", hasDebrisBelt ? "YES" : "NO");
             row("STATION", highlighted_ == world.stationHostPlanetIndex && world.stationActive ? "IN ORBIT" : "NONE");
         }
 

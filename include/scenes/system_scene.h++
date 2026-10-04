@@ -273,6 +273,27 @@ private:
             world_.stationOrbitSpeed = placement.orbitSpeed;
         }
 
+        // Some planets carry a little debris belt of their own (never the station's host). Like
+        // the star's belts, these use their own RNG stream, so nothing else in the system moves.
+        {
+            const std::uint32_t systemSeed = deriveSystemSeed(galaxy_.seed, systemIndex);
+            std::vector<AsteroidBelt> planetBelts = procgen::generatePlanetBelts(
+                systemSeed,
+                world_.star,
+                world_.planets,
+                world_.asteroidBelts,
+                world_.stationActive ? world_.stationHostPlanetIndex : -1
+            );
+
+            for (AsteroidBelt& belt : planetBelts)
+                world_.asteroidBelts.push_back(std::move(belt));
+
+            // Lone rocks drifting through the system share one small set of shapes.
+            world_.looseRockShapes = procgen::generateLooseRockShapes(systemSeed, 6, 3);
+            world_.looseCoarseShapeCount = 6;
+            world_.driftRng.seed(systemSeed ^ 0x0D1F7u);
+        }
+
         // Outer bound for NPC roaming, sized to comfortably contain every planet's orbit.
         float outerRadius = world_.star.radius * 3.f;
 

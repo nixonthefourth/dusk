@@ -512,26 +512,29 @@ private:
         const sf::Color rockColor(125, 118, 105);
         const sf::Color rockStalk(70, 66, 60);
 
-        for (const AsteroidBelt& belt : world.asteroidBelts)
+        const auto plotRock = [&](const Asteroid& rock)
         {
-            procgen::forEachAsteroidNear(belt, ship.position, scannerRange, [&](const Asteroid& rock)
-            {
-                if (rock.radius < 250.f)
-                    return;
+            if (rock.radius < 250.f)
+                return;
 
-                const Vec3 local = toShipLocal(ship, rock.position);
+            const Vec3 local = toShipLocal(ship, rock.position);
 
-                if (std::hypot(local.x, local.z) > scannerRange || std::abs(local.y) > scannerRange)
-                    return;
+            if (std::hypot(local.x, local.z) > scannerRange || std::abs(local.y) > scannerRange)
+                return;
 
-                const sf::Vector2f base = {centre.x + local.x / scannerRange * radii.x, centre.y - local.z / scannerRange * radii.y};
-                const sf::Vector2f tip = {base.x, base.y - local.y / scannerRange * radii.y * 1.6f};
-                drawLine(target, base, tip, rockStalk);
+            const sf::Vector2f base = {centre.x + local.x / scannerRange * radii.x, centre.y - local.z / scannerRange * radii.y};
+            const sf::Vector2f tip = {base.x, base.y - local.y / scannerRange * radii.y * 1.6f};
+            drawLine(target, base, tip, rockStalk);
 
-                const float speck = rock.radius > 1400.f ? 3.f : 2.f;
-                drawRect(target, {tip.x - speck * 0.5f, tip.y - speck * 0.5f}, {speck, speck}, rockColor);
-            });
-        }
+            const float speck = rock.radius > 1400.f ? 3.f : 2.f;
+            drawRect(target, {tip.x - speck * 0.5f, tip.y - speck * 0.5f}, {speck, speck}, rockColor);
+        };
+
+        for (const AsteroidBelt& belt : world.asteroidBelts)
+            procgen::forEachAsteroidNear(belt, ship.position, scannerRange, plotRock);
+
+        for (const Asteroid& rock : world.driftingAsteroids)
+            plotRock(rock);
 
         for (const NpcShip& npc : world.npcShips)
         {
