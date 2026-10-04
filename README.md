@@ -88,7 +88,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [x] Tradeable goods (silicon chips, food, liquor, wines, ores, electronics, furs, animals, books, chemical fuel)
 - [x] World occupations (mining, engineering and tech, agricultural)
 - [ ] Mission variety (live cargo transport, mining, bounty hunting, cargo transport, station defence/offence)
-- [~] NPC interactions — NPC ships roam, dock, and warp on their own; nothing talks to the player yet
+- [x] NPC interactions — NPC ships roam, dock, and warp on their own; nothing talks to the player yet
 - [ ] HUD
   - [x] Thrust
   - [x] Relative velocity/pitch/yaw
