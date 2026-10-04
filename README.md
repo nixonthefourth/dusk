@@ -81,7 +81,7 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [ ] Chemical combustion ships
   - [ ] Electric ships
   - [ ] 20 ships total
-- [~] World
+- [x] World
   - [x] Asteroid belts
   - [x] OBJ-loaded models
   - [x] Stars

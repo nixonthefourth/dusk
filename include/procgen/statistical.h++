@@ -213,7 +213,7 @@ inline int generateNpcShipCount(std::mt19937& rng, EconomyTier economyTier)
  * of each scaled count is settled by a dice roll: on average, systems carry exactly this many
  * times as many ships as the base rolls give.
  */
-constexpr float npcTrafficMultiplier = 2.f;
+constexpr float npcTrafficMultiplier = 3.f;
 
 /** Scales a base ship count by npcTrafficMultiplier, rolling for the fractional ship. */
 inline int scaleNpcTraffic(std::mt19937& rng, int baseCount)
