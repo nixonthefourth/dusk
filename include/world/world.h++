@@ -17,6 +17,15 @@
 #include "objects/npc_ship.h++"
 #include "systems/npc_ai.h++"
 #include <cmath>
+#include <optional>
+
+/** What kind of object the player has locked as a target. Only the station can be targeted for now. */
+enum class TargetType { None, Station };
+
+/** The player's current target lock. Room for an index once ships or planets become targetable. */
+struct TargetLock {
+    TargetType type = TargetType::None;
+};
 
 /** Owns all objects that exist in world coordinates. */
 struct World {
@@ -44,6 +53,9 @@ struct World {
     float stationOrbitSpeed = 0.15f;
 
     Ship playerShip;
+
+    /** What the player has targeted, shown on the scanner, compass and in-view brackets. */
+    TargetLock target;
 };
 
 
@@ -209,6 +221,62 @@ inline void updateStationOrbit(World& world, float dt)
     };
 
     world.station.dockFacing = stationOrbitTangent(world);
+}
+
+/** World-space velocity of the station: its host planet's orbital velocity plus its own orbit around the host. */
+inline Vec3 stationVelocity(const World& world)
+{
+    if (!world.stationActive ||
+        world.stationHostPlanetIndex < 0 ||
+        static_cast<std::size_t>(world.stationHostPlanetIndex) >= world.planets.size())
+    {
+        return {};
+    }
+
+    const Planet& host = world.planets[static_cast<std::size_t>(world.stationHostPlanetIndex)];
+    return host.velocity + stationOrbitTangent(world) * (std::abs(world.stationOrbitSpeed) * world.stationOrbitRadius);
+}
+
+/** True if the current target still exists (a station can vanish when the system changes). */
+inline bool hasValidTarget(const World& world)
+{
+    switch (world.target.type)
+    {
+        case TargetType::Station: return world.stationActive;
+        case TargetType::None: break;
+    }
+
+    return false;
+}
+
+/** World position of the current target, if there is one. */
+inline std::optional<Vec3> targetPosition(const World& world)
+{
+    if (!hasValidTarget(world))
+        return std::nullopt;
+
+    return world.station.position;
+}
+
+/** World velocity of the current target (zero if there is none). */
+inline Vec3 targetVelocity(const World& world)
+{
+    return hasValidTarget(world) ? stationVelocity(world) : Vec3{};
+}
+
+/** Short HUD label for the current target. */
+inline const char* targetLabel(const World& world)
+{
+    return hasValidTarget(world) ? "STATION" : "";
+}
+
+/** Steps the target lock to the next available target, wrapping back to none. */
+inline void cycleTarget(World& world)
+{
+    if (world.target.type == TargetType::None && world.stationActive)
+        world.target.type = TargetType::Station;
+    else
+        world.target.type = TargetType::None;
 }
 
 /** Clears collision hits from every object before fresh detection runs. */

@@ -5,6 +5,8 @@
 #ifndef DUSK_STATISTICAL_H
 #define DUSK_STATISTICAL_H
 
+#include "math/Vec2.h++"
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <random>
@@ -23,7 +25,23 @@ struct SystemInfo {
     std::string occupation;
     int stationCount = 0;
     int npcShipCount = 0;
+
+    /** Position on the galactic chart, in light years from the galactic core. Set by generateGalaxy(). */
+    Vec2 mapPosition;
 };
+
+/** Display name for an economy tier. */
+inline const char* economyTierName(EconomyTier tier)
+{
+    switch (tier)
+    {
+        case EconomyTier::Poor: return "Poor";
+        case EconomyTier::Developing: return "Developing";
+        case EconomyTier::Progressive: return "Progressive";
+    }
+
+    return "";
+}
 
 /* Name generation */
 

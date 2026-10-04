@@ -46,6 +46,12 @@ public:
         return true;
     }
 
+    /** Whether the scene wants Escape for itself (e.g. to close a map) instead of quitting the game. */
+    virtual bool capturesEscape() const
+    {
+        return false;
+    }
+
     /** Whether the standard ship HUD should render over this scene. */
     virtual bool showsHud() const
     {

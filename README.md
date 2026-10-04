@@ -4,7 +4,7 @@
 
 `dusk` is a small SFML/C++ experiment that fakes 3D in a 2D window. There is no OpenGL, no depth buffer, no borrowed rendering pipeline underneath it — just a `Vec3` world, a hand-rolled camera and view matrix, a perspective projector, and SFML lines and shapes doing the actual drawing. Everything from vector math to frustum clipping to Newtonian ship physics is written from scratch, on purpose.
 
-Pick PLAY, and you drop into a procedurally generated star system: a filled white sun, a handful of orbiting gridded planets, a spinning wireframe space station you can auto-dock with, and a scatter of NPC ships going about their own simple-reflex business — all seeded from one number, with `[` and `]` letting you jump between systems while the real warp scene is still on the drawing board.
+Pick PLAY, and you drop into a procedurally generated star system: a filled white sun, a handful of orbiting gridded planets, a spinning wireframe space station you can auto-dock with, and a scatter of NPC ships going about their own simple-reflex business — all seeded from one number. Open the galactic chart with `G` to pick any of the galaxy's 1000 systems and jump there, or the system map with `M` to see what's orbiting where.
 
 ## Manifesto
 
@@ -35,7 +35,10 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - A recycled, endless-feeling starfield.
 - Frustum clipping for both points and line segments, with a small side guard-band so things don't visibly pop in at the frustum edges.
 - A system's star drawn as a solid filled disc, and its planets drawn as gridded, optionally ringed wireframes — sorted and drawn back-to-front together, with per-edge visibility shading based on facing direction.
-- A minimalist HUD showing throttle, actual speed and thrust direction, plus a boresight and a prograde (direction-of-travel) marker in the view.
+- An Elite-style flight HUD: a bottom dashboard with speed and throttle, a 3D scanner, heading, pitch and turn-rate readouts and a target compass; heading and pitch tapes; a boresight and prograde marker; and brackets (or an off-screen arrow) on the locked target.
+- Target lock (`T`): the station can be locked, and shows on the scanner, the compass and in view with its distance and closing speed.
+- A galactic chart of all 1000 systems laid out on a two-armed spiral, navigable by arrow keys or mouse, with zoom, pan, per-system details, and jumping.
+- A system map: a top-down, to-scale view of the current system's orbits, with the station, traffic, your position, and a details panel for every body.
 
 ## Roadmap
 
@@ -68,9 +71,9 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [x] Flight assist: velocity-holding thruster control, switchable back to raw Newtonian flight
   - [x] In-system cruise drive with mass locking
   - [ ] Towed cargo mass affects ship handling (every thruster already divides by `mass`, so this is mostly bookkeeping)
-- [~] Phase-space warp between system nodes — `[`/`]` system cycling stands in for it today
-- [ ] Galactic map
-- [ ] System map
+- [~] Phase-space warp between system nodes — jumping from the galactic chart is instant for now, with no travel scene
+- [x] Galactic map
+- [x] System map
 - [ ] Spaceships
   - [ ] Chemical combustion ships
   - [ ] Electric ships
@@ -88,8 +91,8 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [~] NPC interactions — NPC ships roam, dock, and warp on their own; nothing talks to the player yet
 - [ ] HUD
   - [x] Thrust
-  - [ ] Relative velocity/pitch/yaw
-  - [ ] Targeting, radar-esque
+  - [x] Relative velocity/pitch/yaw
+  - [x] Targeting, radar-esque (station only so far)
 - [~] Physics
   - [x] Object-level collision hitboxes
   - [ ] Fuel expenditure (mass matters)
@@ -156,11 +159,24 @@ Flight controls:
 
 Once you're in a system:
 
-- `]`: jump to the next system in the galaxy.
-- `[`: jump to the previous system.
-- `C`: engage the docking computer. Press again during the approach or line-up to cancel; once the ship starts entering the slot the sequence is committed.
+- `G`: open the galactic chart.
+- `M`: open the system map.
+- `T`: lock or clear the target (the station is the only target for now).
+- `C`: engage the docking computer. Press again during the approach or line-up to cancel; once the ship starts entering the slot the sequence is committed. Engaging it also locks the station as your target.
 
-`[` and `]` are ignored while the docking computer is flying the ship or you're docked.
+On the galactic chart:
+
+- Arrow keys step to the nearest system in that direction; a mouse click selects; hovering shows a system's name.
+- Mouse wheel or `+`/`-` zooms; dragging pans; `H` returns to your current system.
+- `Enter`, `Space` or the `JUMP` button jumps to the selected system. Jumping is unavailable while docked or while the docking computer is flying.
+- `G` or `Escape` closes the chart.
+
+On the system map:
+
+- `Up`/`Down` (or a click on a body or a row in the list) highlights a body and shows its details.
+- `T` locks the station, `G` switches to the galactic chart, `M` or `Escape` closes the map.
+
+While a map is open, flight controls are paused (the ship carries on under flight assist) and `Escape` closes the map instead of quitting.
 
 While docked:
 
@@ -233,6 +249,9 @@ include/
 
   ui/
     menu_button.h++
+    format.h++
+    galaxy_map.h++
+    system_map.h++
 
   rendering/
     projector.h++
@@ -827,6 +846,7 @@ public:
 
     virtual void handleEvent(const sf::Event&, const sf::RenderWindow&) {}
     virtual bool acceptsShipInput() const { return true; }
+    virtual bool capturesEscape() const { return false; }
     virtual bool showsHud() const { return true; }
 
     virtual void updatePhysics(float dt)
@@ -866,7 +886,7 @@ MainMenuScene
   -> SystemScene (Enter/Space/PLAY click, always entering system 0 today)
 ```
 
-`main.cpp` owns a small `applySceneTransition` lambda that matches on the returned transition, calls `sceneManager.setScene<...>()`, resets input/camera-rig state, and re-primes the camera and streaming for the new scene — so a fresh scene never starts from a stale camera angle or a leftover keypress. Note that `EnterSystem` always constructs a brand-new `SystemScene(galaxy, 0)`; travelling between systems from inside `SystemScene` (via `[`/`]`) is handled entirely within that one scene instance instead, by regenerating its own `World` in place — see `SystemScene::enterSystem()` in `system_scene.h++`.
+`main.cpp` owns a small `applySceneTransition` lambda that matches on the returned transition, calls `sceneManager.setScene<...>()`, resets input/camera-rig state, and re-primes the camera and streaming for the new scene — so a fresh scene never starts from a stale camera angle or a leftover keypress. Note that `EnterSystem` always constructs a brand-new `SystemScene(galaxy, 0)`; travelling between systems from inside `SystemScene` (by jumping from the galactic chart) is handled entirely within that one scene instance instead, by regenerating its own `World` in place — see `SystemScene::enterSystem()` in `system_scene.h++`.
 
 `SceneTransition` still has room for more values as new top-level scenes show up — a galactic map screen or a dedicated warp/travel scene would each earn their own entry, requested the same way `EnterSystem` is today.
 
@@ -921,36 +941,63 @@ If instead you want a scene that's part of the procedural galaxy flow — a prop
 
 ### Scene-Specific Behavior
 
-Override `handleEvent()` for scene-specific input outside the standard flight controls — this is exactly how `SystemScene` implements its temporary `[`/`]` system cycling, and how `MainMenuScene` handles its keyboard/mouse activation:
+Override `handleEvent()` for scene-specific input outside the standard flight controls — this is exactly how `SystemScene` opens its maps and locks targets, and how `MainMenuScene` handles its keyboard/mouse activation:
 
 ```cpp
-void handleEvent(const sf::Event& event, const sf::RenderWindow&) override
+void handleEvent(const sf::Event& event, const sf::RenderWindow& window) override
 {
+    if (mapView_ == MapView::Galaxy)
+    {
+        handleGalaxyMapEvent(event, window); // the chart gets every event while it's open
+        return;
+    }
+
     if (const auto* keyPressed = event.getIf<sf::Event::KeyPressed>())
     {
-        if (keyPressed->code == sf::Keyboard::Key::RBracket)
-            enterSystem(currentSystemIndex_ + 1);
+        if (keyPressed->code == sf::Keyboard::Key::G)
+            openGalaxyMap();
 
-        if (keyPressed->code == sf::Keyboard::Key::LBracket)
-            enterSystem(currentSystemIndex_ - 1);
+        if (keyPressed->code == sf::Keyboard::Key::T)
+            cycleTarget(world_);
     }
 }
 ```
 
-Override `updatePhysics()` for custom simulation on top of the default world update, `updateCamera()` for a scene-specific camera (`MainMenuScene` showcases the ship instead of chasing it), `acceptsShipInput()`/`showsHud()` to opt a menu-like scene out of flight controls and the HUD, `drawOverlay()` for screen-space UI drawn after the 3D world (`SystemScene` uses this to draw its system-name/travel-hint label), and `consumeTransition()` whenever a scene needs to request a top-level switch.
+Override `capturesEscape()` to keep `Escape` for the scene (SystemScene closes an open map with it rather than letting `main.cpp` quit). Override `updatePhysics()` for custom simulation on top of the default world update, `updateCamera()` for a scene-specific camera (`MainMenuScene` showcases the ship instead of chasing it), `acceptsShipInput()`/`showsHud()` to opt a menu-like scene out of flight controls and the HUD, `drawOverlay()` for screen-space UI drawn after the 3D world (`SystemScene` uses this to draw its system-name/travel-hint label), and `consumeTransition()` whenever a scene needs to request a top-level switch.
 
 ## The HUD
 
-The HUD lives in `include/rendering/hud_renderer.h++` and deliberately avoids loading a font. Instead it draws:
+The flight HUD lives in `include/rendering/hud_renderer.h++`. It is a single `HudRenderer::draw(target, world, camera)` call from `main.cpp`, and it only reads state. It loads the Jersey 15 font once, at construction, for its readouts.
 
-- A small background panel in the bottom-left corner.
-- A thrust bar, filled proportionally to current throttle.
-- A throttle percentage rendered as seven-segment-style digits built from rectangles.
-- A percent sign made from two dots and a diagonal line.
-- A white tick on the thrust bar showing actual speed on the same scale, so with flight assist on, the bar is where you're heading and the tick is where you've got to.
-- Cyan for forward thrust, red for reverse — driven by `ship.reverseThrust`.
+**Dashboard** (`dashboardHeight = 122` pixels along the bottom, which scenes keep their own text clear of):
 
-`drawFlightMarkers()` adds two in-view markers: a boresight cross where the nose points, and a prograde ring where the ship is actually travelling (a red retrograde cross when moving backwards). Each is the projected vanishing point of its direction, `camera.position + direction × 1000`, so these two are the only HUD elements that use a `Projector`. `SystemScene` draws a speed readout above the panel with the menu font, along with flight-assist state and cruise/mass-lock status.
+- Left: speed (or cruise speed), forward/reverse, a throttle bar and a speed bar on the same scale (with flight assist on, the throttle bar is where you're heading and the speed bar is where you've got to), and flight-assist and cruise/mass-lock status.
+- Centre: an Elite-style 3D scanner. The ellipse is the ship's horizontal plane seen from above and behind, forward up the scope; each contact sits on the plane at its ship-relative position with a stalk up or down to its height. NPC ships show as bars, the station as a cyan square (ringed when targeted). The range is `scannerRange = 25000` units.
+- Right: heading (000–359, with 000 along world `+z`) and pitch in degrees, centre-zero bars for the current yaw and pitch rates, and the target compass. The compass dot shows where the target lies relative to the nose: filled when ahead, hollow red when behind. Underneath are the target's name, distance and closing speed (positive while the gap shrinks).
+
+**In view:**
+
+- A heading tape across the top (ticks every 5°, labels every 30°) and a pitch tape down the right (ticks every 5°, labels every 10°).
+- A boresight cross where the nose points, and a prograde ring where the ship is actually travelling (a red retrograde cross when moving backwards). Each is the projected vanishing point of its direction, `camera.position + direction × 1000`. When the two overlap, the ship is moving exactly where it's aimed.
+- Target brackets sized to the target's projected size, labelled with name and distance. When the target is off-screen or behind you, an arrow on an ellipse inside the view points the way to turn instead.
+
+Targeting itself is world state: `World::target` holds a `TargetLock`, and `targetPosition()`, `targetVelocity()`, `targetLabel()` and `cycleTarget()` in `world.h++` are the only places that know what a target can be. Making NPC ships or planets targetable means adding a `TargetType` (plus an index in `TargetLock`) and extending those four functions; the HUD picks it up as-is.
+
+## The Galactic Chart
+
+`include/ui/galaxy_map.h++` holds `GalaxyMap`, a full-screen overlay that `SystemScene` opens with `G`. It owns only view state (selection, zoom, pan) and is handed the `Galaxy` on every call, so it can't drift out of step with it. `handleEvent()` returns a `GalaxyMapAction` (`None`, `Close`, `Jump`); the scene acts on it.
+
+Chart positions come from `generateGalaxyLayout()` in `procgen/galaxy.h++`, which stores a `mapPosition` (light years from the core) on every `SystemInfo`. Systems lie on a two-armed logarithmic spiral with a central bulge, kept at least 6 LY apart so each stays clickable. The layout uses its own RNG stream, so it never disturbs the per-system seeds that rebuild each system. System 0, where you start, sits near the outer end of an arm, about 440 LY from the galactic core — the game's end goal, marked on the chart.
+
+Arrow keys pick the system that best continues in that direction (`distance / alignment²`, ignoring anything more than 60° off), and the view recentres when the selection nears the edge. The panel shows the selected system's distance, distance to the core, economy, trade, planets, station, traffic and exports, plus the jump button. Dots are coloured by economy tier: grey for Poor, white for Developing, cyan for Progressive.
+
+Jumping is still instant — `SystemScene::enterSystem()` regenerates the destination from its seed, exactly as the old `[`/`]` cycling did — and is refused while docked or under the docking computer. There's no jump range or fuel yet; `galacticDistance()` is there for when there is.
+
+## The System Map
+
+`include/ui/system_map.h++` holds `SystemMap`, opened with `M`. It's a top-down (`x`/`z`) view of the current system: orbits are to scale and drawn live, while body sizes are not (at true scale every planet would be a single pixel), which the map says in its corner. The station is drawn just outside its host, because its real orbit would sit inside the host's dot. NPC traffic shows as dots, and you as an amber arrow along your heading. A scale bar picks a round length that comes out 60–150 pixels long.
+
+The panel lists the star and every planet, with each planet named after its system plus its orbital order (`planetDisplayName()`, e.g. "JorEl Minor II") and your altitude above each. The highlighted body's radius, orbit, orbital speed, rings and station are shown underneath.
 
 ## Adding Your Own World Object
 
@@ -1088,7 +1135,7 @@ const float speed01 = std::clamp(shipSpeed(ship) / 2000.f, 0.f, 1.f);
 drawRect(target, {18.f, y - 12.f}, {72.f * speed01, 4.f}, sf::Color(255, 255, 255));
 ```
 
-If you decide you want real text somewhere beyond the menu's Jersey 15 font, add a font asset and a small `FontStore`/`HudAssets` type so renderers aren't reloading a font every frame.
+`HudRenderer` loads its font once in its constructor; if more renderers need text, a small shared `FontStore` would save each from loading its own copy. Distance and angle formatting helpers (`formatWorldDistance()`, `formatSigned()`, `formatHeading()`) live in `include/ui/format.h++`.
 
 ## Adding Your Own Renderer
 
@@ -1157,7 +1204,8 @@ Keep these boundaries intact:
 - `include/tools/ship_controller.h++`: input and camera-follow behavior.
 - `include/rendering/ship_renderer.h++`: a line-model renderer with face culling, shared by the player and every NPC.
 - `include/rendering/planet_renderer.h++`: projected, gridded, sorted stellar bodies, star included.
-- `include/rendering/hud_renderer.h++`: font-free screen-space HUD rendering.
+- `include/rendering/hud_renderer.h++`: the flight HUD — dashboard, scanner, compass, attitude tapes and target markers.
+- `include/ui/galaxy_map.h++` and `include/ui/system_map.h++`: the galactic chart and the system map.
 - `include/rendering/projector.h++`: view matrix, projection, culling, and clipping, all in one place.
 
 ## Current Limitations
@@ -1167,11 +1215,11 @@ This is still intentionally small:
 - No depth buffer and no triangle rasterizer — everything visible is either a projected line, a projected point, or an SFML shape primitive.
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
-- There's no real warp/travel scene yet — `[`/`]` system cycling in `SystemScene` is a placeholder, and `EnterSystem` always enters system 0 regardless of which system you were last in.
+- There's no real warp/travel scene yet — jumping from the galactic chart is instant, with no jump range or fuel — and `EnterSystem` always enters system 0 regardless of which system you were last in.
 - The economy layer computes prices per system but has no trading UI, no inventory, and no supply/demand — it's generated data with nowhere to spend it yet.
 - Only one station gets built per system even when `SystemInfo::stationCount` rolls higher, and there's no dedicated `Station` type — it's the same `Cube` used for the old test object, repurposed.
 - No true fixed time-step accumulator; physics is split into sub-steps of at most 1/120 s, but their size still follows the frame time.
 - No real asset-management system beyond loading a font and an OBJ file at scene construction.
-- The HUD uses primitive shapes instead of text; the menu and the in-system label are the only places using the bundled Jersey 15 font.
+- Only the station can be targeted; NPC ships and planets show on the scanner and maps but can't be locked yet.
 
 That's still enough surface area to play with fake-3D projection, starfields, procedural galaxy generation, orbital mechanics, simple-reflex NPC behavior, planet rendering, and wireframe Newtonian space flight — and enough structure that adding the next object, physics rule, or scene should feel like following a pattern, not fighting one.

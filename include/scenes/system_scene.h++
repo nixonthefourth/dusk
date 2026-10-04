@@ -8,13 +8,17 @@
 #include "io/obj_loader.h++"
 #include "procgen/galaxy.h++"
 #include "procgen/planet_generation.h++"
+#include "rendering/hud_renderer.h++"
 #include "scenes/scene.h++"
 #include "systems/docking_computer.h++"
+#include "ui/galaxy_map.h++"
 #include "ui/menu_button.h++"
+#include "ui/system_map.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <iostream>
 #include <random>
 #include <string>
@@ -30,14 +34,16 @@ public:
           font_("assets/fonts/Jersey15-Regular.ttf"),
           label_(font_, "", 28),
           statusText_(font_, "", 24),
-          flightText_(font_, "", 22),
+          hintText_(font_, "[G] GALAXY MAP\n[M] SYSTEM MAP\n[T] TARGET\n[C] DOCK", 15),
           messageText_(font_, "", 30),
           menuTitle_(font_, "", 40),
           stayText_(font_, "STAY", 42),
           leaveText_(font_, "LEAVE", 42)
     {
         statusText_.setFillColor(sf::Color(110, 220, 255));
-        flightText_.setFillColor(sf::Color(110, 220, 255));
+        hintText_.setFillColor(sf::Color(90, 100, 110));
+        hintText_.setLineSpacing(0.95f);
+        hintText_.setPosition({4.f, 38.f});
         messageText_.setFillColor(sf::Color::White);
         messageText_.setStyle(sf::Text::Bold);
         menuTitle_.setFillColor(sf::Color::White);
@@ -67,6 +73,18 @@ public:
 
     void handleEvent(const sf::Event& event, const sf::RenderWindow& window) override
     {
+        if (mapView_ == MapView::Galaxy)
+        {
+            handleGalaxyMapEvent(event, window);
+            return;
+        }
+
+        if (mapView_ == MapView::System)
+        {
+            handleSystemMapEvent(event, window);
+            return;
+        }
+
         if (stationMenuOpen_)
         {
             handleStationMenuEvent(event, window);
@@ -78,13 +96,37 @@ public:
         if (!keyPressed)
             return;
 
+        switch (keyPressed->code)
+        {
+            case sf::Keyboard::Key::G:
+                openGalaxyMap();
+                return;
+
+            case sf::Keyboard::Key::M:
+                openSystemMap();
+                return;
+
+            case sf::Keyboard::Key::T:
+                cycleTarget(world_);
+                return;
+
+            default:
+                break;
+        }
+
         // C toggles the docking computer (Elite's docking-computer key).
         if (keyPressed->code == sf::Keyboard::Key::C)
         {
             if (docking_.phase == DockingPhase::Idle)
-                docking::engage(docking_, world_);
+            {
+                // The docking computer flies to the station, so lock it as the target too.
+                if (docking::engage(docking_, world_))
+                    world_.target.type = TargetType::Station;
+            }
             else
+            {
                 docking::cancel(docking_);
+            }
 
             return;
         }
@@ -96,19 +138,19 @@ public:
 
             if (keyPressed->code == sf::Keyboard::Key::L)
                 docking::launch(docking_);
-
-            return;
         }
+    }
 
-        // Temporary stand-in for the warp scene: cycle systems directly with [ and ], in free flight only.
-        if (docking_.phase != DockingPhase::Idle)
-            return;
+    /** Escape closes an open map instead of quitting the game. */
+    bool capturesEscape() const override
+    {
+        return mapView_ != MapView::None;
+    }
 
-        if (keyPressed->code == sf::Keyboard::Key::RBracket)
-            enterSystem(currentSystemIndex_ + 1);
-
-        if (keyPressed->code == sf::Keyboard::Key::LBracket)
-            enterSystem(currentSystemIndex_ - 1);
+    /** The flight HUD is hidden while a full-screen map is up. */
+    bool showsHud() const override
+    {
+        return mapView_ == MapView::None;
     }
 
     /** Read-only view of the docking computer, e.g. for debugging or future HUD elements. */
@@ -122,10 +164,10 @@ public:
         return stationMenuOpen_;
     }
 
-    /** The player flies the ship only while the docking computer is idle. */
+    /** The player flies the ship only while the docking computer is idle and no map has the keyboard. */
     bool acceptsShipInput() const override
     {
-        return !docking::controlsShip(docking_);
+        return !docking::controlsShip(docking_) && mapView_ == MapView::None;
     }
 
     void updatePhysics(float dt) override
@@ -142,8 +184,20 @@ public:
 
     void drawOverlay(sf::RenderTarget& target) override
     {
+        if (mapView_ == MapView::Galaxy)
+        {
+            galaxyMap_.draw(target, font_, galaxy_, currentSystemIndex_, jumpAvailable(), jumpBlockedReason());
+            return;
+        }
+
+        if (mapView_ == MapView::System)
+        {
+            systemMap_.draw(target, font_, world_, currentSystemName_);
+            return;
+        }
+
         target.draw(label_);
-        drawFlightStatus(target);
+        target.draw(hintText_); // a short column under the system name, clear of the heading tape
         drawDockingStatus(target);
 
         if (stationMenuOpen_)
@@ -158,7 +212,7 @@ private:
     sf::Font font_;
     sf::Text label_;
     sf::Text statusText_;
-    sf::Text flightText_;
+    sf::Text hintText_;
     sf::Text messageText_;
     sf::Text menuTitle_;
     sf::Text stayText_;
@@ -166,6 +220,13 @@ private:
 
     DockingComputer docking_;
     bool stationMenuOpen_ = false;
+
+    /** Which full-screen map, if any, is open over the flight view. */
+    enum class MapView { None, Galaxy, System };
+    MapView mapView_ = MapView::None;
+
+    GalaxyMap galaxyMap_;
+    SystemMap systemMap_;
 
     /** Highlighted station-menu option: 0 = STAY, 1 = LEAVE. */
     int menuSelection_ = 0;
@@ -278,10 +339,7 @@ private:
 
         currentSystemIndex_ = systemIndex;
         currentSystemName_ = info.name;
-        label_.setString(
-            info.name + "  |  system " + std::to_string(systemIndex + 1) + "/" + std::to_string(systemCount) +
-            "  |  [ / ] to travel"
-        );
+        label_.setString(info.name);
     }
 
     void openStationMenu()
@@ -369,32 +427,82 @@ private:
         }
     }
 
-    /** Speed readout and flight-mode flags, just above the throttle panel. */
-    void drawFlightStatus(sf::RenderTarget& target)
+    /* ---- Maps -------------------------------------------------------------------------------- */
+
+    /** Jumps are only possible in free flight: not docked, not under the docking computer. */
+    bool jumpAvailable() const
     {
-        if (docking::controlsShip(docking_))
-            return;
+        return docking_.phase == DockingPhase::Idle;
+    }
 
-        const Ship& ship = world_.playerShip;
-        const int speed = static_cast<int>(std::round(shipSpeed(ship)));
+    std::string jumpBlockedReason() const
+    {
+        return docking_.phase == DockingPhase::Docked ? "LAUNCH FIRST" : "DOCKING IN PROGRESS";
+    }
 
-        std::string status = (ship.cruiseEngaged ? "CRUISE " : "SPEED ") + std::to_string(speed);
-        status += ship.flightAssist ? "   FA ON" : "   FA OFF";
+    void openGalaxyMap()
+    {
+        galaxyMap_.open(galaxy_, currentSystemIndex_);
+        mapView_ = MapView::Galaxy;
+    }
 
-        if (ship.cruiseEngaged)
-            status += "   [J] DROP";
-        else if (shipMassLocked(ship))
-            status += "   MASS LOCKED";
-        else
-            status += "   [J] CRUISE";
+    void openSystemMap()
+    {
+        systemMap_.open();
+        mapView_ = MapView::System;
+    }
 
-        flightText_.setString(status);
-        flightText_.setFillColor(ship.flightAssist ? sf::Color(110, 220, 255) : sf::Color(255, 190, 90));
+    void handleGalaxyMapEvent(const sf::Event& event, const sf::RenderWindow& window)
+    {
+        switch (galaxyMap_.handleEvent(event, window, galaxy_, currentSystemIndex_, jumpAvailable()))
+        {
+            case GalaxyMapAction::Close:
+                mapView_ = MapView::None;
+                break;
 
-        const sf::FloatRect bounds = flightText_.getLocalBounds();
-        flightText_.setOrigin({bounds.position.x, bounds.position.y + bounds.size.y});
-        flightText_.setPosition({18.f, static_cast<float>(target.getSize().y) - 78.f});
-        target.draw(flightText_);
+            case GalaxyMapAction::Jump:
+            {
+                // Stand-in for the warp scene: regenerate the destination from its seed, instantly.
+                const int destination = galaxyMap_.selected();
+                const float distance = galacticDistance(
+                    galaxy_.systems[static_cast<std::size_t>(currentSystemIndex_)],
+                    galaxy_.systems[static_cast<std::size_t>(destination)]
+                );
+
+                enterSystem(destination);
+                mapView_ = MapView::None;
+
+                char message[96];
+                std::snprintf(message, sizeof(message), "ARRIVED IN %s  (%.1f LY)", currentSystemName_.c_str(), distance);
+                docking::showMessage(docking_, message, 3.f);
+                break;
+            }
+
+            case GalaxyMapAction::None:
+                break;
+        }
+    }
+
+    void handleSystemMapEvent(const sf::Event& event, const sf::RenderWindow& window)
+    {
+        switch (systemMap_.handleEvent(event, window, world_))
+        {
+            case SystemMapAction::Close:
+                mapView_ = MapView::None;
+                break;
+
+            case SystemMapAction::OpenGalaxyMap:
+                openGalaxyMap();
+                break;
+
+            case SystemMapAction::TargetStation:
+                if (world_.stationActive)
+                    world_.target.type = world_.target.type == TargetType::Station ? TargetType::None : TargetType::Station;
+                break;
+
+            case SystemMapAction::None:
+                break;
+        }
     }
 
     void drawDockingStatus(sf::RenderTarget& target)
@@ -414,7 +522,7 @@ private:
             statusText_.setString(status);
             const sf::FloatRect bounds = statusText_.getLocalBounds();
             statusText_.setOrigin({bounds.position.x + bounds.size.x, bounds.position.y + bounds.size.y});
-            statusText_.setPosition({static_cast<float>(size.x) - 18.f, static_cast<float>(size.y) - 18.f});
+            statusText_.setPosition({static_cast<float>(size.x) - 18.f, static_cast<float>(size.y) - HudRenderer::dashboardHeight - 10.f});
             target.draw(statusText_);
         }
 

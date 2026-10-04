@@ -1,0 +1,537 @@
+//
+// Galactic chart: every system in the galaxy, laid out on its spiral, with selection and jumping.
+//
+
+#ifndef DUSK_GALAXY_MAP_H
+#define DUSK_GALAXY_MAP_H
+
+#include "math/Vec2.h++"
+#include "procgen/galaxy.h++"
+#include "ui/menu_button.h++"
+#include <SFML/Graphics.hpp>
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <string>
+
+/** What the scene should do after the chart has handled an event. */
+enum class GalaxyMapAction { None, Close, Jump };
+
+/**
+ * Screen-space galactic chart. Owns only view state (selection, zoom, pan); the galaxy itself is
+ * passed in, so the chart can never drift out of step with the systems it shows.
+ *
+ * Controls: arrow keys step to the nearest system in that direction, a click selects, dragging
+ * pans, the wheel or +/- zooms, Enter (or the JUMP button) jumps, G or Escape closes.
+ */
+class GalaxyMap {
+public:
+    /** Width of the information panel on the right-hand side, in pixels. */
+    static constexpr float panelWidth = 250.f;
+
+    /** Resets the view onto the player's current system. */
+    void open(const Galaxy& galaxy, int currentIndex)
+    {
+        selected_ = std::clamp(currentIndex, 0, static_cast<int>(galaxy.systems.size()) - 1);
+        hovered_ = -1;
+        zoom_ = 2.f;
+        viewCenter_ = galaxy.systems[static_cast<std::size_t>(selected_)].mapPosition;
+        dragging_ = false;
+        mouseDown_ = false;
+    }
+
+    int selected() const
+    {
+        return selected_;
+    }
+
+    GalaxyMapAction handleEvent(
+        const sf::Event& event,
+        const sf::RenderWindow& window,
+        const Galaxy& galaxy,
+        int currentIndex,
+        bool jumpAvailable
+    )
+    {
+        const sf::Vector2u size = window.getSize();
+
+        if (const auto* key = event.getIf<sf::Event::KeyPressed>())
+        {
+            switch (key->code)
+            {
+                case sf::Keyboard::Key::Escape:
+                case sf::Keyboard::Key::G:
+                    return GalaxyMapAction::Close;
+
+                case sf::Keyboard::Key::Left: stepSelection(galaxy, {-1.f, 0.f}, size); break;
+                case sf::Keyboard::Key::Right: stepSelection(galaxy, {1.f, 0.f}, size); break;
+                case sf::Keyboard::Key::Up: stepSelection(galaxy, {0.f, -1.f}, size); break;
+                case sf::Keyboard::Key::Down: stepSelection(galaxy, {0.f, 1.f}, size); break;
+
+                case sf::Keyboard::Key::Equal:
+                case sf::Keyboard::Key::Add:
+                    setZoom(zoom_ * 2.f, galaxy);
+                    break;
+
+                case sf::Keyboard::Key::Hyphen:
+                case sf::Keyboard::Key::Subtract:
+                    setZoom(zoom_ * 0.5f, galaxy);
+                    break;
+
+                case sf::Keyboard::Key::Home:
+                case sf::Keyboard::Key::H:
+                    selected_ = currentIndex;
+                    viewCenter_ = galaxy.systems[static_cast<std::size_t>(selected_)].mapPosition;
+                    break;
+
+                case sf::Keyboard::Key::Enter:
+                case sf::Keyboard::Key::Space:
+                    if (canJump(currentIndex, jumpAvailable))
+                        return GalaxyMapAction::Jump;
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        if (const auto* wheel = event.getIf<sf::Event::MouseWheelScrolled>())
+            setZoom(wheel->delta > 0.f ? zoom_ * 2.f : zoom_ * 0.5f, galaxy);
+
+        if (const auto* pressed = event.getIf<sf::Event::MouseButtonPressed>())
+        {
+            if (pressed->button == sf::Mouse::Button::Left)
+            {
+                const sf::Vector2f mouse = ui::toVector2f(pressed->position);
+
+                if (jumpButtonBounds(size).contains(mouse))
+                {
+                    if (canJump(currentIndex, jumpAvailable))
+                        return GalaxyMapAction::Jump;
+
+                    return GalaxyMapAction::None;
+                }
+
+                if (mouse.x < mapWidth(size))
+                {
+                    mouseDown_ = true;
+                    dragging_ = false;
+                    pressPosition_ = mouse;
+                    lastMouse_ = mouse;
+                }
+            }
+        }
+
+        if (const auto* moved = event.getIf<sf::Event::MouseMoved>())
+        {
+            const sf::Vector2f mouse = ui::toVector2f(moved->position);
+
+            if (mouseDown_)
+            {
+                const sf::Vector2f fromPress = mouse - pressPosition_;
+
+                if (dragging_ || std::hypot(fromPress.x, fromPress.y) > 5.f)
+                {
+                    dragging_ = true;
+                    const float scale = pixelsPerLightYear(size);
+                    viewCenter_ -= Vec2{mouse.x - lastMouse_.x, mouse.y - lastMouse_.y} / scale;
+                    clampView();
+                }
+
+                lastMouse_ = mouse;
+            }
+
+            hovered_ = mouse.x < mapWidth(size) ? systemNear(galaxy, mouse, size) : -1;
+        }
+
+        if (const auto* released = event.getIf<sf::Event::MouseButtonReleased>())
+        {
+            if (released->button == sf::Mouse::Button::Left && mouseDown_)
+            {
+                if (!dragging_)
+                {
+                    const int clicked = systemNear(galaxy, ui::toVector2f(released->position), size);
+
+                    if (clicked >= 0)
+                        selected_ = clicked;
+                }
+
+                mouseDown_ = false;
+                dragging_ = false;
+            }
+        }
+
+        return GalaxyMapAction::None;
+    }
+
+    void draw(
+        sf::RenderTarget& target,
+        const sf::Font& font,
+        const Galaxy& galaxy,
+        int currentIndex,
+        bool jumpAvailable,
+        const std::string& jumpBlockedReason
+    ) const
+    {
+        const sf::Vector2u size = target.getSize();
+        const float width = static_cast<float>(size.x);
+        const float height = static_cast<float>(size.y);
+
+        sf::RectangleShape backdrop({width, height});
+        backdrop.setFillColor(sf::Color::Black);
+        target.draw(backdrop);
+
+        drawCore(target, font, size);
+        drawSystems(target, font, galaxy, currentIndex, size);
+        drawPanel(target, font, galaxy, currentIndex, jumpAvailable, jumpBlockedReason, size);
+    }
+
+private:
+    int selected_ = 0;
+    int hovered_ = -1;
+    float zoom_ = 2.f;
+    Vec2 viewCenter_;
+
+    bool mouseDown_ = false;
+    bool dragging_ = false;
+    sf::Vector2f pressPosition_;
+    sf::Vector2f lastMouse_;
+
+    static constexpr float minZoom = 1.f;
+    static constexpr float maxZoom = 16.f;
+
+    static inline const sf::Color accent = sf::Color(110, 220, 255);
+    static inline const sf::Color dim = sf::Color(90, 100, 110);
+
+    bool canJump(int currentIndex, bool jumpAvailable) const
+    {
+        return jumpAvailable && selected_ != currentIndex;
+    }
+
+    static float mapWidth(sf::Vector2u size)
+    {
+        return static_cast<float>(size.x) - panelWidth;
+    }
+
+    float pixelsPerLightYear(sf::Vector2u size) const
+    {
+        const float fit = std::min(mapWidth(size), static_cast<float>(size.y)) * 0.46f / galaxyRadius;
+        return fit * zoom_;
+    }
+
+    sf::Vector2f toScreen(const Vec2& position, sf::Vector2u size) const
+    {
+        const float scale = pixelsPerLightYear(size);
+        return
+        {
+            mapWidth(size) * 0.5f + (position.x - viewCenter_.x) * scale,
+            static_cast<float>(size.y) * 0.5f + (position.y - viewCenter_.y) * scale
+        };
+    }
+
+    /** Zooms around the selected system, keeping it in view. */
+    void setZoom(float zoom, const Galaxy& galaxy)
+    {
+        zoom_ = std::clamp(zoom, minZoom, maxZoom);
+        viewCenter_ = zoom_ <= minZoom ? Vec2{} : galaxy.systems[static_cast<std::size_t>(selected_)].mapPosition;
+        clampView();
+    }
+
+    void clampView()
+    {
+        viewCenter_.x = std::clamp(viewCenter_.x, -galaxyRadius, galaxyRadius);
+        viewCenter_.y = std::clamp(viewCenter_.y, -galaxyRadius, galaxyRadius);
+    }
+
+    /** Nearest system to a screen point within a small pick radius, or -1. */
+    int systemNear(const Galaxy& galaxy, sf::Vector2f point, sf::Vector2u size) const
+    {
+        constexpr float pickRadius = 12.f;
+        int best = -1;
+        float bestDistance = pickRadius;
+
+        for (std::size_t index = 0; index < galaxy.systems.size(); ++index)
+        {
+            const sf::Vector2f screen = toScreen(galaxy.systems[index].mapPosition, size);
+            const float distance = std::hypot(screen.x - point.x, screen.y - point.y);
+
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = static_cast<int>(index);
+            }
+        }
+
+        return best;
+    }
+
+    /**
+     * Moves the selection to the system that best continues in a screen direction: close by, and
+     * as straight along that direction as possible. Systems more than 60 degrees off are ignored.
+     */
+    void stepSelection(const Galaxy& galaxy, Vec2 direction, sf::Vector2u size)
+    {
+        const Vec2 origin = galaxy.systems[static_cast<std::size_t>(selected_)].mapPosition;
+        int best = -1;
+        float bestScore = 1e30f;
+
+        for (std::size_t index = 0; index < galaxy.systems.size(); ++index)
+        {
+            if (static_cast<int>(index) == selected_)
+                continue;
+
+            const Vec2 offset = galaxy.systems[index].mapPosition - origin;
+            const float distance = length(offset);
+
+            if (distance <= 0.f)
+                continue;
+
+            const float alignment = dot(offset / distance, direction);
+
+            if (alignment < 0.5f)
+                continue;
+
+            const float score = distance / (alignment * alignment);
+
+            if (score < bestScore)
+            {
+                bestScore = score;
+                best = static_cast<int>(index);
+            }
+        }
+
+        if (best < 0)
+            return;
+
+        selected_ = best;
+
+        // Keep the selection on screen: recentre once it nears the edge of the chart area.
+        const sf::Vector2f screen = toScreen(galaxy.systems[static_cast<std::size_t>(best)].mapPosition, size);
+        const float margin = 60.f;
+
+        if (screen.x < margin || screen.x > mapWidth(size) - margin ||
+            screen.y < margin || screen.y > static_cast<float>(size.y) - margin)
+        {
+            viewCenter_ = galaxy.systems[static_cast<std::size_t>(best)].mapPosition;
+            clampView();
+        }
+    }
+
+    static sf::FloatRect jumpButtonBounds(sf::Vector2u size)
+    {
+        const float x = static_cast<float>(size.x) - panelWidth + 20.f;
+        return {{x, static_cast<float>(size.y) - 112.f}, {panelWidth - 40.f, 44.f}};
+    }
+
+    static sf::Color systemColor(const SystemInfo& info)
+    {
+        switch (info.economyTier)
+        {
+            case EconomyTier::Poor: return sf::Color(130, 130, 130);
+            case EconomyTier::Developing: return sf::Color(225, 225, 225);
+            case EconomyTier::Progressive: return accent;
+        }
+
+        return sf::Color::White;
+    }
+
+    static void drawLine(sf::RenderTarget& target, sf::Vector2f a, sf::Vector2f b, sf::Color color)
+    {
+        const sf::Vertex line[] = {sf::Vertex(a, color), sf::Vertex(b, color)};
+        target.draw(line, 2, sf::PrimitiveType::Lines);
+    }
+
+    static void drawRing(sf::RenderTarget& target, sf::Vector2f center, float radius, sf::Color color, float thickness = 1.f)
+    {
+        sf::CircleShape ring(radius, 32);
+        ring.setOrigin({radius, radius});
+        ring.setPosition(center);
+        ring.setFillColor(sf::Color::Transparent);
+        ring.setOutlineColor(color);
+        ring.setOutlineThickness(thickness);
+        target.draw(ring);
+    }
+
+    static void drawLabel(
+        sf::RenderTarget& target,
+        const sf::Font& font,
+        const std::string& string,
+        sf::Vector2f position,
+        unsigned size,
+        sf::Color color
+    )
+    {
+        sf::Text text(font, string, size);
+        text.setFillColor(color);
+        text.setPosition(position);
+        target.draw(text);
+    }
+
+    static std::string formatDistance(float lightYears)
+    {
+        char buffer[32];
+        std::snprintf(buffer, sizeof(buffer), "%.1f LY", lightYears);
+        return buffer;
+    }
+
+    /** Faint range rings and a marker at the galactic core, the game's end goal. */
+    void drawCore(sf::RenderTarget& target, const sf::Font& font, sf::Vector2u size) const
+    {
+        const sf::Vector2f core = toScreen({}, size);
+        const float scale = pixelsPerLightYear(size);
+
+        for (float ring = 100.f; ring <= galaxyRadius; ring += 100.f)
+            drawRing(target, core, ring * scale, sf::Color(40, 46, 54));
+
+        const sf::Color coreColor(255, 190, 90);
+        drawLine(target, {core.x - 10.f, core.y}, {core.x + 10.f, core.y}, coreColor);
+        drawLine(target, {core.x, core.y - 10.f}, {core.x, core.y + 10.f}, coreColor);
+        drawRing(target, core, 5.f, coreColor);
+        drawLabel(target, font, "GALACTIC CORE", {core.x + 10.f, core.y + 6.f}, 16, coreColor);
+    }
+
+    void drawSystems(
+        sf::RenderTarget& target,
+        const sf::Font& font,
+        const Galaxy& galaxy,
+        int currentIndex,
+        sf::Vector2u size
+    ) const
+    {
+        const float mapRight = mapWidth(size);
+        const float dotRadius = std::clamp(1.2f + zoom_ * 0.35f, 1.5f, 4.f);
+        const bool showNames = zoom_ >= 8.f;
+
+        sf::CircleShape dot(dotRadius, 10);
+        dot.setOrigin({dotRadius, dotRadius});
+
+        for (std::size_t index = 0; index < galaxy.systems.size(); ++index)
+        {
+            const SystemInfo& info = galaxy.systems[index];
+            const sf::Vector2f screen = toScreen(info.mapPosition, size);
+
+            if (screen.x < -10.f || screen.x > mapRight + 10.f || screen.y < -10.f || screen.y > static_cast<float>(size.y) + 10.f)
+                continue;
+
+            dot.setPosition(screen);
+            dot.setFillColor(systemColor(info));
+            target.draw(dot);
+
+            if (showNames && screen.x < mapRight - 60.f)
+                drawLabel(target, font, info.name, {screen.x + 6.f, screen.y - 8.f}, 14, dim);
+        }
+
+        const SystemInfo& current = galaxy.systems[static_cast<std::size_t>(currentIndex)];
+        const SystemInfo& selected = galaxy.systems[static_cast<std::size_t>(selected_)];
+        const sf::Vector2f currentScreen = toScreen(current.mapPosition, size);
+        const sf::Vector2f selectedScreen = toScreen(selected.mapPosition, size);
+
+        if (selected_ != currentIndex)
+        {
+            drawLine(target, currentScreen, selectedScreen, sf::Color(110, 220, 255, 140));
+
+            const sf::Vector2f middle = (currentScreen + selectedScreen) * 0.5f;
+            drawLabel(target, font, formatDistance(galacticDistance(current, selected)), {middle.x + 6.f, middle.y}, 15, accent);
+        }
+
+        if (hovered_ >= 0 && hovered_ != selected_)
+        {
+            const sf::Vector2f hoverScreen = toScreen(galaxy.systems[static_cast<std::size_t>(hovered_)].mapPosition, size);
+            drawRing(target, hoverScreen, 7.f, sf::Color(200, 200, 200));
+            drawLabel(target, font, galaxy.systems[static_cast<std::size_t>(hovered_)].name, {hoverScreen.x + 9.f, hoverScreen.y - 9.f}, 16, sf::Color::White);
+        }
+
+        // You-are-here diamond.
+        sf::CircleShape here(7.f, 4);
+        here.setOrigin({7.f, 7.f});
+        here.setPosition(currentScreen);
+        here.setFillColor(sf::Color::Transparent);
+        here.setOutlineColor(sf::Color::White);
+        here.setOutlineThickness(2.f);
+        target.draw(here);
+
+        // Selection reticle.
+        const float r = 11.f;
+        const float c = 5.f;
+        const sf::Vector2f s = selectedScreen;
+        drawLine(target, {s.x - r, s.y - r}, {s.x - r + c, s.y - r}, accent);
+        drawLine(target, {s.x - r, s.y - r}, {s.x - r, s.y - r + c}, accent);
+        drawLine(target, {s.x + r, s.y - r}, {s.x + r - c, s.y - r}, accent);
+        drawLine(target, {s.x + r, s.y - r}, {s.x + r, s.y - r + c}, accent);
+        drawLine(target, {s.x - r, s.y + r}, {s.x - r + c, s.y + r}, accent);
+        drawLine(target, {s.x - r, s.y + r}, {s.x - r, s.y + r - c}, accent);
+        drawLine(target, {s.x + r, s.y + r}, {s.x + r - c, s.y + r}, accent);
+        drawLine(target, {s.x + r, s.y + r}, {s.x + r, s.y + r - c}, accent);
+        drawLabel(target, font, selected.name, {s.x + 14.f, s.y - 10.f}, 18, accent);
+    }
+
+    void drawPanel(
+        sf::RenderTarget& target,
+        const sf::Font& font,
+        const Galaxy& galaxy,
+        int currentIndex,
+        bool jumpAvailable,
+        const std::string& jumpBlockedReason,
+        sf::Vector2u size
+    ) const
+    {
+        const float left = static_cast<float>(size.x) - panelWidth;
+        const float height = static_cast<float>(size.y);
+
+        sf::RectangleShape panel({panelWidth, height});
+        panel.setPosition({left, 0.f});
+        panel.setFillColor(sf::Color(8, 12, 18));
+        panel.setOutlineColor(sf::Color(60, 70, 78));
+        panel.setOutlineThickness(1.f);
+        target.draw(panel);
+
+        const SystemInfo& info = galaxy.systems[static_cast<std::size_t>(selected_)];
+        const SystemInfo& current = galaxy.systems[static_cast<std::size_t>(currentIndex)];
+        const float x = left + 20.f;
+        float y = 16.f;
+
+        drawLabel(target, font, "GALACTIC CHART", {x, y}, 18, dim);
+        y += 26.f;
+        drawLabel(target, font, info.name, {x, y}, 32, sf::Color::White);
+        y += 44.f;
+
+        const auto row = [&](const std::string& label, const std::string& value, sf::Color color = sf::Color::White)
+        {
+            drawLabel(target, font, label, {x, y}, 17, dim);
+            drawLabel(target, font, value, {x + 84.f, y}, 17, color);
+            y += 23.f;
+        };
+
+        row("DISTANCE", selected_ == currentIndex ? "YOU ARE HERE" : formatDistance(galacticDistance(current, info)), accent);
+        row("TO CORE", formatDistance(length(info.mapPosition)));
+        row("ECONOMY", economyTierName(info.economyTier), systemColor(info));
+        row("TRADE", info.occupation);
+        row("PLANETS", std::to_string(info.planetCount));
+        row("STATION", info.stationCount > 0 && info.planetCount > 0 ? "YES" : "NONE");
+        row("TRAFFIC", std::to_string(info.npcShipCount) + " SHIPS");
+
+        y += 6.f;
+        drawLabel(target, font, "EXPORTS", {x, y}, 17, dim);
+        y += 23.f;
+
+        for (const std::string& good : info.goods)
+        {
+            if (y > height - 150.f)
+                break;
+
+            drawLabel(target, font, good, {x + 10.f, y}, 17, sf::Color::White);
+            y += 21.f;
+        }
+
+        const sf::FloatRect button = jumpButtonBounds(size);
+        const bool enabled = canJump(currentIndex, jumpAvailable);
+        sf::Text jumpText(font, enabled ? "JUMP" : (selected_ == currentIndex ? "CURRENT SYSTEM" : jumpBlockedReason), enabled ? 28 : 18);
+        ui::drawButton(target, button, jumpText, enabled, enabled);
+
+        drawLabel(target, font, "ARROWS / CLICK  select", {x, height - 58.f}, 15, dim);
+        drawLabel(target, font, "WHEEL / +-  zoom   DRAG  pan", {x, height - 40.f}, 15, dim);
+        drawLabel(target, font, "ENTER  jump   H  home   G  close", {x, height - 22.f}, 15, dim);
+    }
+};
+
+#endif //DUSK_GALAXY_MAP_H

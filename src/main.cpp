@@ -89,7 +89,7 @@ int main() {
 
             if (const auto* keyPressed = event->getIf<sf::Event::KeyPressed>())
             {
-                if (keyPressed->code == sf::Keyboard::Key::Escape)
+                if (keyPressed->code == sf::Keyboard::Key::Escape && !sceneManager.activeScene().capturesEscape())
                     window.close();
             }
 
@@ -136,10 +136,7 @@ int main() {
         }
 
         if (sceneManager.activeScene().showsHud())
-        {
-            hudRenderer.drawFlightMarkers(window, renderWorld.playerShip, camera);
-            hudRenderer.draw(window, renderWorld.playerShip);
-        }
+            hudRenderer.draw(window, renderWorld, camera);
 
         sceneManager.activeScene().drawOverlay(window);
         window.display();
