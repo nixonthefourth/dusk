@@ -47,6 +47,7 @@ add_executable(dusk src/main.cpp
         include/ui/station_menu.h++
         include/objects/commander.h++
         include/systems/refuelling.h++
+        include/systems/save_game.h++
         include/ui/menu_button.h++
         include/ui/format.h++
         include/ui/galaxy_map.h++

@@ -17,6 +17,7 @@
 #include "systems/docking_computer.h++"
 #include "ui/galaxy_map.h++"
 #include "ui/menu_button.h++"
+#include "systems/save_game.h++"
 #include "ui/station_menu.h++"
 #include "ui/system_map.h++"
 #include "ui/style.h++"
@@ -34,7 +35,24 @@
 /** The one reused scene for every system; regenerated on entry from the galaxy seed. */
 class SystemScene : public Scene {
 public:
-    /** Binds this scene to a galaxy and immediately enters one of its systems. */
+    /**
+     * Starts a game from the main menu: a new commander in a fresh slot, or a loaded save. Either
+     * way the commander begins docked at the station of the save's system (saves are made at
+     * stations), and a new game is saved straight away so its slot shows as taken.
+     */
+    SystemScene(Galaxy& galaxy, const GameLaunch& launch)
+        : SystemScene(galaxy, std::clamp(launch.save.systemIndex, 0, static_cast<int>(galaxy.systems.size()) - 1))
+    {
+        saveSlot_ = launch.slot;
+        applySave(launch.save);
+
+        if (launch.isNewGame && saveSlot_ >= 0)
+            saveToSlot(false);
+        else
+            refreshSlotSummary();
+    }
+
+    /** Binds this scene to a galaxy and enters one of its systems, with no save slot (tests and tools). */
     SystemScene(Galaxy& galaxy, int startingSystemIndex)
         : galaxy_(galaxy),
           font_("assets/fonts/Jersey15-Regular.ttf"),
@@ -174,6 +192,14 @@ public:
         return mapView_ == MapView::None && !inHyperspaceSequence() && !stationMenuOpen_;
     }
 
+    /** Hands main.cpp a requested transition (MAIN MENU from the station) exactly once. */
+    SceneTransition consumeTransition() override
+    {
+        const SceneTransition transition = pendingTransition_;
+        pendingTransition_ = SceneTransition::None;
+        return transition;
+    }
+
     /** Travel-animation state for the effects renderer. */
     TravelEffects travelEffects() const override
     {
@@ -258,6 +284,7 @@ public:
 
         updateCruiseTransitionEffects(dt);
         updateHyperspace(dt);
+        playTime_ += dt;
     }
 
     /**
@@ -354,6 +381,14 @@ private:
     /** The docked station screen, and the commander whose credits it spends. */
     StationMenu stationMenu_;
     Commander commander_;
+
+    /** The save slot this game belongs to (0-2), or -1 if it can't be saved; time played; what's in the slot now. */
+    int saveSlot_ = -1;
+    double playTime_ = 0.0;
+    std::optional<SaveGame> slotSummary_;
+
+    /** A transition requested from inside the game (MAIN MENU on the station screen). */
+    SceneTransition pendingTransition_ = SceneTransition::None;
 
 
     /** Rebuilds the world from the system's seed. Same index always gives the same layout. */
@@ -528,6 +563,18 @@ private:
         view.pricePerTonne = price;
         view.fillQuote = quoteRefuel(ship, commander_, price, ship.fuelCapacity);
         view.oneTonneQuote = quoteRefuel(ship, commander_, price, 1.f);
+
+        view.saveSlot = saveSlot_;
+        view.hasSave = slotSummary_.has_value();
+
+        if (slotSummary_)
+        {
+            view.savedAt = slotSummary_->savedAt;
+            view.playTime = formatPlayTime(slotSummary_->playTimeSeconds);
+            const int savedIndex = std::clamp(slotSummary_->systemIndex, 0, static_cast<int>(galaxy_.systems.size()) - 1);
+            view.savedSystem = galaxy_.systems[static_cast<std::size_t>(savedIndex)].name;
+        }
+
         return view;
     }
 
@@ -567,9 +614,85 @@ private:
                 break;
             }
 
+            case StationMenuAction::SaveGame:
+                saveToSlot(true);
+                break;
+
+            case StationMenuAction::LoadGame:
+                if (const auto save = saveSlot_ >= 0 ? readSave(saveSlot_) : std::nullopt)
+                {
+                    applySave(*save);
+                    refreshSlotSummary();
+                    docking::showMessage(docking_, "GAME LOADED", 2.f);
+                }
+                else
+                {
+                    docking::showMessage(docking_, "NOTHING SAVED IN THIS SLOT", 2.f);
+                }
+                break;
+
+            case StationMenuAction::MainMenu:
+                pendingTransition_ = SceneTransition::MainMenu;
+                break;
+
             case StationMenuAction::None:
                 break;
         }
+    }
+
+    /* ---- Saving and loading ------------------------------------------------------------------ */
+
+    /** The current game as a save: commander, credits, fuel, this system and time played. */
+    SaveGame currentSave() const
+    {
+        SaveGame save;
+        save.commanderName = commander_.name;
+        save.credits = commander_.credits;
+        save.galaxySeed = galaxy_.seed;
+        save.systemIndex = currentSystemIndex_;
+        save.systemName = currentSystemName_;
+        save.fuel = world_.playerShip.fuel;
+        save.playTimeSeconds = playTime_;
+        return save;
+    }
+
+    /** Writes the current game to this commander's slot; with `announce`, says so (or why it failed). */
+    void saveToSlot(bool announce)
+    {
+        std::string error;
+        const bool saved = saveSlot_ >= 0 && writeSave(saveSlot_, currentSave(), &error);
+        refreshSlotSummary();
+
+        if (announce)
+            docking::showMessage(docking_, saved ? "GAME SAVED" : "SAVE FAILED: " + (error.empty() ? std::string("NO SLOT") : error), 2.5f);
+    }
+
+    /** Re-reads what's in the slot, for the SAVE GAME page. */
+    void refreshSlotSummary()
+    {
+        slotSummary_ = saveSlot_ >= 0 ? readSave(saveSlot_) : std::nullopt;
+    }
+
+    /**
+     * Puts the game into a save's state: the commander and their credits, the saved system (rebuilt
+     * from its seed), the fuel aboard, and the ship parked in that system's station with the station
+     * screen open. If the system has no station (only possible for a brand-new game), the ship
+     * starts in space at the usual spawn point instead.
+     */
+    void applySave(const SaveGame& save)
+    {
+        commander_.name = save.commanderName;
+        commander_.credits = save.credits;
+        playTime_ = save.playTimeSeconds;
+        hyperspace_ = {};
+        mapView_ = MapView::None;
+
+        const int systemIndex = std::clamp(save.systemIndex, 0, static_cast<int>(galaxy_.systems.size()) - 1);
+        enterSystem(systemIndex);
+        world_.playerShip.fuel = std::clamp(save.fuel, 0.f, world_.playerShip.fuelCapacity);
+
+        if (docking::dockImmediately(docking_, world_))
+            openStationMenu();
     }
 
     /* ---- Travel animations ------------------------------------------------------------------- */

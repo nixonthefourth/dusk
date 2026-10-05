@@ -4,7 +4,7 @@
 
 `dusk` is a small SFML/C++ experiment that fakes 3D in a 2D window. There is no OpenGL, no depth buffer, no borrowed rendering pipeline underneath it — just a `Vec3` world, a hand-rolled camera and view matrix, a perspective projector, and SFML lines and shapes doing the actual drawing. Everything from vector math to frustum clipping to Newtonian ship physics is written from scratch, on purpose.
 
-Pick PLAY, and you drop into a procedurally generated star system: a filled white sun, a handful of orbiting gridded planets, a spinning wireframe space station you can auto-dock with, and a scatter of NPC ships going about their own simple-reflex business — all seeded from one number. Open the galactic chart with `G` to pick any of the galaxy's 1000 systems and jump there, or the system map with `M` to see what's orbiting where.
+Pick PLAY, choose one of three save slots, name your commander (or load one you've already made), and you start docked at a station in a procedurally generated star system: a filled white sun, a handful of orbiting gridded planets, a spinning wireframe space station you can auto-dock with, and a scatter of NPC ships going about their own simple-reflex business — all seeded from one number. Open the galactic chart with `G` to pick any of the galaxy's 1000 systems and jump there, or the system map with `M` to see what's orbiting where.
 
 ## Manifesto
 
@@ -38,6 +38,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - A recycled, endless-feeling starfield.
 - Frustum clipping for both points and line segments, with a small side guard-band so things don't visibly pop in at the frustum edges.
 - A system's star drawn as a solid filled disc, and its planets drawn as gridded, optionally ringed wireframes — sorted and drawn back-to-front together, with per-edge visibility shading based on facing direction.
+- Three save slots: name a new commander, save at any station, and load from the main menu or the station screen.
 - Fuel with mass: a 6-tonne tank limits how far you can jump (40 LY full) and how long you can cruise (about ten minutes flat out), and every tonne aboard makes the ship slower to accelerate and to turn.
 - A station screen while docked: refuelling at local prices with your credits, launch, and pages laid out for market, upgrades, missions and a garage.
 - NPC ships that visibly dock: they line up on the slot, roll to match it and fly in, then launch back out of it later.
@@ -104,6 +105,7 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [x] Object-level collision hitboxes
   - [x] Fuel expenditure (mass matters)
 - [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear) — the docking computer exists, fitted as standard for now
+- [x] Save/load: three commander slots, named commanders, saving at stations
 - [~] Docking — automatic docking and launch work, NPCs dock and launch visibly, and the station screen offers refuelling; manual docking is next
 - [~] Space stations: small, medium, large — one procedurally placed small station (`station_s.obj`) per eligible system today
 - [x] Wireframe graphics style
@@ -137,11 +139,15 @@ Game assets (fonts, OBJ ship models) are copied into the build directory automat
 
 ## Controls
 
-The main menu accepts:
+The main menu has three screens:
 
-- `Enter` or `Space`: start the first test scene.
-- Mouse click on `PLAY`: start the first test scene.
-- Mouse click on `EXIT`, or `Escape`: quit.
+- **Title.** `Enter`/`Space` or clicking PLAY opens the slot screen. Clicking EXIT, or `Escape`, quits.
+- **Slots.** Three save slots, each showing its commander, where and when they last saved, credits and play time, or EMPTY.
+  - `Up`/`Down` choose a slot (or BACK).
+  - `Enter` loads an occupied slot, or starts a new game in an empty one.
+  - `D` or `Delete` asks to delete the selected slot; press it again (or `Enter`) to confirm, anything else cancels.
+  - `Escape` goes back to the title. The mouse works throughout: click a card, its DELETE button, or BACK.
+- **Naming** (new games). Type your commander's name: letters, digits, spaces, hyphens, apostrophes and full stops, shown in capitals, up to 16 characters. `Backspace` deletes, `Enter` starts, and `Escape` goes back to the slots. Leave it blank to fly as JAMESON.
 
 Playable scenes use a ship-first input pipeline:
 
@@ -192,6 +198,7 @@ While docked:
 - `Up`/`Down` (or `W`/`S`, `Tab`) choose a service. `Enter`/`Space` does the page's main action: fill the tank on REFUEL, launch on LAUNCH.
 - On REFUEL, `B` buys one tonne.
 - `L` launches from any page, and `Escape` closes the screen (you stay docked). The mouse works throughout.
+- SAVE GAME shows your slot and what's saved in it. `Enter` saves; LOAD (click) restores the last save; MAIN MENU (click) returns to the title.
 - With the screen closed: `Enter` reopens it, `L` launches.
 
 With flight assist on (the default), throttle is a speed demand: `W`/`S` choose how fast you want to go along the nose, and the thrusters get you there and hold it. Turning swings your velocity round with the nose, because the RCS cancels the sideways drift. `X` (or throttle to `0`) brings the ship to a stop; `Arrow Down` then lets you back up slowly.
@@ -246,6 +253,7 @@ include/
     ship_physics.h++
     travel_effects.h++
     refuelling.h++
+    save_game.h++
     orbital_physics.h++
     npc_ai.h++
     docking_computer.h++
@@ -723,7 +731,8 @@ The key idea holding this together is **determinism**: `generateGalaxy(seed)` al
 `main.cpp` builds the one `Galaxy` for the whole run:
 
 ```cpp
-Galaxy galaxy = generateGalaxy(1337u); // TODO: seed from a save file or menu input later
+// The galaxy every new game starts in. Loading a save from a different seed regenerates it.
+Galaxy galaxy = generateGalaxy(1337u);
 ```
 
 ## Stations
@@ -803,6 +812,76 @@ Frequency: after each roam leg an NPC now heads for the station 55% of the time 
 
 Nothing in the game currently displays these prices or lets the player buy or sell anything — this is infrastructure for the trading/economy loop on the roadmap, deliberately kept as a pure function of already-generated data so it's cheap to call from a future map or station UI without needing its own persistent state yet.
 
+## Saving And Loading
+
+Dusk keeps three save slots. Every game belongs to one: you pick an empty slot and name a commander to start, or pick an occupied one to carry on.
+
+### What's saved, and when
+
+Saving happens at stations, as in Elite: the station screen's SAVE GAME page writes the current game to your slot. Because of that, a save doesn't need a ship position. Loading always puts you back docked in the station of the system you saved in, with the station screen open.
+
+A save (`SaveGame` in `include/systems/save_game.h++`) holds:
+
+| Field | Meaning |
+| --- | --- |
+| `commanderName` | the name you chose (sanitised: capitals, allowed characters only, up to 16) |
+| `credits` | your balance |
+| `galaxySeed` | which galaxy you live in (always 1337 for now) |
+| `systemIndex`, `systemName` | where you saved; the name is stored for the slot screen only |
+| `fuel` | tonnes aboard |
+| `playTimeSeconds` | time played in this slot |
+| `savedAt` | local time of the save, for display |
+
+The world itself isn't saved and doesn't need to be: systems are rebuilt from the seed (see [Seeds And Determinism](#seeds-and-determinism)), so the station you return to is the one you left.
+
+A **new game** is saved straight away, so its slot shows as taken even if you quit at once. It starts you docked at the station of system 0. If that system happens to have no station, you start in space at the usual spawn point.
+
+**LOAD** on the station screen restores your slot's last save, and **MAIN MENU** returns to the title. Both discard anything since your last save, and the page says so.
+
+### Where saves live
+
+Saves are written to each platform's usual place for per-user app data, not the project folder, so they never end up in git:
+
+| Platform | Folder |
+| --- | --- |
+| macOS | `~/Library/Application Support/Dusk/saves` |
+| Linux | `$XDG_DATA_HOME/dusk/saves`, or `~/.local/share/dusk/saves` |
+| Windows | `%APPDATA%\Dusk\saves` |
+
+Setting the `DUSK_SAVE_DIR` environment variable overrides all of these, which is handy for testing with throwaway saves. The files are `slot1.sav`, `slot2.sav` and `slot3.sav`.
+
+### The format
+
+A save is a small, readable text file:
+
+```text
+dusk-save 1
+name=NICK
+credits=1000
+galaxySeed=1337
+system=0
+systemName=JorEl Minor
+fuel=6
+playTime=5.22
+savedAt=2026-10-05 20:44
+```
+
+Three choices keep it robust:
+
+- **Versioned and tolerant.** The first line is `dusk-save <version>`. `parseSave()` ignores keys it doesn't know and leaves missing keys at their defaults, so files from older and newer versions both load. Values are sanity-checked: names are re-sanitised, and credits, fuel and system indices can't go negative. `SystemScene` also clamps the system index to the galaxy and the fuel to the tank.
+- **Atomic writes.** `writeSave()` writes `slotN.sav.tmp`, then renames it over the real file. A crash or power cut mid-save leaves the previous save intact, never a half-written one.
+- **Deleting takes two presses** on the slot screen.
+
+### Adding something to the save
+
+To save something new, for example cargo or a ship upgrade:
+
+1. add a field to `SaveGame`;
+2. write it in `serialiseSave()` and read it in `parseSave()`;
+3. fill it in `SystemScene::currentSave()` and apply it in `SystemScene::applySave()`.
+
+Older saves simply load with the field's default. Bump `saveFormatVersion` if you ever change what an existing key means.
+
 ## Fuel And Mass
 
 Fuel is a resource you have to manage, and it's real mass.
@@ -832,7 +911,7 @@ Rotation scales too, through `shipMassRatio()`: total mass divided by the half-t
 
 Docking opens the station screen (`include/ui/station_menu.h++`). Its header shows the station name, your commander name, your credits and your fuel. Below that are a list of services and the selected service's page.
 
-**Built to grow.** The services are a table, `stationServices`, holding each service's `StationPage`, label, whether it's available yet, and a description. MARKET, UPGRADES, MISSIONS and GARAGE are listed today as `SOON`, each with a page describing what it will do. Building one means:
+**Built to grow.** The services are a table, `stationServices`, holding each service's `StationPage`, label, whether it's available yet, and a description. MARKET, UPGRADES, MISSIONS and GARAGE are listed today as `SOON`, each with a page describing what it will do. SAVE GAME shows your slot and its last save, with SAVE, LOAD and MAIN MENU buttons (see [Saving And Loading](#saving-and-loading)); pages can have any number of buttons, which share the page's width. Building one means:
 
 1. setting `available = true` in the table;
 2. adding its page in `drawPage()`;
@@ -848,7 +927,7 @@ The menu itself owns only its selection. Everything it displays comes from a `St
 
 The price comes from the local economy: `fuelPricePerTonne()` multiplies the 12 CR/t base by `economyTierMultiplier()`, so fuel costs 13.8 CR/t in Poor systems, 12 in Developing and 10.2 in Progressive. The page shows the gauge, your current and full-tank jump range, your ship's mass against its hull mass, the price, and two buttons that show what they'll buy: FILL (or TANK FULL / NO CREDITS) and BUY 1 t.
 
-**The commander.** `Commander` (`include/objects/commander.h++`) holds the player's persistent state that isn't ship physics. Today that's a name, `JAMESON` after Elite's default commander, and credits, starting at 1,000. `SystemScene` keeps it across jumps. There's no way to earn credits yet; missions and trading will add one.
+**The commander.** `Commander` (`include/objects/commander.h++`) holds the player's persistent state that isn't ship physics. Today that's the name you chose when starting the game (JAMESON, after Elite's default commander, if you left it blank) and credits, starting at 1,000. `SystemScene` keeps it across jumps, and it is written to your save slot (see [Saving And Loading](#saving-and-loading)). There's no way to earn credits yet; missions and trading will add one.
 
 ## The Camera
 
@@ -1093,7 +1172,7 @@ Scene code lives in `include/scenes/`:
 
 - `scene.h++`: the base `Scene` interface.
 - `scene_manager.h++`: owns and exposes the currently-active scene.
-- `main_menu.h++`: the start menu, with keyboard and mouse activation and a showcase-camera ship display.
+- `main_menu.h++`: the main menu's title, save-slot and commander-naming screens, over a showcase-camera ship display.
 - `system_scene.h++`: the one scene every system is played through, regenerated from the galaxy on each entry.
 - `default_scene.h++`: a minimal experimental scene kept around for quick manual testing.
 
@@ -1137,6 +1216,7 @@ public:
 enum class SceneTransition {
     None,
     EnterSystem,
+    MainMenu,
     Exit
 };
 ```
@@ -1144,11 +1224,13 @@ enum class SceneTransition {
 Current flow:
 
 ```text
-MainMenuScene
-  -> SystemScene (Enter/Space/PLAY click, always entering system 0 today)
+MainMenuScene  --(slot loaded, or new commander named: EnterSystem + a GameLaunch)-->  SystemScene
+SystemScene    --(MAIN MENU on the station screen: MainMenu)-->                         MainMenuScene
 ```
 
-`main.cpp` owns a small `applySceneTransition` lambda that matches on the returned transition, calls `sceneManager.setScene<...>()`, resets input/camera-rig state, and re-primes the camera and streaming for the new scene — so a fresh scene never starts from a stale camera angle or a leftover keypress. Note that `EnterSystem` always constructs a brand-new `SystemScene(galaxy, 0)`; travelling between systems from inside `SystemScene` (by jumping from the galactic chart) is handled entirely within that one scene instance instead, by regenerating its own `World` in place — see `SystemScene::enterSystem()` in `system_scene.h++`.
+Starting a game needs more than "which scene": it needs which slot, and what's in it. A scene that requests `EnterSystem` therefore also offers a `GameLaunch` through `Scene::consumeGameLaunch()`, holding the slot, the `SaveGame` and whether it's a new game. `main.cpp` takes it, regenerates the galaxy if the save comes from a different seed, and builds `SystemScene(galaxy, launch)`.
+
+`main.cpp` owns a small `applySceneTransition` lambda that matches on the returned transition, calls `sceneManager.setScene<...>()`, resets input/camera-rig state, and re-primes the camera and streaming for the new scene — so a fresh scene never starts from a stale camera angle or a leftover keypress. Note that `EnterSystem` always constructs a brand-new `SystemScene` from the launch; travelling between systems from inside `SystemScene` (by jumping from the galactic chart) is handled entirely within that one scene instance instead, by regenerating its own `World` in place — see `SystemScene::enterSystem()` in `system_scene.h++`.
 
 `SceneTransition` still has room for more values as new top-level scenes show up — a galactic map screen or a dedicated warp/travel scene would each earn their own entry, requested the same way `EnterSystem` is today.
 
@@ -1521,7 +1603,8 @@ This is still intentionally small:
 - No depth buffer and no triangle rasterizer — everything visible is either a projected line, a projected point, or an SFML shape primitive.
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
-- There's no way to earn credits yet (missions and trading will add one), and `EnterSystem` (PLAY on the menu) always enters system 0 regardless of which system you were last in.
+- There's no way to earn credits yet (missions and trading will add one).
+- Saving is only possible while docked, and a save holds the commander, credits, fuel, system and play time. Nothing about the world itself is saved; it's regenerated from the seed.
 - The economy layer computes prices per system but has no trading UI, no inventory, and no supply/demand — it's generated data with nowhere to spend it yet.
 - Only one station gets built per system even when `SystemInfo::stationCount` rolls higher.
 - No true fixed time-step accumulator; physics is split into sub-steps of at most 1/120 s, but their size still follows the frame time.

@@ -18,7 +18,7 @@
 #include <vector>
 
 /** Every service the station screen can show. Add a value here and a row in stationServices to add a page. */
-enum class StationPage { Refuel, Market, Outfitting, Missions, Garage, Launch };
+enum class StationPage { Refuel, Market, Outfitting, Missions, Garage, SaveGame, Launch };
 
 /** One entry in the service list. */
 struct StationService {
@@ -33,18 +33,19 @@ struct StationService {
 };
 
 /** The services, in list order. LAUNCH stays last. */
-inline const std::array<StationService, 6> stationServices =
+inline const std::array<StationService, 7> stationServices =
 {{
     {StationPage::Refuel, "REFUEL", true, "Top up the tank. Fuel is priced by the local economy."},
     {StationPage::Market, "MARKET", false, "Buy and sell trade goods. Each system exports what it makes and pays more for what it lacks."},
     {StationPage::Outfitting, "UPGRADES", false, "Fit better drives, bigger tanks and stronger thrusters."},
     {StationPage::Missions, "MISSIONS", false, "Take on courier runs, deliveries and contracts for credits."},
     {StationPage::Garage, "GARAGE", false, "Store, swap and buy ships."},
+    {StationPage::SaveGame, "SAVE GAME", true, "Save your progress to this commander's slot, load the last save, or return to the main menu."},
     {StationPage::Launch, "LAUNCH", true, "Undock and fly out of the slot."},
 }};
 
 /** What the scene should do after the station screen handled an event. */
-enum class StationMenuAction { None, Close, Launch, RefuelFull, RefuelOneTonne };
+enum class StationMenuAction { None, Close, Launch, RefuelFull, RefuelOneTonne, SaveGame, LoadGame, MainMenu };
 
 /**
  * Everything the station screen displays, gathered by the scene each frame. The menu only reads
@@ -65,12 +66,20 @@ struct StationMenuView {
 
     RefuelQuote fillQuote;      // what "FILL TANK" would buy
     RefuelQuote oneTonneQuote;  // what "BUY 1 t" would buy
+
+    /** The save slot this game belongs to (0-2, or -1 for none), and what's currently saved in it. */
+    int saveSlot = -1;
+    bool hasSave = false;
+    std::string savedAt;
+    std::string savedSystem;
+    std::string playTime;
 };
 
 /**
  * The station screen. Owns only its selection; everything it shows comes in through a
  * StationMenuView. Keys: Up/Down choose a service, Enter does the page's main action (fill the
- * tank, launch), B buys one tonne of fuel, L launches from anywhere, Escape closes (you stay docked).
+ * tank, save, launch), B buys one tonne of fuel, L launches from anywhere, Escape closes (you stay
+ * docked). Pages with several buttons take mouse clicks for the others.
  */
 class StationMenu {
 public:
@@ -147,12 +156,10 @@ public:
                 }
             }
 
-            switch (pageButtonAt(size, mouse))
-            {
-                case 0: return primaryAction();
-                case 1: return selectedPage() == StationPage::Refuel ? StationMenuAction::RefuelOneTonne : StationMenuAction::None;
-                default: break;
-            }
+            const int button = pageButtonAt(size, mouse);
+
+            if (button >= 0)
+                return buttonAction(button);
         }
 
         return StationMenuAction::None;
@@ -195,11 +202,27 @@ private:
     /** The main action of the selected page: fill the tank, or launch. Others have none yet. */
     StationMenuAction primaryAction() const
     {
+        return buttonAction(0);
+    }
+
+    /** What each of the selected page's buttons does, left to right. */
+    StationMenuAction buttonAction(int button) const
+    {
         switch (selectedPage())
         {
-            case StationPage::Refuel: return StationMenuAction::RefuelFull;
-            case StationPage::Launch: return StationMenuAction::Launch;
-            default: return StationMenuAction::None;
+            case StationPage::Refuel:
+                return button == 0 ? StationMenuAction::RefuelFull : StationMenuAction::RefuelOneTonne;
+
+            case StationPage::SaveGame:
+                if (button == 0) return StationMenuAction::SaveGame;
+                if (button == 1) return StationMenuAction::LoadGame;
+                return StationMenuAction::MainMenu;
+
+            case StationPage::Launch:
+                return StationMenuAction::Launch;
+
+            default:
+                return StationMenuAction::None;
         }
     }
 
@@ -229,11 +252,12 @@ private:
         return {{left, top}, {frame.position.x + frame.size.x - 16.f - left, frame.size.y - headerHeight - 70.f}};
     }
 
-    /** The page's action buttons, side by side along its bottom: 0 is the main action, 1 the secondary. */
-    static sf::FloatRect pageButtonBounds(sf::Vector2u size, int index)
+    /** The page's action buttons, side by side along its bottom, sharing the width: 0 is the main action. */
+    sf::FloatRect pageButtonBounds(sf::Vector2u size, int index) const
     {
         const sf::FloatRect page = pageBounds(size);
-        const float width = std::min(220.f, (page.size.x - 16.f) * 0.5f);
+        const int count = std::max(1, pageButtonCount());
+        const float width = std::min(220.f, (page.size.x - 16.f * static_cast<float>(count - 1)) / static_cast<float>(count));
         return {{page.position.x + static_cast<float>(index) * (width + 16.f), page.position.y + page.size.y - 52.f}, {width, 44.f}};
     }
 
@@ -243,6 +267,7 @@ private:
         switch (selectedPage())
         {
             case StationPage::Refuel: return 2;
+            case StationPage::SaveGame: return 3;
             case StationPage::Launch: return 1;
             default: return 0;
         }
@@ -418,11 +443,59 @@ private:
                 drawPageButton(target, font, size, 0, "LAUNCH", true);
                 return;
 
+            case StationPage::SaveGame:
+                drawSavePage(target, font, view, size, page, y);
+                return;
+
             default:
                 drawText(target, font, "COMING SOON", {x, y}, 20, style::stationComingSoon);
                 drawParagraph(target, font, service.blurb, {x, y + 32.f}, page.size.x, 18, style::textSecondary);
                 return;
         }
+    }
+
+    /** This commander's slot and what's saved in it, with SAVE / LOAD / MAIN MENU. */
+    void drawSavePage(sf::RenderTarget& target, const sf::Font& font, const StationMenuView& view, sf::Vector2u size, const sf::FloatRect& page, float y) const
+    {
+        const float x = page.position.x;
+
+        const auto row = [&](const std::string& label, const std::string& value)
+        {
+            drawText(target, font, label, {x, y}, 17, style::textDim);
+            drawText(target, font, value, {x + 150.f, y}, 17, style::textPrimary);
+            y += 24.f;
+        };
+
+        if (view.saveSlot < 0)
+        {
+            drawParagraph(target, font, "This game isn't attached to a save slot, so it can't be saved. Start a game from the main menu to pick a slot.",
+                          {x, y}, page.size.x, 17, style::textSecondary);
+            drawPageButton(target, font, size, 2, "MAIN MENU", true);
+            return;
+        }
+
+        row("SLOT", std::to_string(view.saveSlot + 1));
+        row("COMMANDER", view.commanderName);
+
+        if (view.hasSave)
+        {
+            row("LAST SAVED", view.savedAt);
+            row("SAVED AT", view.savedSystem);
+            row("PLAY TIME", view.playTime);
+        }
+        else
+        {
+            row("LAST SAVED", "NEVER");
+        }
+
+        y += 8.f;
+        drawParagraph(target, font,
+                      "SAVE writes your credits, fuel and this station to the slot. LOAD and MAIN MENU discard anything since your last save.",
+                      {x, y}, page.size.x, 16, style::textSecondary);
+
+        drawPageButton(target, font, size, 0, "SAVE", true);
+        drawPageButton(target, font, size, 1, "LOAD", view.hasSave);
+        drawPageButton(target, font, size, 2, "MAIN MENU", true);
     }
 
     /** The fuel gauge, range, mass and price, and the FILL TANK / BUY 1 t buttons. */

@@ -8,7 +8,9 @@
 #ifndef DUSK_SCENE_H
 #define DUSK_SCENE_H
 
+#include "systems/save_game.h++"
 #include "systems/travel_effects.h++"
+#include <optional>
 #include <SFML/Graphics/RenderTarget.hpp>
 #include <SFML/Graphics/RenderWindow.hpp>
 #include <SFML/Window/Event.hpp>
@@ -22,6 +24,7 @@ enum class SceneTransition {
     FirstTest,
     TwoPlanet,
     EnterSystem,
+    MainMenu,
     Exit
 };
 
@@ -48,6 +51,15 @@ public:
     virtual bool acceptsShipInput() const
     {
         return true;
+    }
+
+    /**
+     * The game a scene wants started when it requests EnterSystem (the main menu fills this in
+     * after slot selection and naming). Handed over once; empty for scenes that don't start games.
+     */
+    virtual std::optional<GameLaunch> consumeGameLaunch()
+    {
+        return std::nullopt;
     }
 
     /** Travel-animation state (cruise bursts, hyperspace jump) for the effects renderer. */

@@ -204,6 +204,9 @@ namespace style {
     inline constexpr sf::Color dockingStatus = accent;
     inline constexpr sf::Color message = textPrimary;
 
+    /** Main menu: save-slot cards and the commander name field. */
+    inline constexpr sf::Color slotCardFill{8, 12, 18, 225};
+
     /** Station screen: title, the frame around it, the header strip, the gauge, "coming soon" text. */
     inline constexpr sf::Color stationMenuTitle = textPrimary;
     inline constexpr sf::Color stationFrame = panelFill;

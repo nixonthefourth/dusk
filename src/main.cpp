@@ -39,7 +39,8 @@ int main() {
     Camera camera;
 
     // Initialise scene/world
-    Galaxy galaxy = generateGalaxy(1337u); // TODO: seed from a save file or menu input later
+    // The galaxy every new game starts in. Loading a save from a different seed regenerates it.
+    Galaxy galaxy = generateGalaxy(1337u);
 
     SceneManager sceneManager;
     sceneManager.setScene<MainMenuScene>();
@@ -75,13 +76,29 @@ int main() {
         switch (transition)
         {
             case SceneTransition::EnterSystem:
-                sceneManager.setScene<SystemScene>(galaxy, 0);
+            {
+                // The menu says which slot and save to start; without one, start an unsaved game.
+                GameLaunch launch = sceneManager.activeScene().consumeGameLaunch().value_or(GameLaunch{});
+
+                // A save from a different galaxy brings its galaxy with it.
+                if (launch.save.galaxySeed != galaxy.seed)
+                    galaxy = generateGalaxy(launch.save.galaxySeed);
+
+                sceneManager.setScene<SystemScene>(galaxy, launch);
+                break;
+            }
+
+            case SceneTransition::MainMenu:
+                sceneManager.setScene<MainMenuScene>();
                 break;
 
             case SceneTransition::Exit:
                 window.close();
                 return;
 
+            // Leftovers from early test scenes; nothing requests them any more.
+            case SceneTransition::FirstTest:
+            case SceneTransition::TwoPlanet:
             case SceneTransition::None:
                 break;
         }

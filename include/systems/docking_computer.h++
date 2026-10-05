@@ -446,6 +446,45 @@ inline bool launch(DockingComputer& computer)
     return true;
 }
 
+/**
+ * Puts the ship straight into the docked position, as if a docking had just finished: parked
+ * in the slot nose-in, wings matched to the slot. Used when a saved game loads (saves are made
+ * at stations, so a commander always resumes docked). Returns false if there's no station.
+ */
+inline bool dockImmediately(DockingComputer& computer, World& world)
+{
+    if (!world.stationActive || !world.station.dockingPort.valid)
+        return false;
+
+    Ship& ship = world.playerShip;
+    const Station& station = world.station;
+    const Vec3 mouth = stationDockMouth(station);
+    const Vec3 normal = stationDockNormal(station);
+    const Vec3 inward = normal * -1.f;
+
+    ship.yaw = std::atan2(inward.x, inward.z);
+    ship.pitch = std::asin(std::clamp(inward.y, -1.f, 1.f));
+    clampShipPitch(ship);
+    ship.roll = rollToMatchSlot(ship, inward, stationDockSlotAxis(station));
+
+    // Same parking depth the Docked phase holds: nose a little short of the slot's back wall.
+    const float dockedProgress = -std::max(0.f, station.dockingPort.depth - shipHalfLength(ship) - noseClearance);
+    ship.position = mouth + normal * dockedProgress;
+    ship.previousPosition = ship.position;
+    ship.velocity = {};
+    ship.throttle = 0.f;
+    disengageCruise(ship);
+    cancelCruiseCharge(ship);
+    resetShipRotationState(ship);
+
+    computer.slotProgress = dockedProgress;
+    computer.previousMouth = mouth;
+    computer.previousApproachPoint = mouth + normal * approachDistance;
+    computer.hasPreviousFrame = true;
+    setPhase(computer, DockingPhase::Docked);
+    return true;
+}
+
 /** Returns control to the player with the ship coasting at the given velocity. */
 inline void releaseControl(DockingComputer& computer, Ship& ship, const Vec3& velocity)
 {
