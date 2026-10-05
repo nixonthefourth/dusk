@@ -103,6 +103,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [~] Docking — automatic docking and launch work; manual docking and station services are next
 - [~] Space stations: small, medium, large — one procedurally placed small station (`station_s.obj`) per eligible system today
 - [x] Wireframe graphics style
+- [x] Animations
 - [ ] Classical music for docking (*The Blue Danube*, for example)
 
 P.S. I wanted to add something that breathes life without the player on the small scale — a system that reacts to itself almost on a clock, running in the background so the procedural world feels alive even when nobody is watching it.
