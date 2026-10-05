@@ -99,24 +99,50 @@ struct Ship {
 
     /* ---- Linear flight model --------------------------------------------------------------- */
 
-    /**
-     * Main engine force at full throttle. Acceleration is force / mass: 1050 / 15 = 70 u/s^2,
-     * roughly 16 seconds from rest to top speed.
+    /*
+     * Thruster forces. Acceleration is force / total mass, and the forces are tuned so the ship
+     * handles exactly as it always has with half a tank (18 t): 70 u/s^2 forward, 90 braking,
+     * 200 sideways. A full tank (21 t) is about 15% more sluggish; a nearly empty one (15 t)
+     * about 20% livelier.
      */
-    float maxThrust = 1050.f;
 
-    /** Retro thrusters, used for braking and for flying in reverse (90 u/s^2 at mass 15). */
-    float retroThrust = 1350.f;
+    /** Main engine force at full throttle: 70 u/s^2 at half a tank, about 18 seconds from rest to top speed. */
+    float maxThrust = 1260.f;
+
+    /** Retro thrusters, used for braking and for flying in reverse (90 u/s^2 at half a tank). */
+    float retroThrust = 1620.f;
 
     /**
-     * RCS force along the ship's right and up axes (200 u/s^2 at mass 15). Flight assist spends it
+     * RCS force along the ship's right and up axes (200 u/s^2 at half a tank). Flight assist spends it
      * cancelling sideways drift, which is what makes the velocity follow the nose through a turn.
      * Deliberately stronger than the main engine: turning is crisp, straight-line speed builds slowly.
      */
-    float lateralThrust = 3000.f;
+    float lateralThrust = 3600.f;
 
-    /** Mass of the ship in tonnes. Every thruster's acceleration is its force divided by this. */
+    /**
+     * Dry hull mass in tonnes: the ship with empty tanks and holds. Thrusters divide their force
+     * by the ship's *total* mass (shipTotalMass(): hull + fuel + cargo), so a full tank makes the
+     * ship noticeably slower to accelerate and to turn.
+     */
     float mass = 15.f;
+
+    /* ---- Fuel ------------------------------------------------------------------------------- */
+
+    /** Tank size and current fuel, in tonnes. Fuel counts toward the ship's mass. */
+    float fuelCapacity = 6.f;
+    float fuel = 6.f;
+
+    /** Hyperspace cost: a full 6 t tank reaches 40 light years. */
+    float hyperspaceFuelPerLightYear = 0.15f;
+
+    /** Cruise-drive burn at full cruise speed, tonnes per second (scales with speed): ten minutes of flat-out cruising per tank. */
+    float cruiseFuelPerSecond = 0.01f;
+
+    /** False for ships that never run dry (NPCs): they burn nothing and never refuel. */
+    bool usesFuel = true;
+
+    /** Mass of carried cargo in tonnes. Nothing loads cargo yet; it is here so trading can add mass later. */
+    float cargoMass = 0.f;
 
     /** When true, the flight computer converts throttle into a velocity and fires thrusters to hold it. */
     bool flightAssist = true;

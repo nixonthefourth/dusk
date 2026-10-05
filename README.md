@@ -20,7 +20,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - One reused `SystemScene` that regenerates its entire world from a system's own seed the moment you enter it, so system #217 always looks and plays out the same way.
 - Real orbital mechanics: planets orbit a central star under actual Newtonian gravity, integrated with velocity Verlet, and the star's own gravity pulls on the player ship too.
 - An OBJ-modelled space station procedurally placed in orbit around a random planet, in systems that roll one. It spins Elite-style around its docking axis, with the slot facing along its orbit.
-- A docking computer: press `C` and the ship flies itself to the station, lines up, matches the station's spin, and slides into the docking slot. Once docked, a station menu lets you stay or leave; leaving backs the ship out, turns it around, and hands control back.
+- A docking computer: press `C` and the ship flies itself to the station, lines up, matches the station's spin, and slides into the docking slot. Once docked, the station screen opens; launching backs the ship out, turns it around, and hands control back.
 - Simple-reflex NPC ships that roam, avoid planets and stars, occasionally head to the station and dock, and periodically "warp out" and back in — no memory, no planning, just current-state reflexes.
 - An "on-paper" economy and system-flavor layer: procedural system names, an economy tier, a dominant occupation, a handful of tradeable goods, and derived prices per system — generated, but not yet wired into any in-game trading UI.
 - A camera that chases the ship from behind, plus an orbit "showcase" mode.
@@ -38,6 +38,9 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - A recycled, endless-feeling starfield.
 - Frustum clipping for both points and line segments, with a small side guard-band so things don't visibly pop in at the frustum edges.
 - A system's star drawn as a solid filled disc, and its planets drawn as gridded, optionally ringed wireframes — sorted and drawn back-to-front together, with per-edge visibility shading based on facing direction.
+- Fuel with mass: a 6-tonne tank limits how far you can jump (40 LY full) and how long you can cruise (about ten minutes flat out), and every tonne aboard makes the ship slower to accelerate and to turn.
+- A station screen while docked: refuelling at local prices with your credits, launch, and pages laid out for market, upgrades, missions and a garage.
+- NPC ships that visibly dock: they line up on the slot, roll to match it and fly in, then launch back out of it later.
 - One stylesheet (`include/ui/style.h++`) holding every colour in the game, so the whole look can be re-themed from a single file.
 - An Elite-style flight HUD: a bottom dashboard with speed and throttle, a 3D scanner, heading, pitch and turn-rate readouts and a target compass; heading and pitch tapes; a boresight and prograde marker; and brackets (or an off-screen arrow) on the locked target.
 - Target lock (`T`): the station can be locked, and shows on the scanner, the compass and in view with its distance and closing speed.
@@ -99,9 +102,9 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [x] Targeting, radar-esque (station only so far)
 - [~] Physics
   - [x] Object-level collision hitboxes
-  - [ ] Fuel expenditure (mass matters)
+  - [x] Fuel expenditure (mass matters)
 - [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear) — the docking computer exists, fitted as standard for now
-- [~] Docking — automatic docking and launch work; manual docking and station services are next
+- [~] Docking — automatic docking and launch work, NPCs dock and launch visibly, and the station screen offers refuelling; manual docking is next
 - [~] Space stations: small, medium, large — one procedurally placed small station (`station_s.obj`) per eligible system today
 - [x] Wireframe graphics style
 - [x] Animations
@@ -185,11 +188,11 @@ While a map is open, flight controls are paused (the ship carries on under fligh
 
 While docked:
 
-- The station menu opens automatically. `STAY` keeps you docked; `LEAVE` launches.
-- In the menu: `Tab`, `W`/`S`, or `Left`/`Right` switch the highlighted option, `Enter`/`Space` confirms, `1` stays, `2` or `L` leaves. The mouse works too.
-- With the menu closed: `Enter` reopens it, `L` launches.
-
-This is a deliberate stand-in for a proper warp/phase-space scene — it regenerates the destination system from its own seed and drops you in, instantly, so the orbital-mechanics and NPC-behavior work can be tested across many systems without a travel scene to build first.
+- The station screen opens automatically. Services are listed on the left: REFUEL, MARKET, UPGRADES, MISSIONS, GARAGE (the middle three marked SOON for now) and LAUNCH.
+- `Up`/`Down` (or `W`/`S`, `Tab`) choose a service. `Enter`/`Space` does the page's main action: fill the tank on REFUEL, launch on LAUNCH.
+- On REFUEL, `B` buys one tonne.
+- `L` launches from any page, and `Escape` closes the screen (you stay docked). The mouse works throughout.
+- With the screen closed: `Enter` reopens it, `L` launches.
 
 With flight assist on (the default), throttle is a speed demand: `W`/`S` choose how fast you want to go along the nose, and the thrusters get you there and hold it. Turning swings your velocity round with the nose, because the RCS cancels the sideways drift. `X` (or throttle to `0`) brings the ship to a stop; `Arrow Down` then lets you back up slowly.
 
@@ -222,6 +225,7 @@ include/
     cube.h++            (the Station type and its docking port)
     planet.h++
     asteroid.h++
+    commander.h++
     star.h++
     collision_body.h++
 
@@ -241,6 +245,7 @@ include/
   systems/
     ship_physics.h++
     travel_effects.h++
+    refuelling.h++
     orbital_physics.h++
     npc_ai.h++
     docking_computer.h++
@@ -257,6 +262,7 @@ include/
 
   ui/
     style.h++
+    station_menu.h++
     menu_button.h++
     format.h++
     galaxy_map.h++
@@ -306,7 +312,7 @@ Every frame runs the same fixed sequence. Knowing it makes it much easier to see
 2. **Events.** Every queued SFML event is handled:
    - closing the window quits;
    - `Escape` quits unless the scene `capturesEscape()` (it does while a map is open or a hyperspace countdown is running);
-   - every event is then passed to `Scene::handleEvent()`, which is where the maps, target lock, docking computer and station menu react to key presses and mouse clicks.
+   - every event is then passed to `Scene::handleEvent()`, which is where the maps, target lock, docking computer and station screen react to key presses and mouse clicks.
 3. **Transitions.** If the scene asked for one (PLAY or EXIT on the menu), `applySceneTransition()` swaps scenes and resets the input and camera state that lives in `main.cpp`.
 4. **Ship input.** If `acceptsShipInput()` is true, `updateShipFromKeyboard()` turns held keys into pilot intent on the ship: throttle, yaw and pitch demands, the precision modifier, and the reverse, flight-assist and cruise toggles. It never moves the ship itself. The scene returns false while a map is open, while the docking computer flies, and during a hyperspace jump.
 5. **Physics, in sub-steps.** The frame's `dt` is split into equal steps of at most 1/120 s, and `Scene::updatePhysics()` runs once per step. This keeps the flight computer, the integrators and the camera spring behaving the same at 30 or 144 frames per second. For `SystemScene`, one step is:
@@ -325,7 +331,7 @@ Every frame runs the same fixed sequence. Knowing it makes it much easier to see
    6. the player's ship and visible NPC ships;
    7. travel effects (streaks, bursts, the hyperspace tunnel);
    8. the HUD, if `showsHud()`;
-   9. the scene's screen-space overlay: the system name, hints, messages, the station menu, a map, or the hyperspace text.
+   9. the scene's screen-space overlay: the system name, hints, messages, the station screen, a map, or the hyperspace text.
 
 ### One Physics Step
 
@@ -528,11 +534,19 @@ struct Ship {
     float throttle;                     // speed demand with flight assist, thrust fraction without
     bool reverseThrust;
 
-    // Linear flight model: acceleration = force / mass
-    float maxThrust = 1050.f;           // main engine, 70 u/s^2
-    float retroThrust = 1350.f;         // braking and reverse, 90 u/s^2
-    float lateralThrust = 3000.f;       // RCS, 200 u/s^2, cancels sideways drift
-    float mass = 15.f;
+    // Mass and fuel: thrusters divide by the TOTAL mass (hull + fuel + cargo)
+    float mass = 15.f;                  // dry hull
+    float fuelCapacity = 6.f;           // tonnes
+    float fuel = 6.f;
+    float hyperspaceFuelPerLightYear = 0.15f;  // 40 LY on a full tank
+    float cruiseFuelPerSecond = 0.01f;  // at full cruise speed
+    bool usesFuel = true;               // false for NPCs
+    float cargoMass = 0.f;              // reserved for trading
+
+    // Linear flight model: acceleration = force / total mass
+    float maxThrust = 1260.f;           // main engine: 70 u/s^2 at half a tank
+    float retroThrust = 1620.f;         // braking and reverse: 90 u/s^2 at half a tank
+    float lateralThrust = 3600.f;       // RCS: 200 u/s^2 at half a tank, cancels sideways drift
     bool flightAssist = true;
     float maxSpeed = 1200.f;
     float reverseSpeedFraction = 0.35f;
@@ -561,7 +575,7 @@ struct Ship {
 };
 ```
 
-These are the knobs to turn if the handling needs adjusting: `maxThrust` for how hard the ship pulls in a straight line, `lateralThrust` for how quickly it carves a turn, `maxSpeed` for top speed, and `yawSpeed`/`pitchSpeed` with the two time constants for how the nose feels.
+These are the knobs to turn if the handling needs adjusting (the forces are tuned for a ship carrying half a tank; see [Fuel And Mass](#fuel-and-mass)): `maxThrust` for how hard the ship pulls in a straight line, `lateralThrust` for how quickly it carves a turn, `maxSpeed` for top speed, and `yawSpeed`/`pitchSpeed` with the two time constants for how the nose feels.
 
 Orientation helpers keep physics and rendering agreeing about which way the ship is pointing:
 
@@ -737,10 +751,10 @@ While it's active, `SystemScene::acceptsShipInput()` returns `false` and `update
 - **Approach** flies to a point 1600 units in front of the slot. Far out, it heads straight there; within a few thousand units it blends in the approach point's own velocity, so it can keep pace with the orbiting station. The velocity *relative* to that point is kept as persistent state and smoothed — recomputing it from the ship's velocity each frame would let the station's centripetal acceleration show up as a constant lag. The path avoids the star, planets and the station hull (a detour waypoint for whatever is in the way, plus local steering away from nearby surfaces), and the speed drops near surfaces so the ship has room to turn.
 - **Align** holds the ship on the approach point, points the nose down the slot, and rolls the ship to match the slot's long side. The ship's new `roll` field exists for this; player controls leave it at zero.
 - **Enter** slides the ship down the slot axis, still matching the station's spin, until the nose is 10 units from the back wall.
-- **Docked** keeps the ship parked in the slot and opens the station menu.
+- **Docked** keeps the ship parked in the slot and opens the station screen (see [Station Services](#station-services)).
 - **LaunchReverse** backs the ship straight out to 900 units, **LaunchTurn** turns it to face away and levels the wings, and control returns with the ship moving at the station's speed plus 300 units per second outward.
 
-The station menu is drawn by `SystemScene::drawOverlay()` using the button helpers in `include/ui/menu_button.h++`, which the main menu shares.
+The station screen is a `StationMenu` (`include/ui/station_menu.h++`), drawn from `SystemScene::drawOverlay()`; its buttons use the helpers in `include/ui/menu_button.h++`, which the main menu shares.
 
 ## NPC Ships And Simple-Reflex AI
 
@@ -750,11 +764,13 @@ An `NpcShip` is just a `Ship` (so it gets the exact same model, physics, and ren
 
 ```cpp
 enum class NpcState {
-    Inactive,        // warped out, invisible, waiting to respawn
-    Roaming,         // flying toward a roam waypoint, avoiding hazards
-    HeadingToStation,
-    Docked,          // paused at the station, invisible
-    WarpingOut       // brief wind-up before vanishing
+    Inactive,          // warped out, invisible, waiting to respawn
+    Roaming,           // flying toward a roam waypoint, avoiding hazards
+    HeadingToStation,  // flying to the approach point in front of the station's slot
+    EnteringStation,   // lined up on the slot, flying down its axis into the station
+    Docked,            // inside the station, invisible
+    Launching,         // flying out of the slot along its axis
+    WarpingOut         // brief wind-up before vanishing
 };
 ```
 
@@ -768,13 +784,71 @@ Each tick, `npc_ai::updateNpcShip()`:
 4. On arrival at its target, rolls whether to head to the station, warp out, or pick a fresh roam waypoint.
 5. While `Docked` or `WarpingOut`, waits out a randomized duration before transitioning onward.
 
-`NpcShip::isVisible()` is what `main.cpp`'s render loop checks before drawing an NPC — `Inactive` and `Docked` ships are deliberately invisible, standing in for "not currently in this volume of space" until there's an actual station interior or warp-in effect to show instead.
+### Visible Docking
+
+NPCs dock the way the player's docking computer does, so you can watch it happen:
+
+1. **Heading to the station.** The NPC flies to an approach point 2,600 units out from the slot's mouth along the slot normal. `updateNpcShips()` hands every NPC a `StationDockingInfo` each step, with the slot's mouth, normal and long axis and the station's velocity, all in world space. The AI therefore doesn't need to know about `Station` or `World`. Within 25,000 units of the approach point the NPC switches to *final approach* avoidance: it steers clear only of planet surfaces, not their usual wide avoidance zones. Without this, the station, which orbits inside its host's zone, would push its own visitors away, and that was a big part of why NPCs used to dock so rarely.
+2. **Entering.** At the approach point the NPC lines up. Its sideways offset from the slot axis closes exponentially, it turns nose-in, and it rolls its wings onto the slot's long side (`slotRoll()`, the smaller of the two rolls half a turn apart). It then flies down the axis at 380 u/s relative to the station. Like the docking computer this is kinematic: `placeOnSlotAxis()` puts the ship exactly on the moving, spinning slot every step, rather than chasing it. Once the nose is 260 units past the mouth, the ship is inside and disappears.
+3. **Docked** for 12–35 seconds.
+4. **Launching.** The ship appears just inside the slot, nose out and wings on the slot, flies out along the axis at 340 u/s, and hands over to normal roaming flight 3,000 units out. It then levels its wings as it goes.
+
+Frequency: after each roam leg an NPC now heads for the station 55% of the time (it used to be 25%). In addition, 35% of ships arriving in a system appear launching from the station rather than in open space, so the station is busy from the moment you arrive. In a headless test of the start system, 15 minutes saw 37 dockings and 44 launches, with about 10 ships within 15,000 units of the station at any moment.
+
+`NpcShip::isVisible()` is what `main.cpp`'s render loop checks before drawing an NPC — only `Inactive` (warped out) and `Docked` (inside the station) ships are invisible.
 
 ## Economy (On Paper)
 
 `include/systems/economy.h++` is a small, pure pricing layer on top of `procgen::SystemInfo`. `computeSystemPrices()` takes a system's rolled goods and economy tier and returns a `GoodPrice` per good — poorer systems pay more for everything, wealthier ones undercut the galaxy-wide base price, and a system's own specialty goods sell at a further local-surplus discount.
 
 Nothing in the game currently displays these prices or lets the player buy or sell anything — this is infrastructure for the trading/economy loop on the roadmap, deliberately kept as a pure function of already-generated data so it's cheap to call from a future map or station UI without needing its own persistent state yet.
+
+## Fuel And Mass
+
+Fuel is a resource you have to manage, and it's real mass.
+
+**The tank.** The ship carries `fuelCapacity = 6` tonnes, starting full. It is spent two ways:
+
+- **Hyperspace:** `hyperspaceFuelPerLightYear = 0.15`, so a full tank reaches 40 LY (`jumpRangeLightYears()`). The galactic chart draws that range as a circle around your system, as Elite's charts did. Systems outside it are dimmed, the panel shows the fuel each jump needs, and JUMP reads `OUT OF RANGE` when you can't make it. Fuel is paid when the destination swaps in mid-tunnel. If cruising during the countdown burned so much that the jump can no longer be paid for, the jump is called off before it starts.
+- **The cruise drive:** it burns `cruiseFuelPerSecond = 0.01` t/s at full cruise speed, scaling with speed, which is about ten minutes flat out on a full tank. When the tank runs dry, cruise drops out and won't charge, and the HUD shows `NO FUEL`. Normal-space thrusters burn nothing, so you can never be stranded; you can always fly to a station.
+
+Fuel carries over between systems: `enterSystem()` rebuilds the world but keeps the ship's fuel. NPC ships have `usesFuel = false` and never run dry.
+
+**Mass.** `Ship::mass` is the dry hull (15 t). `shipTotalMass()` adds fuel and `cargoMass` (always 0 until trading exists), and every thruster divides its force by the total:
+
+| Tank | Total mass | 0 → 95% speed | 90° turn | Side thrust |
+| --- | --- | --- | --- | --- |
+| Empty | 15 t | 13.6 s | 1.16 s | 240 u/s² |
+| Half | 18 t | 16.3 s | 1.28 s | 200 u/s² |
+| Full | 21 t | 19.0 s | 1.40 s | 171 u/s² |
+
+The thruster forces are tuned so the ship handles at half a tank exactly as it always did. A full tank is a little sluggish, and a nearly empty one lively.
+
+Rotation scales too, through `shipMassRatio()`: total mass divided by the half-tank reference mass. The turn spin-up and stop times are multiplied by the ratio (more inertia for the RCS to fight), and the top turn rate is divided by its square root. Because everything goes through `shipTotalMass()`, cargo will slow the ship down without further changes once trading lands.
+
+**HUD.** A FUEL bar sits under THR and SPD. It turns red below a fifth of the tank and shows the tonnes left beside it. The total mass is shown at the top right of the speed block.
+
+## Station Services
+
+Docking opens the station screen (`include/ui/station_menu.h++`). Its header shows the station name, your commander name, your credits and your fuel. Below that are a list of services and the selected service's page.
+
+**Built to grow.** The services are a table, `stationServices`, holding each service's `StationPage`, label, whether it's available yet, and a description. MARKET, UPGRADES, MISSIONS and GARAGE are listed today as `SOON`, each with a page describing what it will do. Building one means:
+
+1. setting `available = true` in the table;
+2. adding its page in `drawPage()`;
+3. giving it buttons in `pageButtonCount()`;
+4. returning an action from `primaryAction()`, then handling that action in `SystemScene::handleStationMenuEvent()`.
+
+The menu itself owns only its selection. Everything it displays comes from a `StationMenuView` that the scene builds each frame, and it changes nothing itself: it returns a `StationMenuAction` and the scene carries it out. Gameplay rules therefore stay out of the UI.
+
+**Refuelling** (`include/systems/refuelling.h++`) is a pair of pure functions:
+
+- `quoteRefuel()` works out what a purchase would deliver: never more than the tank has room for, never more than you can pay for, in 0.1 t steps. A purchase that fills the tank tops it off exactly.
+- `buyFuel()` applies the quote.
+
+The price comes from the local economy: `fuelPricePerTonne()` multiplies the 12 CR/t base by `economyTierMultiplier()`, so fuel costs 13.8 CR/t in Poor systems, 12 in Developing and 10.2 in Progressive. The page shows the gauge, your current and full-tank jump range, your ship's mass against its hull mass, the price, and two buttons that show what they'll buy: FILL (or TANK FULL / NO CREDITS) and BUY 1 t.
+
+**The commander.** `Commander` (`include/objects/commander.h++`) holds the player's persistent state that isn't ship physics. Today that's a name, `JAMESON` after Elite's default commander, and credits, starting at 1,000. `SystemScene` keeps it across jumps. There's no way to earn credits yet; missions and trading will add one.
 
 ## The Camera
 
@@ -1159,7 +1233,7 @@ The flight HUD lives in `include/rendering/hud_renderer.h++`. It is a single `Hu
 
 **Dashboard** (`dashboardHeight = 122` pixels along the bottom, which scenes keep their own text clear of):
 
-- Left: speed (or cruise speed), forward/reverse, a throttle bar and a speed bar on the same scale (with flight assist on, the throttle bar is where you're heading and the speed bar is where you've got to), and the status line. That line shows flight assist in its own colour (`style::assistOn` blue for FA ON, `style::assistOff` orange for FA OFF), followed by cruise state in the accent: `[J] CRUISE`, `CRUISE CHARGING n%`, `MASS LOCKED` or `[J] DROP`.
+- Left: speed (or cruise speed) with the ship's total mass beside it, a throttle bar (labelled REV in red when reversing), a speed bar on the same scale, a fuel gauge, (with flight assist on, the throttle bar is where you're heading and the speed bar is where you've got to), and the status line. That line shows flight assist in its own colour (`style::assistOn` blue for FA ON, `style::assistOff` orange for FA OFF), followed by cruise state in the accent: `[J] CRUISE`, `CRUISE CHARGING n%`, `MASS LOCKED`, `[J] DROP`, or `NO FUEL` in red.
 - Centre: an Elite-style 3D scanner. The ellipse is the ship's horizontal plane seen from above and behind, forward up the scope; each contact sits on the plane at its ship-relative position with a stalk up or down to its height. NPC ships show as bars, the station as an accent-orange square (ringed when targeted), and your own ship as a gold dot at the centre. The range is `scannerRange = 25000` units.
 - Right: heading (000–359, with 000 along world `+z`) and pitch in degrees, centre-zero bars for the current yaw and pitch rates, and the target compass. The compass dot shows where the target lies relative to the nose: filled when ahead, hollow red when behind. Underneath are the target's name, distance and closing speed (positive while the gap shrinks).
 
@@ -1179,7 +1253,7 @@ Chart positions come from `generateGalaxyLayout()` in `procgen/galaxy.h++`, whic
 
 Arrow keys pick the system that best continues in that direction (`distance / alignment²`, ignoring anything more than 60° off), and the view recentres when the selection nears the edge. The panel shows the selected system's distance, distance to the core, economy, trade, planets, station, asteroid belts, traffic and exports, plus the jump button. Dots are coloured by economy tier: grey for Poor, white for Developing, accent orange for Progressive (`style::economy*`).
 
-Jumping starts the hyperspace sequence described under [Travel Animations](#travel-animations); partway through the tunnel, `SystemScene::enterSystem()` regenerates the destination from its seed. Jumps are refused while docked, under the docking computer, or while another jump is in progress. There's no jump range or fuel yet; `galacticDistance()` is there for when there is.
+Jumping starts the hyperspace sequence described under [Travel Animations](#travel-animations); partway through the tunnel, `SystemScene::enterSystem()` regenerates the destination from its seed. Jumps are refused while docked, under the docking computer, or while another jump is in progress. Jump range is limited by fuel (see [Fuel And Mass](#fuel-and-mass)).
 
 ## The System Map
 
@@ -1418,6 +1492,7 @@ Keep these boundaries intact:
 
 - `src/main.cpp`: the whole frame loop, end to end.
 - `include/ui/style.h++`: every colour in the game.
+- `include/ui/station_menu.h++` and `include/systems/refuelling.h++`: the station screen and how fuel is bought.
 - `include/scenes/main_menu.h++`: menu input, mouse hover, and overlay rendering.
 - `include/scenes/system_scene.h++`: the reused, galaxy-driven scene — regenerating a `World` from a seed on entry.
 - `include/scenes/default_scene.h++`: a minimal, hand-authored world for quick testing outside procgen.
@@ -1446,7 +1521,7 @@ This is still intentionally small:
 - No depth buffer and no triangle rasterizer — everything visible is either a projected line, a projected point, or an SFML shape primitive.
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
-- Hyperspace has no jump range or fuel yet, and `EnterSystem` (PLAY on the menu) always enters system 0 regardless of which system you were last in.
+- There's no way to earn credits yet (missions and trading will add one), and `EnterSystem` (PLAY on the menu) always enters system 0 regardless of which system you were last in.
 - The economy layer computes prices per system but has no trading UI, no inventory, and no supply/demand — it's generated data with nowhere to spend it yet.
 - Only one station gets built per system even when `SystemInfo::stationCount` rolls higher.
 - No true fixed time-step accumulator; physics is split into sub-steps of at most 1/120 s, but their size still follows the frame time.

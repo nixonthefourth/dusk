@@ -409,9 +409,22 @@ inline void updateDriftingAsteroids(World& world, float dt)
 
 
 
-/** Advances every NPC's simple-reflex behaviour and physics for one frame. */
+inline Vec3 stationVelocity(const World& world); // defined below, with the station's orbit
+
+/** Advances every NPC's behaviour and physics, handing each the station's docking slot as it is this step. */
 inline void updateNpcShips(World& world, float dt)
 {
+    npc_ai::StationDockingInfo dock;
+    dock.exists = world.stationActive;
+
+    if (dock.exists)
+    {
+        dock.mouth = stationDockMouth(world.station);
+        dock.normal = stationDockNormal(world.station);
+        dock.slotAxis = stationDockSlotAxis(world.station);
+        dock.velocity = stationVelocity(world);
+    }
+
     for (NpcShip& npc : world.npcShips)
     {
         const Vec3 gravity = gravityAt(world, npc.ship.position);
@@ -423,8 +436,7 @@ inline void updateNpcShips(World& world, float dt)
             world.npcRng,
             world.star,
             world.planets,
-            world.station.position,
-            world.stationActive,
+            dock,
             world.systemOuterRadius,
             gravity
         );

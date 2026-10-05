@@ -19,6 +19,7 @@
 #include <SFML/Graphics.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <optional>
 #include <string>
 
@@ -427,14 +428,26 @@ private:
 
         drawText(target, ship.cruiseEngaged ? "CRUISE" : "SPEED", {x, top + 10.f}, 15, style::textDim);
         drawText(target, std::to_string(static_cast<int>(std::round(shipSpeed(ship)))), {x + 60.f, top + 2.f}, 28, style::textPrimary);
-        drawText(target, ship.reverseThrust ? "REV" : "FWD", {x + 60.f + barWidth * 0.6f, top + 10.f}, 15, throttleColor);
+
+        // Total mass (hull + fuel + cargo): it drops as fuel burns, and the ship gets livelier.
+        char mass[24];
+        std::snprintf(mass, sizeof(mass), "%.1f t", shipTotalMass(ship));
+        drawText(target, mass, {x + 34.f + barWidth, top + 10.f}, 15, style::textDim, 1.f);
 
         const float speedScale = ship.cruiseEngaged
             ? ship.cruiseMaxSpeed
             : ship.maxSpeed * (ship.reverseThrust ? ship.reverseSpeedFraction : 1.f);
 
-        drawFillBar(target, "THR", {x, top + 50.f}, barWidth, ship.throttle, throttleColor);
-        drawFillBar(target, "SPD", {x, top + 70.f}, barWidth, speedScale > 0.f ? shipSpeed(ship) / speedScale : 0.f, style::speedBar);
+        drawFillBar(target, ship.reverseThrust ? "REV" : "THR", {x, top + 44.f}, barWidth, ship.throttle, throttleColor);
+        drawFillBar(target, "SPD", {x, top + 60.f}, barWidth, speedScale > 0.f ? shipSpeed(ship) / speedScale : 0.f, style::speedBar);
+
+        // Fuel gauge, red below a fifth of the tank, with the tonnes left beside it.
+        const float fuelFraction = ship.fuelCapacity > 0.f ? ship.fuel / ship.fuelCapacity : 0.f;
+        drawFillBar(target, "FUEL", {x, top + 76.f}, barWidth, fuelFraction, fuelFraction < 0.2f ? style::fuelLow : style::fuelBar);
+
+        char fuel[16];
+        std::snprintf(fuel, sizeof(fuel), "%.1f", ship.fuel);
+        drawText(target, fuel, {x + 40.f + barWidth, top + 68.f}, 14, fuelFraction < 0.2f ? style::fuelLow : style::textDim);
 
         // Flight-assist state gets its own colour (blue when on, orange when off); the cruise
         // status that follows it is drawn separately in the accent.
@@ -445,13 +458,15 @@ private:
             cruise = "[J] DROP";
         else if (cruiseCharging(ship))
             cruise = "CRUISE CHARGING " + std::to_string(static_cast<int>(ship.cruiseCharge * 100.f)) + "%";
+        else if (!hasCruiseFuel(ship))
+            cruise = "NO FUEL";
         else if (shipMassLocked(ship))
             cruise = "MASS LOCKED";
         else
             cruise = "[J] CRUISE";
 
-        const float assistWidth = drawText(target, assist, {x, top + 88.f}, 17, ship.flightAssist ? style::assistOn : style::assistOff);
-        drawText(target, cruise, {x + assistWidth + 16.f, top + 88.f}, 17, style::accent);
+        const float assistWidth = drawText(target, assist, {x, top + 92.f}, 17, ship.flightAssist ? style::assistOn : style::assistOff);
+        drawText(target, cruise, {x + assistWidth + 16.f, top + 92.f}, 17, hasCruiseFuel(ship) ? style::accent : style::warning);
     }
 
     /**

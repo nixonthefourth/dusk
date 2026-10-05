@@ -53,9 +53,11 @@ public:
         const sf::RenderWindow& window,
         const Galaxy& galaxy,
         int currentIndex,
-        bool jumpAvailable
+        bool jumpAvailable,
+        float jumpRangeLY
     )
     {
+        jumpRangeLY_ = jumpRangeLY;
         const sf::Vector2u size = window.getSize();
 
         if (const auto* key = event.getIf<sf::Event::KeyPressed>())
@@ -89,7 +91,7 @@ public:
 
                 case sf::Keyboard::Key::Enter:
                 case sf::Keyboard::Key::Space:
-                    if (canJump(currentIndex, jumpAvailable))
+                    if (canJump(galaxy, currentIndex, jumpAvailable))
                         return GalaxyMapAction::Jump;
                     break;
 
@@ -109,7 +111,7 @@ public:
 
                 if (jumpButtonBounds(size).contains(mouse))
                 {
-                    if (canJump(currentIndex, jumpAvailable))
+                    if (canJump(galaxy, currentIndex, jumpAvailable))
                         return GalaxyMapAction::Jump;
 
                     return GalaxyMapAction::None;
@@ -174,9 +176,13 @@ public:
         const Galaxy& galaxy,
         int currentIndex,
         bool jumpAvailable,
-        const std::string& jumpBlockedReason
-    ) const
+        const std::string& jumpBlockedReason,
+        float jumpRangeLY,
+        float fuelPerLightYear
+    )
     {
+        jumpRangeLY_ = jumpRangeLY;
+        fuelPerLightYear_ = fuelPerLightYear;
         const sf::Vector2u size = target.getSize();
         const float width = static_cast<float>(size.x);
         const float height = static_cast<float>(size.y);
@@ -186,6 +192,7 @@ public:
         target.draw(backdrop);
 
         drawCore(target, font, size);
+        drawJumpRange(target, galaxy, currentIndex, size);
         drawSystems(target, font, galaxy, currentIndex, size);
         drawPanel(target, font, galaxy, currentIndex, jumpAvailable, jumpBlockedReason, size);
     }
@@ -193,6 +200,10 @@ public:
 private:
     int selected_ = 0;
     int hovered_ = -1;
+
+    /** Hyperspace reach on the fuel aboard, and fuel burned per light year, as last handed in by the scene. */
+    float jumpRangeLY_ = 1e9f;
+    float fuelPerLightYear_ = 0.f;
     float zoom_ = 2.f;
     Vec2 viewCenter_;
 
@@ -206,9 +217,39 @@ private:
 
 
     /** A jump needs the scene's permission and a destination other than where you already are. */
-    bool canJump(int currentIndex, bool jumpAvailable) const
+    bool canJump(const Galaxy& galaxy, int currentIndex, bool jumpAvailable) const
     {
-        return jumpAvailable && selected_ != currentIndex;
+        return jumpAvailable && selected_ != currentIndex && inRange(galaxy, currentIndex, selected_);
+    }
+
+    /** True if system `index` is within jump range of the current system on the fuel aboard. */
+    bool inRange(const Galaxy& galaxy, int currentIndex, int index) const
+    {
+        return galacticDistance(
+            galaxy.systems[static_cast<std::size_t>(currentIndex)],
+            galaxy.systems[static_cast<std::size_t>(index)]
+        ) <= jumpRangeLY_;
+    }
+
+    /**
+     * The jump-range circle around the current system, as on Elite's charts: everything inside it
+     * can be reached on the fuel aboard. Drawn as a faint filled disc with an accent edge.
+     */
+    void drawJumpRange(sf::RenderTarget& target, const Galaxy& galaxy, int currentIndex, sf::Vector2u size) const
+    {
+        if (jumpRangeLY_ <= 0.f || jumpRangeLY_ > galaxyRadius * 4.f)
+            return;
+
+        const sf::Vector2f centre = toScreen(galaxy.systems[static_cast<std::size_t>(currentIndex)].mapPosition, size);
+        const float radius = jumpRangeLY_ * pixelsPerLightYear(size);
+
+        sf::CircleShape range(radius, 96);
+        range.setOrigin({radius, radius});
+        range.setPosition(centre);
+        range.setFillColor(style::chartRangeFill);
+        range.setOutlineColor(style::chartRangeEdge);
+        range.setOutlineThickness(1.5f);
+        target.draw(range);
     }
 
     /** Width of the chart area, left of the info panel. */
@@ -430,7 +471,10 @@ private:
                 continue;
 
             dot.setPosition(screen);
-            dot.setFillColor(systemColor(info));
+
+            // Out of reach on the fuel aboard: dimmed.
+            const bool reachable = galacticDistance(galaxy.systems[static_cast<std::size_t>(currentIndex)], info) <= jumpRangeLY_;
+            dot.setFillColor(reachable ? systemColor(info) : style::withAlpha(systemColor(info), 70));
             target.draw(dot);
 
             if (showNames && screen.x < mapRight - 60.f)
@@ -521,6 +565,13 @@ private:
 
         row("DISTANCE", selected_ == currentIndex ? "YOU ARE HERE" : formatDistance(galacticDistance(current, info)), style::accent);
         row("TO CORE", formatDistance(length(info.mapPosition)));
+
+        if (selected_ != currentIndex)
+        {
+            char fuel[32];
+            std::snprintf(fuel, sizeof(fuel), "%.1f t", galacticDistance(current, info) * fuelPerLightYear_);
+            row("FUEL NEEDED", fuel, inRange(galaxy, currentIndex, selected_) ? style::textPrimary : style::warning);
+        }
         row("ECONOMY", economyTierName(info.economyTier), systemColor(info));
         row("TRADE", info.occupation);
         row("PLANETS", std::to_string(info.planetCount));
@@ -542,8 +593,15 @@ private:
         }
 
         const sf::FloatRect button = jumpButtonBounds(size);
-        const bool enabled = canJump(currentIndex, jumpAvailable);
-        sf::Text jumpText(font, enabled ? "JUMP" : (selected_ == currentIndex ? "CURRENT SYSTEM" : jumpBlockedReason), enabled ? 28 : 18);
+        const bool enabled = canJump(galaxy, currentIndex, jumpAvailable);
+        std::string blocked = jumpBlockedReason;
+
+        if (selected_ == currentIndex)
+            blocked = "CURRENT SYSTEM";
+        else if (jumpAvailable && !inRange(galaxy, currentIndex, selected_))
+            blocked = "OUT OF RANGE";
+
+        sf::Text jumpText(font, enabled ? "JUMP" : blocked, enabled ? 28 : 18);
         ui::drawButton(target, button, jumpText, enabled, enabled);
 
         drawLabel(target, font, "ARROWS / CLICK  select", {x, height - 58.f}, 15, style::textDim);

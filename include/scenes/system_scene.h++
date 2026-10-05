@@ -17,6 +17,7 @@
 #include "systems/docking_computer.h++"
 #include "ui/galaxy_map.h++"
 #include "ui/menu_button.h++"
+#include "ui/station_menu.h++"
 #include "ui/system_map.h++"
 #include "ui/style.h++"
 #include <SFML/Graphics.hpp>
@@ -40,10 +41,7 @@ public:
           label_(font_, "", 28),
           statusText_(font_, "", 24),
           hintText_(font_, "[G] GALAXY MAP\n[M] SYSTEM MAP\n[T] TARGET\n[C] DOCK", 15),
-          messageText_(font_, "", 30),
-          menuTitle_(font_, "", 40),
-          stayText_(font_, "STAY", 42),
-          leaveText_(font_, "LEAVE", 42)
+          messageText_(font_, "", 30)
     {
         statusText_.setFillColor(style::dockingStatus);
         hintText_.setFillColor(style::keyHints);
@@ -51,10 +49,6 @@ public:
         hintText_.setPosition({4.f, 38.f});
         messageText_.setFillColor(style::message);
         messageText_.setStyle(sf::Text::Bold);
-        menuTitle_.setFillColor(style::stationMenuTitle);
-        menuTitle_.setStyle(sf::Text::Bold);
-        stayText_.setStyle(sf::Text::Bold);
-        leaveText_.setStyle(sf::Text::Bold);
 
         label_.setFillColor(style::systemLabel);
         label_.setStyle(sf::Text::Bold);
@@ -174,10 +168,10 @@ public:
         return mapView_ != MapView::None || hyperspace_.phase != HyperspacePhase::None;
     }
 
-    /** The flight HUD is hidden while a full-screen map is up, and for the jump itself. */
+    /** The flight HUD is hidden while a full-screen map or the station screen is up, and for the jump itself. */
     bool showsHud() const override
     {
-        return mapView_ == MapView::None && !inHyperspaceSequence();
+        return mapView_ == MapView::None && !inHyperspaceSequence() && !stationMenuOpen_;
     }
 
     /** Travel-animation state for the effects renderer. */
@@ -274,7 +268,16 @@ public:
     {
         if (mapView_ == MapView::Galaxy)
         {
-            galaxyMap_.draw(target, font_, galaxy_, currentSystemIndex_, jumpAvailable(), jumpBlockedReason());
+            galaxyMap_.draw(
+                target,
+                font_,
+                galaxy_,
+                currentSystemIndex_,
+                jumpAvailable(),
+                jumpBlockedReason(),
+                jumpRangeLightYears(world_.playerShip),
+                world_.playerShip.hyperspaceFuelPerLightYear
+            );
             return;
         }
 
@@ -311,9 +314,6 @@ private:
     sf::Text statusText_;
     sf::Text hintText_;
     sf::Text messageText_;
-    sf::Text menuTitle_;
-    sf::Text stayText_;
-    sf::Text leaveText_;
 
     DockingComputer docking_;
     bool stationMenuOpen_ = false;
@@ -351,10 +351,10 @@ private:
     bool wasCruising_ = false;
 
     /** Highlighted station-menu option: 0 = STAY, 1 = LEAVE. */
-    int menuSelection_ = 0;
+    /** The docked station screen, and the commander whose credits it spends. */
+    StationMenu stationMenu_;
+    Commander commander_;
 
-    static constexpr int stayOption = 0;
-    static constexpr int leaveOption = 1;
 
     /** Rebuilds the world from the system's seed. Same index always gives the same layout. */
     void enterSystem(int systemIndex)
@@ -365,7 +365,11 @@ private:
         const SystemInfo& info = galaxy_.systems[static_cast<std::size_t>(systemIndex)];
         std::mt19937 rng(deriveSystemSeed(galaxy_.seed, systemIndex));
 
+        // Fuel belongs to the ship, which is rebuilt with the world: carry it across the jump.
+        const float carriedFuel = world_.playerShip.fuel;
+
         world_ = World();
+        world_.playerShip.fuel = std::min(carriedFuel, world_.playerShip.fuelCapacity);
         docking_ = DockingComputer();
         stationMenuOpen_ = false;
         wasCruising_ = false;
@@ -438,6 +442,7 @@ private:
             npcOptions.rotationDegrees = {0.f, -90.f, -90.f};
             npcOptions.centerOnOrigin = true;
             npc.ship.loadObjModel("assets/objects/ships/banshee.obj", npcOptions);
+            npc.ship.usesFuel = false; // NPCs never run dry
 
             npc.state = NpcState::Inactive;
             npc.stateTimer = 0.f;
@@ -501,90 +506,69 @@ private:
     void openStationMenu()
     {
         stationMenuOpen_ = true;
-        menuSelection_ = stayOption;
+        stationMenu_.open();
     }
 
-    /** Applies the highlighted station-menu option. */
-    void confirmStationMenu()
+    /** Gathers what the station screen shows: credits, fuel, mass, range, and the price quotes. */
+    StationMenuView stationMenuView() const
     {
-        stationMenuOpen_ = false;
+        const Ship& ship = world_.playerShip;
+        const float price = fuelPricePerTonne(galaxy_.systems[static_cast<std::size_t>(currentSystemIndex_)]);
 
-        if (menuSelection_ == leaveOption)
-            docking::launch(docking_);
+        StationMenuView view;
+        view.title = currentSystemName_ + " STATION";
+        view.commanderName = commander_.name;
+        view.credits = commander_.credits;
+        view.fuel = ship.fuel;
+        view.fuelCapacity = ship.fuelCapacity;
+        view.hullMass = ship.mass;
+        view.totalMass = shipTotalMass(ship);
+        view.jumpRangeLY = jumpRangeLightYears(ship);
+        view.fullTankRangeLY = ship.hyperspaceFuelPerLightYear > 0.f ? ship.fuelCapacity / ship.hyperspaceFuelPerLightYear : 0.f;
+        view.pricePerTonne = price;
+        view.fillQuote = quoteRefuel(ship, commander_, price, ship.fuelCapacity);
+        view.oneTonneQuote = quoteRefuel(ship, commander_, price, 1.f);
+        return view;
     }
 
-    /** Screen rectangle of a station-menu button in a centred stack of two. */
-    static sf::FloatRect menuButtonBounds(sf::Vector2u targetSize, int option)
-    {
-        return ui::stackedButtonBounds(targetSize, option, 2, 30.f);
-    }
-
-    /**
-     * Up/Down (or the mouse) choose between STAY and LEAVE; Enter, Space or a click confirms.
-     * LEAVE launches the ship; STAY simply closes the menu.
-     */
+    /** Passes input to the station screen, then acts on it: buy fuel, launch, or close (staying docked). */
     void handleStationMenuEvent(const sf::Event& event, const sf::RenderWindow& window)
     {
-        if (const auto* keyPressed = event.getIf<sf::Event::KeyPressed>())
+        const float price = fuelPricePerTonne(galaxy_.systems[static_cast<std::size_t>(currentSystemIndex_)]);
+        Ship& ship = world_.playerShip;
+
+        switch (stationMenu_.handleEvent(event, window))
         {
-            switch (keyPressed->code)
+            case StationMenuAction::Close:
+                stationMenuOpen_ = false;
+                break;
+
+            case StationMenuAction::Launch:
+                stationMenuOpen_ = false;
+                docking::launch(docking_);
+                break;
+
+            case StationMenuAction::RefuelFull:
+            case StationMenuAction::RefuelOneTonne:
             {
-                case sf::Keyboard::Key::W:
-                case sf::Keyboard::Key::S:
-                case sf::Keyboard::Key::Left:
-                case sf::Keyboard::Key::Right:
-                case sf::Keyboard::Key::Tab:
-                    menuSelection_ = menuSelection_ == stayOption ? leaveOption : stayOption;
-                    break;
+                const bool full = stationMenu_.selectedPage() == StationPage::Refuel &&
+                                  !(event.getIf<sf::Event::KeyPressed>() &&
+                                    event.getIf<sf::Event::KeyPressed>()->code == sf::Keyboard::Key::B);
+                const RefuelQuote bought = buyFuel(ship, commander_, price, full ? ship.fuelCapacity : 1.f);
 
-                case sf::Keyboard::Key::Num1:
-                    menuSelection_ = stayOption;
-                    confirmStationMenu();
-                    break;
+                char message[64];
 
-                case sf::Keyboard::Key::Num2:
-                case sf::Keyboard::Key::L:
-                    menuSelection_ = leaveOption;
-                    confirmStationMenu();
-                    break;
+                if (bought.tonnes > 0.f)
+                    std::snprintf(message, sizeof(message), "REFUELLED %.1f t  -%.0f CR", bought.tonnes, bought.cost);
+                else
+                    std::snprintf(message, sizeof(message), "%s", bought.tankFull ? "TANK ALREADY FULL" : "NOT ENOUGH CREDITS");
 
-                case sf::Keyboard::Key::Enter:
-                case sf::Keyboard::Key::Space:
-                    confirmStationMenu();
-                    break;
-
-                default:
-                    break;
+                docking::showMessage(docking_, message, 2.f);
+                break;
             }
-        }
 
-        if (const auto* mouseMoved = event.getIf<sf::Event::MouseMoved>())
-        {
-            const sf::Vector2f mouse = ui::toVector2f(mouseMoved->position);
-
-            for (int option : {stayOption, leaveOption})
-            {
-                if (menuButtonBounds(window.getSize(), option).contains(mouse))
-                    menuSelection_ = option;
-            }
-        }
-
-        if (const auto* mousePressed = event.getIf<sf::Event::MouseButtonPressed>())
-        {
-            if (mousePressed->button != sf::Mouse::Button::Left)
-                return;
-
-            const sf::Vector2f mouse = ui::toVector2f(mousePressed->position);
-
-            for (int option : {stayOption, leaveOption})
-            {
-                if (menuButtonBounds(window.getSize(), option).contains(mouse))
-                {
-                    menuSelection_ = option;
-                    confirmStationMenu();
-                    return;
-                }
-            }
+            case StationMenuAction::None:
+                break;
         }
     }
 
@@ -639,6 +623,11 @@ private:
         if (hyperspace_.phase == HyperspacePhase::Tunnel && !hyperspace_.arrived && hyperspace_.time >= tunnelTime * 0.4f)
         {
             const HyperspaceJump jump = hyperspace_;
+
+            // Pay for the jump before the ship is carried into the new system.
+            Ship& ship = world_.playerShip;
+            ship.fuel = std::max(0.f, ship.fuel - jumpFuelCost(ship, jump.distance));
+
             enterSystem(jump.destination);
             hyperspace_ = jump;
             hyperspace_.arrived = true;
@@ -652,6 +641,15 @@ private:
         switch (hyperspace_.phase)
         {
             case HyperspacePhase::Countdown:
+                // Cruising during the countdown burns fuel: if the jump can no longer be paid for,
+                // it is called off here rather than stranding the ship mid-jump.
+                if (world_.playerShip.fuel + 1e-4f < jumpFuelCost(world_.playerShip, hyperspace_.distance))
+                {
+                    hyperspace_ = {};
+                    docking::showMessage(docking_, "HYPERSPACE ABORTED: NOT ENOUGH FUEL", 2.5f);
+                    return;
+                }
+
                 // The jump takes over the screen: any open map gives way to it.
                 hyperspace_.phase = HyperspacePhase::Accelerate;
                 mapView_ = MapView::None;
@@ -746,7 +744,7 @@ private:
     /** Passes input to the chart, then acts on what it returns: close it, or start a jump countdown. */
     void handleGalaxyMapEvent(const sf::Event& event, const sf::RenderWindow& window)
     {
-        switch (galaxyMap_.handleEvent(event, window, galaxy_, currentSystemIndex_, jumpAvailable()))
+        switch (galaxyMap_.handleEvent(event, window, galaxy_, currentSystemIndex_, jumpAvailable(), jumpRangeLightYears(world_.playerShip)))
         {
             case GalaxyMapAction::Close:
                 mapView_ = MapView::None;
@@ -832,25 +830,20 @@ private:
     /** Veils the view and draws the station name over the STAY and LEAVE buttons. */
     void drawStationMenu(sf::RenderTarget& target)
     {
-        const sf::Vector2u size = target.getSize();
+        stationMenu_.draw(target, font_, stationMenuView());
 
-        sf::RectangleShape veil({static_cast<float>(size.x), static_cast<float>(size.y)});
-        veil.setFillColor(style::stationMenuVeil);
-        target.draw(veil);
-
-        menuTitle_.setString(currentSystemName_ + " STATION");
-        const sf::FloatRect stayBounds = menuButtonBounds(size, stayOption);
-        ui::centerText(menuTitle_, {static_cast<float>(size.x) * 0.5f, stayBounds.position.y - 50.f});
-        target.draw(menuTitle_);
-
-        ui::drawButton(target, stayBounds, stayText_, menuSelection_ == stayOption, menuSelection_ == stayOption);
-        ui::drawButton(
-            target,
-            menuButtonBounds(size, leaveOption),
-            leaveText_,
-            menuSelection_ == leaveOption,
-            menuSelection_ == leaveOption
-        );
+        // Purchase confirmations show over the station screen.
+        if (docking_.messageTimer > 0.f)
+        {
+            const sf::Vector2u size = target.getSize();
+            messageText_.setString(docking_.message);
+            messageText_.setCharacterSize(20);
+            const std::uint8_t alpha = static_cast<std::uint8_t>(255.f * std::min(1.f, docking_.messageTimer));
+            messageText_.setFillColor(style::withAlpha(style::accent, static_cast<int>(alpha)));
+            ui::centerText(messageText_, {static_cast<float>(size.x) * 0.5f, static_cast<float>(size.y) - 70.f});
+            target.draw(messageText_);
+            messageText_.setCharacterSize(30);
+        }
     }
 };
 

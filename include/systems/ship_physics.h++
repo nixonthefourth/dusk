@@ -37,6 +37,52 @@
  * ship up toward it, and stops it crisply on release, so short taps give small, exact corrections.
  */
 
+/* ---- Mass and fuel ---------------------------------------------------------------------------- */
+
+/** Everything the thrusters have to move: hull, fuel and cargo, in tonnes. */
+inline float shipTotalMass(const Ship& ship)
+{
+    return ship.mass + std::max(0.f, ship.fuel) + std::max(0.f, ship.cargoMass);
+}
+
+/** The mass the handling is tuned at: the hull with half a tank. */
+inline float shipReferenceMass(const Ship& ship)
+{
+    return ship.mass + ship.fuelCapacity * 0.5f;
+}
+
+/**
+ * Total mass relative to the tuning mass (1 at half a tank, below 1 when lighter, above when
+ * heavier). Rotation uses it: with more inertia for the RCS to fight, turns spin up and stop more
+ * slowly and top turn rate falls; a light ship is correspondingly snappier.
+ */
+inline float shipMassRatio(const Ship& ship)
+{
+    const float reference = shipReferenceMass(ship);
+    return reference > 0.f ? shipTotalMass(ship) / reference : 1.f;
+}
+
+/** How far a hyperspace jump can reach on the fuel aboard, in light years. */
+inline float jumpRangeLightYears(const Ship& ship)
+{
+    if (!ship.usesFuel)
+        return 1e9f;
+
+    return ship.hyperspaceFuelPerLightYear > 0.f ? ship.fuel / ship.hyperspaceFuelPerLightYear : 1e9f;
+}
+
+/** Fuel a jump of `lightYears` would burn. */
+inline float jumpFuelCost(const Ship& ship, float lightYears)
+{
+    return ship.usesFuel ? lightYears * ship.hyperspaceFuelPerLightYear : 0.f;
+}
+
+/** True when there is enough fuel to start or keep the cruise drive running. */
+inline bool hasCruiseFuel(const Ship& ship)
+{
+    return !ship.usesFuel || ship.fuel > 0.001f;
+}
+
 /** Signed speed demand along the nose, in world units per second, from throttle and direction. */
 inline float shipTargetSpeed(const Ship& ship)
 {
@@ -51,7 +97,9 @@ inline float shipTargetSpeed(const Ship& ship)
 /** Thrust force from flight assist: whatever the thrusters can give toward holding the demanded velocity. */
 inline Vec3 flightAssistThrustForce(const Ship& ship, float dt, const Vec3& externalAcceleration)
 {
-    if (ship.mass <= 0.f)
+    const float mass = shipTotalMass(ship);
+
+    if (mass <= 0.f)
         return {};
 
     const Vec3 forward = shipForward(ship);
@@ -71,13 +119,13 @@ inline Vec3 flightAssistThrustForce(const Ship& ship, float dt, const Vec3& exte
 
     forwardAcceleration = std::clamp(
         forwardAcceleration,
-        -ship.retroThrust / ship.mass,
-        ship.maxThrust / ship.mass
+        -ship.retroThrust / mass,
+        ship.maxThrust / mass
     );
 
     // The RCS budget is shared across the lateral plane, so diagonal drift isn't corrected
     // faster than straight sideways drift.
-    const float lateralLimit = ship.lateralThrust / ship.mass;
+    const float lateralLimit = ship.lateralThrust / mass;
     const float lateralAcceleration = std::hypot(rightAcceleration, upAcceleration);
 
     if (lateralAcceleration > lateralLimit)
@@ -87,7 +135,7 @@ inline Vec3 flightAssistThrustForce(const Ship& ship, float dt, const Vec3& exte
         upAcceleration *= scale;
     }
 
-    return (forward * forwardAcceleration + right * rightAcceleration + up * upAcceleration) * ship.mass;
+    return (forward * forwardAcceleration + right * rightAcceleration + up * upAcceleration) * mass;
 }
 
 /** Thrust force with flight assist off: throttle drives the main engine (or retros, in reverse) directly. */
@@ -109,24 +157,31 @@ inline Vec3 shipThrustForce(const Ship& ship, float dt = 0.f, const Vec3& extern
 /** Returns current ship acceleration, protecting the integrator from invalid mass. */
 inline Vec3 shipAcceleration(const Ship& ship, float dt = 0.f, const Vec3& externalAcceleration = {})
 {
-    if (ship.mass <= 0.f)
+    const float mass = shipTotalMass(ship);
+
+    if (mass <= 0.f)
         return externalAcceleration;
 
-    return shipThrustForce(ship, dt, externalAcceleration) / ship.mass + externalAcceleration;
+    return shipThrustForce(ship, dt, externalAcceleration) / mass + externalAcceleration;
 }
 
 /** Eases a turn rate toward its commanded value: gentle spin-up, quick stop. */
 inline float approachTurnRate(const Ship& ship, float rate, float commanded, float dt)
 {
     const bool slowingDown = std::abs(commanded) < std::abs(rate) || commanded * rate < 0.f;
-    const float timeConstant = std::max(1e-3f, slowingDown ? ship.turnStopTime : ship.turnResponseTime);
+
+    // A heavier ship has more inertia for the RCS to fight: spin-up and stopping both take longer.
+    const float inertia = shipMassRatio(ship);
+    const float timeConstant = std::max(1e-3f, (slowingDown ? ship.turnStopTime : ship.turnResponseTime) * inertia);
     return commanded + (rate - commanded) * std::exp(-dt / timeConstant);
 }
 
 /** Integrates yaw and pitch from the pilot's rate demands. Autopilots that set yaw/pitch directly leave the inputs at zero. */
 inline void integrateShipRotation(Ship& ship, float dt)
 {
-    const float scale = ship.precisionInput ? ship.precisionTurnScale : 1.f;
+    // Top turn rate scales with the inverse square root of the mass ratio: about 8% slower with a
+    // full tank than at half, about 10% quicker nearly empty.
+    const float scale = (ship.precisionInput ? ship.precisionTurnScale : 1.f) / std::sqrt(shipMassRatio(ship));
     const float yawInput = std::clamp(ship.yawInput, -1.f, 1.f);
     const float pitchInput = std::clamp(ship.pitchInput, -1.f, 1.f);
 
@@ -192,7 +247,7 @@ inline bool engageCruise(Ship& ship)
     if (ship.cruiseEngaged)
         return true;
 
-    if (shipMassLocked(ship))
+    if (shipMassLocked(ship) || !hasCruiseFuel(ship))
         return false;
 
     // Cruise speed starts from the current forward speed; throttle now scales cruiseMaxSpeed.
@@ -210,7 +265,7 @@ inline bool cruiseCharging(const Ship& ship)
 /** Starts charging the cruise drive (refused while mass-locked or already cruising). Returns whether it started. */
 inline bool beginCruiseCharge(Ship& ship)
 {
-    if (ship.cruiseEngaged || cruiseCharging(ship) || shipMassLocked(ship))
+    if (ship.cruiseEngaged || cruiseCharging(ship) || shipMassLocked(ship) || !hasCruiseFuel(ship))
         return false;
 
     ship.cruiseCharge = 0.f;
@@ -229,7 +284,7 @@ inline void updateCruiseCharge(Ship& ship, float dt)
     if (!cruiseCharging(ship))
         return;
 
-    if (shipMassLocked(ship))
+    if (shipMassLocked(ship) || !hasCruiseFuel(ship))
     {
         cancelCruiseCharge(ship);
         return;
@@ -285,6 +340,15 @@ inline void integrateCruise(Ship& ship, float dt)
 
     ship.velocity = forward * speed;
     ship.position += ship.velocity * dt;
+
+    // The drive burns fuel in proportion to speed; running dry drops the ship out of cruise.
+    if (ship.usesFuel && ship.cruiseMaxSpeed > 0.f)
+    {
+        ship.fuel = std::max(0.f, ship.fuel - ship.cruiseFuelPerSecond * (speed / ship.cruiseMaxSpeed) * dt);
+
+        if (!hasCruiseFuel(ship))
+            disengageCruise(ship);
+    }
 }
 
 /**

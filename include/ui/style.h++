@@ -152,6 +152,10 @@ namespace style {
     /** "ASTEROID FIELD" above the scanner. */
     inline constexpr sf::Color fieldWarning = caution;
 
+    /** Fuel gauge: normal, and below a fifth of the tank. */
+    inline constexpr sf::Color fuelBar = accent;
+    inline constexpr sf::Color fuelLow = warning;
+
     /* ---- Maps --------------------------------------------------------------------------------- */
 
     /** Galactic chart: range rings, the route line, hover ring, you-are-here diamond, the core. */
@@ -161,6 +165,10 @@ namespace style {
     inline constexpr sf::Color chartHover{200, 200, 200};
     inline constexpr sf::Color chartHere = textPrimary;
     inline constexpr sf::Color chartCore = highlight;
+
+    /** Galactic chart: the jump-range circle around your system (faint fill, accent edge). */
+    inline constexpr sf::Color chartRangeFill = withAlpha(accent, 18);
+    inline constexpr sf::Color chartRangeEdge = withAlpha(accent, 150);
 
     /** System dots on the chart, by economy tier. */
     inline constexpr sf::Color economyPoor{130, 130, 130};
@@ -196,8 +204,13 @@ namespace style {
     inline constexpr sf::Color dockingStatus = accent;
     inline constexpr sf::Color message = textPrimary;
 
-    /** Station menu title. */
+    /** Station screen: title, the frame around it, the header strip, the gauge, "coming soon" text. */
     inline constexpr sf::Color stationMenuTitle = textPrimary;
+    inline constexpr sf::Color stationFrame = panelFill;
+    inline constexpr sf::Color stationFrameEdge = panelOutline;
+    inline constexpr sf::Color stationHeader{14, 20, 28};
+    inline constexpr sf::Color stationGaugeTrack = lineFaint;
+    inline constexpr sf::Color stationComingSoon = textDim;
 
     /** Hyperspace countdown: title, the big number, and the destination line. */
     inline constexpr sf::Color countdownTitle = textPrimary;

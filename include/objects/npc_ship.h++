@@ -13,11 +13,13 @@
 
 /** Coarse behavioural state for a simple-reflex NPC ship. */
 enum class NpcState {
-    Inactive,        // warped out, invisible, waiting to respawn
-    Roaming,         // flying toward a roam waypoint, avoiding hazards
-    HeadingToStation,
-    Docked,          // paused at the station, invisible
-    WarpingOut       // brief wind-up before vanishing
+    Inactive,          // warped out, invisible, waiting to respawn
+    Roaming,           // flying toward a roam waypoint, avoiding hazards
+    HeadingToStation,  // flying to the approach point out in front of the station's docking slot
+    EnteringStation,   // lined up on the slot, flying down its axis into the station
+    Docked,            // inside the station, invisible
+    Launching,         // flying out of the slot along its axis, before roaming again
+    WarpingOut         // brief wind-up before vanishing
 };
 
 /** One simple-reflex NPC ship: a Ship body plus AI state layered on top. */
@@ -37,13 +39,18 @@ struct NpcShip {
     /** Current roam destination while in the Roaming state. */
     Vec3 roamTarget;
 
-    /** Whether this NPC should currently be rendered. */
+    /**
+     * Entering / Launching: distance of the ship from the slot's mouth along the slot normal
+     * (positive outside the station, negative inside), and its sideways offset from the slot
+     * axis, which is eased to zero as it lines up.
+     */
+    float dockDistance = 0.f;
+    Vec3 dockLateral;
+
+    /** Whether this NPC should currently be rendered: everywhere except warped out or inside the station. */
     bool isVisible() const
     {
-        return
-            state == NpcState::Roaming ||
-            state == NpcState::HeadingToStation ||
-            state == NpcState::WarpingOut;
+        return state != NpcState::Inactive && state != NpcState::Docked;
     }
 };
 
