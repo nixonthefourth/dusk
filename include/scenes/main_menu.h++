@@ -486,7 +486,7 @@ private:
         return {{field.position.x + static_cast<float>(index) * (width + 16.f), field.position.y + field.size.y + 24.f}, {width, 48.f}};
     }
 
-    /** Starts the new game in the chosen slot with the typed name (JAMESON if left empty). */
+    /** Starts the new game in the chosen slot with the typed name (JAMES if left empty). */
     void startNewGame()
     {
         GameLaunch launch;
@@ -576,7 +576,7 @@ private:
         target.draw(label);
 
         const float nameX = field.position.x + 16.f + label.getLocalBounds().size.x + 10.f;
-        sf::Text nameText(font_, typedName_.empty() ? "JAMESON" : typedName_, 28);
+        sf::Text nameText(font_, typedName_.empty() ? "JAMES" : typedName_, 28);
         nameText.setFillColor(typedName_.empty() ? style::textDim : style::accent);
         nameText.setPosition({nameX, textY});
         target.draw(nameText);

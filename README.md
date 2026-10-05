@@ -844,9 +844,9 @@ Saves are written to each platform's usual place for per-user app data, not the 
 
 | Platform | Folder |
 | --- | --- |
-| macOS | `~/Library/Application Support/Dusk/saves` |
+| macOS | `~/Library/Application Support/dusk/saves` |
 | Linux | `$XDG_DATA_HOME/dusk/saves`, or `~/.local/share/dusk/saves` |
-| Windows | `%APPDATA%\Dusk\saves` |
+| Windows | `%APPDATA%\dusk\saves` |
 
 Setting the `DUSK_SAVE_DIR` environment variable overrides all of these, which is handy for testing with throwaway saves. The files are `slot1.sav`, `slot2.sav` and `slot3.sav`.
 

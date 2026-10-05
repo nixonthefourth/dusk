@@ -36,7 +36,7 @@ constexpr std::size_t maxCommanderNameLength = 16;
 struct SaveGame {
     int version = saveFormatVersion;
 
-    std::string commanderName = "JAMESON";
+    std::string commanderName = "JAMES";
     double credits = 1000.0;
 
     /** The galaxy the commander lives in, and which system they saved in. */
@@ -68,9 +68,9 @@ struct GameLaunch {
 /**
  * The folder save files go in, following each platform's convention for per-user app data:
  *
- *   macOS    ~/Library/Application Support/Dusk/saves
+ *   macOS    ~/Library/Application Support/dusk/saves
  *   Linux    $XDG_DATA_HOME/dusk/saves, or ~/.local/share/dusk/saves
- *   Windows  %APPDATA%\Dusk\saves
+ *   Windows  %APPDATA%\dusk\saves
  *
  * Setting the DUSK_SAVE_DIR environment variable overrides all of these (handy for testing).
  * If no home folder can be found, saves fall back to a "saves" folder in the working directory.
@@ -84,10 +84,10 @@ inline std::filesystem::path saveDirectory()
 
 #if defined(_WIN32)
     if (const char* appData = std::getenv("APPDATA"); appData && *appData)
-        return fs::path(appData) / "Dusk" / "saves";
+        return fs::path(appData) / "dusk" / "saves";
 #elif defined(__APPLE__)
     if (const char* home = std::getenv("HOME"); home && *home)
-        return fs::path(home) / "Library" / "Application Support" / "Dusk" / "saves";
+        return fs::path(home) / "Library" / "Application Support" / "dusk" / "saves";
 #else
     if (const char* dataHome = std::getenv("XDG_DATA_HOME"); dataHome && *dataHome)
         return fs::path(dataHome) / "dusk" / "saves";
@@ -146,7 +146,7 @@ inline bool isCommanderNameCharacter(char c)
 
 /**
  * Cleans a commander name: uppercase (Elite style), allowed characters only, single spaces, no
- * leading or trailing spaces, at most maxCommanderNameLength long. An empty result becomes JAMESON.
+ * leading or trailing spaces, at most maxCommanderNameLength long. An empty result becomes JAMES.
  */
 inline std::string sanitiseCommanderName(const std::string& raw)
 {
@@ -169,7 +169,7 @@ inline std::string sanitiseCommanderName(const std::string& raw)
     while (!name.empty() && name.back() == ' ')
         name.pop_back();
 
-    return name.empty() ? std::string("JAMESON") : name;
+    return name.empty() ? std::string("JAMES") : name;
 }
 
 /** A fresh game for a newly named commander: system 0, a full tank and 1,000 credits. */
