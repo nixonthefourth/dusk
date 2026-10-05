@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 26/07/2026.
 //
+// The galaxy: 1000 SystemInfo entries generated from a single seed, each given a position on a
+// two-armed spiral for the galactic chart, plus the seed derivation used to rebuild any system.
+//
 
 #ifndef DUSK_GALAXY_H
 #define DUSK_GALAXY_H

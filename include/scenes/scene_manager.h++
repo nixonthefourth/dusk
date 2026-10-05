@@ -1,6 +1,8 @@
 //
 // Created by Mykyta Khomiakov on 24/07/2026.
 //
+// Owns the active scene and swaps it when a scene requests a transition.
+//
 
 #ifndef DUSK_SCENE_MANAGER_H
 #define DUSK_SCENE_MANAGER_H

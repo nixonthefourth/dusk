@@ -1,6 +1,8 @@
 //
 // Created by Mykyta Khomiakov on 26/07/2026.
 //
+// Base prices for goods and per-system price modifiers. Groundwork for trading; not yet used in play.
+//
 
 #ifndef DUSK_ECONOMY_H
 #define DUSK_ECONOMY_H

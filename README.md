@@ -38,6 +38,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - A recycled, endless-feeling starfield.
 - Frustum clipping for both points and line segments, with a small side guard-band so things don't visibly pop in at the frustum edges.
 - A system's star drawn as a solid filled disc, and its planets drawn as gridded, optionally ringed wireframes — sorted and drawn back-to-front together, with per-edge visibility shading based on facing direction.
+- One stylesheet (`include/ui/style.h++`) holding every colour in the game, so the whole look can be re-themed from a single file.
 - An Elite-style flight HUD: a bottom dashboard with speed and throttle, a 3D scanner, heading, pitch and turn-rate readouts and a target compass; heading and pitch tapes; a boresight and prograde marker; and brackets (or an off-screen arrow) on the locked target.
 - Target lock (`T`): the station can be locked, and shows on the scanner, the compass and in view with its distance and closing speed.
 - A galactic chart of all 1000 systems laid out on a two-armed spiral, navigable by arrow keys or mouse, with zoom, pan, per-system details, and jumping.
@@ -255,6 +256,7 @@ include/
     starfield.h++
 
   ui/
+    style.h++
     menu_button.h++
     format.h++
     galaxy_map.h++
@@ -282,7 +284,7 @@ assets/
 
 The important separation is:
 
-- `objects/`: data and local per-object helper functions (a `Cube`, a `Planet`, a `Ship`, an `NpcShip`, a `Star`, a `CollisionBody`).
+- `objects/`: data and local per-object helper functions: `Ship`, `NpcShip`, `Planet` (also used for the star), `Station` (in `cube.h++`, a name kept from when the station was a test cube), `Star`, `Asteroid`/`AsteroidBelt`, `CollisionBody`.
 - `model/`: the shared wire/vector model format used by anything drawn as lines and faces.
 - `io/`: file loading and conversion, currently OBJ-to-vector-model.
 - `procgen/`: deterministic, seed-in/data-out generation — galaxy roster, per-system flavor text and stats, and the star/planet/station/spawn placement that builds an actual `World` from that data.
@@ -291,40 +293,57 @@ The important separation is:
 - `tools/`: input handling and camera behavior.
 - `world/`: ownership and per-frame updates of everything that exists in world coordinates, including collision detection.
 - `rendering/`: code that turns world/camera state into pixels.
+- `ui/`: screen-space interface pieces — the stylesheet, buttons, text formatting, the galactic chart and the system map.
 - `src/main.cpp`: orchestration only — it should stay boring.
 
-`main.cpp`'s frame loop is intentionally simple:
+`main.cpp` stays deliberately boring: it owns the window, the camera, the scene manager and the renderers, and runs the frame loop. Everything interesting happens inside the active scene or the systems it calls.
 
-```cpp
-if (sceneManager.activeScene().acceptsShipInput())
-    updateShipFromKeyboard(world.playerShip, dt, shipInputState);
+## A Frame, Start To Finish
 
-sceneManager.activeScene().updatePhysics(dt);
-sceneManager.activeScene().updateCamera(camera, dt, shipCameraRig);
-sceneManager.activeScene().updateStreaming(camera);
-applySceneTransition(sceneManager.activeScene().consumeTransition());
+Every frame runs the same fixed sequence. Knowing it makes it much easier to see where a new feature belongs.
 
-starRenderer.draw(window, world.starfield.stars(), camera);
-planetRenderer.drawSystem(window, world.star, world.planets, camera);
+1. **Frame time.** `dt` is the time since the last frame, capped at 0.1 s. A stalled frame (dragging the window, a breakpoint) is simply lost, instead of being simulated in one enormous step that would fling ships and planets.
+2. **Events.** Every queued SFML event is handled:
+   - closing the window quits;
+   - `Escape` quits unless the scene `capturesEscape()` (it does while a map is open or a hyperspace countdown is running);
+   - every event is then passed to `Scene::handleEvent()`, which is where the maps, target lock, docking computer and station menu react to key presses and mouse clicks.
+3. **Transitions.** If the scene asked for one (PLAY or EXIT on the menu), `applySceneTransition()` swaps scenes and resets the input and camera state that lives in `main.cpp`.
+4. **Ship input.** If `acceptsShipInput()` is true, `updateShipFromKeyboard()` turns held keys into pilot intent on the ship: throttle, yaw and pitch demands, the precision modifier, and the reverse, flight-assist and cruise toggles. It never moves the ship itself. The scene returns false while a map is open, while the docking computer flies, and during a hyperspace jump.
+5. **Physics, in sub-steps.** The frame's `dt` is split into equal steps of at most 1/120 s, and `Scene::updatePhysics()` runs once per step. This keeps the flight computer, the integrators and the camera spring behaving the same at 30 or 144 frames per second. For `SystemScene`, one step is:
+   1. `updateWorldPhysics()`, in the order listed under [One Physics Step](#one-physics-step);
+   2. `docking::update()`, which moves the player kinematically while the docking computer is in control;
+   3. the cruise animation timers (engage burst, drop-out flash);
+   4. the hyperspace sequence, which may swap in a new system mid-tunnel.
+6. **Camera.** `Scene::updateCamera()` runs once per frame with the full `dt`. The chase camera reads the ship's position, orientation and acceleration, runs its spring, and sets the field of view. The scene adds its own FOV offset during a jump.
+7. **Streaming.** `updateStreaming()` re-wraps the starfield around the camera's new position.
+8. **Drawing,** back to front, because there is no depth buffer:
+   1. clear to `style::background`;
+   2. background stars;
+   3. the star and planets, sorted far to near;
+   4. asteroid dust and rocks;
+   5. the station;
+   6. the player's ship and visible NPC ships;
+   7. travel effects (streaks, bursts, the hyperspace tunnel);
+   8. the HUD, if `showsHud()`;
+   9. the scene's screen-space overlay: the system name, hints, messages, the station menu, a map, or the hyperspace text.
 
-if (world.cubeActive)
-    cubeRenderer.draw(window, world.cube, camera);
+### One Physics Step
 
-shipRenderer.draw(window, world.playerShip, camera);
+`updateWorldPhysics()` in `include/world/world.h++` runs in this order, and the order matters:
 
-for (const NpcShip& npc : world.npcShips)
-{
-    if (npc.isVisible())
-        shipRenderer.draw(window, npc.ship, camera);
-}
+1. **Clock.** `elapsedTime` advances. It is a double, and drives belt rotation and rock tumbling.
+2. **Mass lock.** The player's `cruiseMargin` is refreshed from the nearest star, planet or station, even under autopilot, so the HUD always knows whether cruise is available.
+3. **Player ship** (unless the docking computer has control). Gravity is summed from the star and planets. `integrateShipPhysics()` then runs rotation, the cruise charge, and either cruise or flight-assisted Newtonian motion. Finally `resolveShipBodyContact()` keeps the ship outside planets and the star.
+4. **Planets.** One N-body step: every planet pulls on every other, and the star pulls on all of them.
+5. **Belts.** Each belt moves to its star or host planet and turns to its orbital angle.
+6. **Drifting rocks.** They move, are recycled if out of range, and are topped up to 40.
+7. **Rock contacts.** The player is pushed out of any belt or drifting rock it overlaps, with the planets and belts now in their final positions for this step.
+8. **Station.** It moves along its orbit around its (already moved) host.
+9. **NPCs.** Each NPC runs its simple-reflex AI and integrates through the same `integrateShipPhysics()` as the player.
+10. **Station spin.**
+11. **Collision detection.** Hits are recorded on every `CollisionBody` for anything that wants to query them.
 
-if (sceneManager.activeScene().showsHud())
-    hudRenderer.draw(window, world.playerShip);
-
-sceneManager.activeScene().drawOverlay(window);
-```
-
-Input, physics, camera, streaming, transitions, and rendering never tangle together — each step reads the world, does its one job, and hands off to the next. The player ship and the galaxy's central star both get the special treatment (dedicated `shipRenderer.draw()` call, `drawSystem()` folding the star in with its planets), while NPC ships reuse the exact same `shipRenderer` as the player, just looped over and gated on whether the given NPC is currently in a visible state.
+Everything that moves something lives in this function, the systems it calls, or the docking computer. Renderers, the HUD and the camera only read.
 
 ## The World Coordinate Model
 
@@ -342,31 +361,56 @@ The convention used throughout the project is:
 - `+y`: up.
 - `+z`: forward.
 
-Each scene owns a `World`:
+Each scene owns a `World` (`include/world/world.h++`), which holds everything that exists in a system:
 
 ```cpp
 struct World {
-    Starfield starfield;
-    Cube cube;
-    bool cubeActive = true;
+    Starfield starfield;                       // the wrapping background star pool
+    Station station;                           // the system's station (if stationActive)
+    bool stationActive = true;
     std::vector<Planet> planets;
     std::vector<NpcShip> npcShips;
-    std::mt19937 npcRng;
-    float systemOuterRadius = 40000.f;
+    std::mt19937 npcRng;                       // NPC spawn/behaviour randomness
+    float systemOuterRadius = 40000.f;         // how far out NPCs roam
 
-    /** Central star. Always static — never touched by orbital integration. */
-    Planet star;
+    Planet star;                               // the central star; never moved by orbital physics
 
-    int stationHostPlanetIndex = -1;
+    int stationHostPlanetIndex = -1;           // which planet the station orbits, and how
     float stationOrbitRadius = 0.f;
     float stationOrbitAngle = 0.f;
     float stationOrbitSpeed = 0.15f;
 
     Ship playerShip;
+    TargetLock target;                         // what the player has locked (station or nothing)
+
+    std::vector<AsteroidBelt> asteroidBelts;   // the star's belts, then planets' debris belts
+    std::vector<Asteroid> driftingAsteroids;   // lone rocks kept around the player
+    std::vector<AsteroidShape> looseRockShapes;
+    int looseCoarseShapeCount = 0;
+    std::mt19937 driftRng;
+
+    double elapsedTime = 0.0;                  // simulated seconds in this system
 };
 ```
 
-Note that the star reuses the `Planet` type with an `isStar` flag set, rather than being its own struct — it needs the same position, mass, and radius fields planets already have, and the renderer/gravity code both just check that one flag when a body needs star-specific treatment. The `cube` field, meanwhile, has quietly become the system's station: `stationHostPlanetIndex`/`stationOrbitRadius`/`stationOrbitAngle` describe how it orbits whichever planet it was procedurally assigned to.
+The star reuses the `Planet` type with `isStar` set, rather than being its own struct: it needs the same position, mass and radius fields planets already have. The renderer, the gravity code and the contact code just check that one flag when a body needs star-specific treatment.
+
+### Units And Scale
+
+World units are abstract (they aren't metres), but the proportions are fixed, and most tuning numbers only make sense against them:
+
+| Thing | Size |
+| --- | --- |
+| Player ship (and NPCs) | about 500 units long |
+| Small station | about 1,300 units across |
+| Asteroids | 70–1,100 units in radius, the odd giant up to 2,600 |
+| Planets | 10,000–34,000 units in radius |
+| Star | 45,000–80,000 units in radius |
+| Orbital shells | about 140,000 units apart, the outermost planet roughly 600,000 out |
+| Normal-space top speed | 1,200 u/s |
+| Cruise top speed | 30,000 u/s |
+
+Everything stays within about a million units of the origin, where 32-bit floats still resolve positions to a few hundredths of a unit, so nothing jitters on screen.
 
 The ship is just another object living in world coordinates. The camera follows it, but the ship doesn't "belong" to the camera — that relationship only exists in the camera-controller code:
 
@@ -453,7 +497,18 @@ For a single point, clipping just checks whether `z` sits between the near and f
 
 ### Face Culling
 
-`Projector::isFrontFacing()` takes three camera-space triangle vertices, computes the wound face normal, and checks whether it points back toward the camera. Ship rendering uses this per-triangle-face result to decide which wire edges belong to a currently visible face versus a currently hidden one, so the wireframe doesn't show through the far side of the hull.
+There is no depth buffer, so a wireframe would normally show every edge, including the ones on the far side of the hull. Hidden-line removal fixes that, one convex-ish model at a time.
+
+`Projector::isFrontFacing()` takes a triangle's three camera-space vertices and computes its normal from the winding (`cross(b − a, c − a)`). The triangle faces the camera when that normal points back toward the camera, the origin of camera space. OBJ faces are expected to be wound outward; the loader flips the winding when an import transform mirrors the model.
+
+The ship and station renderers then sort edges into two sets:
+
+- every edge that belongs to some face;
+- the edges of faces that currently face the camera.
+
+A line is drawn if it is in the second set, or if it isn't a face edge at all (decorative detail lines, or every line of a model with no faces). In other words, an edge disappears only when every face it borders points away from you. Silhouette edges, which border one front face and one back face, always survive.
+
+Asteroids use the same rule with their own outward-wound shapes. Because each rock is roughly convex, this gives correct hidden lines for a single rock, but nearer rocks don't hide farther ones; nothing hides anything else in this engine.
 
 ## The Ship
 
@@ -576,9 +631,20 @@ There is still no drag. With flight assist off, the ship keeps its velocity unti
 
 ## Collision Detection
 
-Collision state and detection live in `include/objects/collision_body.h++`, wired together per-frame in `include/world/world.h++`.
+Dusk separates **detection**, which records that two things touch, from **response**, which actually stops the ship going through something. Responses are the ones that matter in play today.
 
-Every collidable object carries a `CollisionBody`:
+### Responses
+
+These run inside `updateWorldPhysics()` and move the ship:
+
+- **`resolveShipBodyContact()`.** If the ship (player or visible NPC) has sunk into a planet or the star, it is moved back to the surface along the line from the body's centre. It then loses the part of its velocity, relative to that body, that points inward, and drops out of cruise. That lets you skim a planet but never fly through it. The menu scene's placeholder star isn't a real star (`isStar` is false), so it is never solid.
+- **`resolveShipRockContact()`,** called for every belt rock and drifting rock within reach by `resolveShipAsteroidContact()`. It does the same against a rock, treated as a sphere at 85% of its jagged radius so grazing a spike doesn't snag. Velocity is taken relative to the rock, so a passing belt rock shoves you along with it. Rocks are treated as far heavier than the ship, so they never move.
+
+The station has no contact response. The docking computer flies the ship in and out of it, and ships are expected to stay out of its way otherwise.
+
+### Detection
+
+Detection lives in `include/objects/collision_body.h++` and is wired together in `updateWorldCollisions()` at the end of every physics step. Every collidable object carries a `CollisionBody`:
 
 ```cpp
 struct CollisionBody {
@@ -587,21 +653,21 @@ struct CollisionBody {
 };
 ```
 
-Each `CollisionHit` records which type of object was touched (`Ship`, `Cube`, or `Planet`), an index (for collections like `planets`), a unit normal pointing from this object toward the other, and how far the two volumes overlap.
+Each `CollisionHit` records:
 
-Every physics tick, `World::updateWorldPhysics()`:
+- the kind of object touched (`CollisionObjectType::Ship`, `::Cube` — which means the station, a name kept from when it was a test cube — or `::Planet`);
+- an index (for collections like `planets`);
+- a unit normal pointing from this object toward the other;
+- how far the two volumes overlap.
 
-1. Integrates ship physics and updates the cube's rotation.
-2. Clears every object's hits from last frame.
-3. Runs a **swept sphere** test for the ship against the cube and against every planet — swept, because the ship moves fast enough in one frame that a plain sphere-overlap test could miss it clipping straight through something.
-4. Runs plain **sphere-sphere** tests between the cube and each planet, and between every pair of planets.
-5. Registers each hit symmetrically on both objects involved.
+Each step, `updateWorldCollisions()`:
 
-`Cube` and `Planet` each expose a `*CollisionRadius()` helper so the collision system doesn't need to know how their visual size maps to a collision volume. The procedurally generated station cube sets `collision.detectsCollisions = false` on itself, so today it's purely decorative furniture in orbit rather than something you can bump into — a natural hook for a future docking mechanic, but not wired up yet.
+1. clears every object's hits from the last step;
+2. runs a **swept sphere** test for the player ship against the station and against every planet. It's swept because the ship can move far enough in one step that a plain overlap test would miss it passing straight through something; the sphere runs from `previousPosition` to `position`;
+3. runs plain **sphere-sphere** tests between the station and each planet, and between every pair of planets;
+4. registers each hit symmetrically on both objects involved.
 
-Detection still only records hits. The one response that exists is `resolveShipBodyContact()`: a ship (player or visible NPC) that has sunk into a planet or the star is moved back to the surface and loses the inward part of its velocity relative to that body, and drops out of cruise. That stops the ship flying through worlds it should be skimming; proper rigid-body response is still on the roadmap.
-
-NPC ships currently sit outside the hit-recording system: they steer around planets and the star through their own AI (see below), but they don't carry a `CollisionBody` and never appear in `updateWorldCollisions()`.
+The station's generated `CollisionBody` has `detectsCollisions = false`, so it never registers hits. NPC ships and asteroids don't carry `CollisionBody`s and aren't part of detection; NPCs steer around bodies through their own AI. The recorded hits are there for gameplay to query (`isColliding()`, `collidingWith(type)`, `collidingWith(type, index)`), for example damage or proximity warnings later. Nothing reads them yet.
 
 ## Orbital Physics And Gravity
 
@@ -816,7 +882,7 @@ There's no depth buffer, so both layers skip anything whose line of sight passes
 
 `resolveShipAsteroidContact()` treats each nearby rock (belt or drifting) as a sphere slightly inside its jagged outline. It pushes the ship back to the surface, removes the part of the ship's velocity relative to the rock that points into it (so a moving rock shoves you along), and drops you out of cruise. Belts don't mass-lock: you can cruise across one, but hitting a rock at cruise speed ends the cruise.
 
-Rocks of 250 units and up appear on the scanner as dim specks with faint stalks, and an amber `ASTEROID FIELD` warning shows while you're inside any belt.
+Rocks of 250 units and up appear on the scanner as dim specks with faint stalks, and a yellow `ASTEROID FIELD` warning (`style::fieldWarning`) shows while you're inside any belt.
 
 On the system map, star belts are drawn as turning speckled bands. A planet with a debris belt gets a dotted halo, and its details show `DEBRIS BELT: YES`. The galactic chart lists each system's star belts.
 
@@ -846,11 +912,13 @@ The HUD and flight controls are off from Accelerate through Arrive, and any open
 
 ## The Starfield
 
-The starfield lives in `include/world/starfield.h++`. It doesn't create infinite stars — it keeps a fixed pool (`starCount = 3000`) scattered randomly through a cubic volume (`radius = 90000.f`) kept centred on the camera.
+The starfield lives in `include/world/starfield.h++`. It doesn't create infinite stars. It keeps a fixed pool (`starCount = 3000`) scattered randomly through a cube kept centred on the camera, extending `radius = 90000` units in each direction.
 
-Rather than re-scattering, the field wraps: a star that falls more than one field radius behind the camera on any axis reappears the same distance ahead on that axis. Nothing ever pops in view, so the field stays seamless even at cruise speed, and the stars streaming past are the main sense of how fast you're going.
+**Wrapping.** Rather than re-scattering, the field wraps. On each axis, a star whose offset from the camera falls outside ±radius is moved by a whole number of field widths (`2 × radius`) back inside, using `floor((offset + radius) / span)`. So a star that drops off the back of the field reappears the same distance ahead. Nothing ever pops in view, the distribution stays uniform, and the field stays seamless even at cruise speed or after a jump teleports the camera. The stars streaming past are the main sense of how fast you're going.
 
-## The Ship And Cube Renderers
+**Drawing.** `StarRenderer` projects each star and draws it as a small filled circle. Its size and alpha come from the star's brightness and distance, so near stars are slightly larger and brighter. The cruise streaks and hyperspace stretch in the travel-effects renderer reuse the same star positions, so the effects line up with the stars you were already looking at.
+
+## The Ship And Station Renderers
 
 The ship renderer (`include/rendering/ship_renderer.h++`) draws a `VectorModel`:
 
@@ -888,7 +956,7 @@ The station renderer (`include/rendering/station_renderer.h++`) follows the same
 
 ## The Planet Renderer
 
-`include/rendering/planet_renderer.h++` draws each planet as a latitude/longitude wireframe grid plus a solid silhouette outline, optionally with a flattened elliptical ring. Bodies are projected, culled if off-screen or too small, then depth-sorted and drawn back-to-front together so overlapping bodies composite correctly without a depth buffer. Grid line brightness is shaded per-segment based on how directly that patch of the sphere faces the camera, which is what gives the far side of a planet its dimmer, more silhouette-like look.
+`include/rendering/planet_renderer.h++` draws each planet as a latitude/longitude wireframe grid plus a solid silhouette outline, optionally with a flattened elliptical ring. Bodies are projected, culled if off-screen or too small, then depth-sorted and drawn back-to-front together so overlapping bodies composite correctly without a depth buffer. Grid line brightness is shaded per segment by how directly that patch of the sphere faces the camera (`lineColorFor()`). The renderer takes the segment midpoint's outward normal and the direction to the camera; their dot product `facing` runs from −1 (far side) to +1 (facing you). It maps that to `visibility = clamp((facing + 0.25) / 1.25, 0, 1)` and sets alpha to `42 + 190 × visibility`. Lines on the near side are bright and those wrapping round the back fade to faint, which is what makes a see-through wireframe read as a solid sphere.
 
 Stellar bodies get their own projection config in `main.cpp`, with a 10,000,000-unit far plane, because a system's planets sit far beyond the starfield-sized far plane that ships and stations use. A body's on-screen radius is its true angular size, `f × R / sqrt(d² − R²)` with `d` the distance to its centre. (The older `f × R / z` undersized planets badly once you got close, leaving the grid lines spilling past the outline.) Bodies smaller than two pixels are drawn as marker dots instead of being culled, so every planet in a system stays visible for navigation. Up close, the grid gets denser so a planet's curvature still reads when it fills the screen, and when you skim so low that the planet's centre is behind the camera, its grid is still drawn without the outline. Each planet's grid is batched into a single draw call.
 
@@ -1091,8 +1159,8 @@ The flight HUD lives in `include/rendering/hud_renderer.h++`. It is a single `Hu
 
 **Dashboard** (`dashboardHeight = 122` pixels along the bottom, which scenes keep their own text clear of):
 
-- Left: speed (or cruise speed), forward/reverse, a throttle bar and a speed bar on the same scale (with flight assist on, the throttle bar is where you're heading and the speed bar is where you've got to), and flight-assist and cruise/mass-lock status.
-- Centre: an Elite-style 3D scanner. The ellipse is the ship's horizontal plane seen from above and behind, forward up the scope; each contact sits on the plane at its ship-relative position with a stalk up or down to its height. NPC ships show as bars, the station as a cyan square (ringed when targeted). The range is `scannerRange = 25000` units.
+- Left: speed (or cruise speed), forward/reverse, a throttle bar and a speed bar on the same scale (with flight assist on, the throttle bar is where you're heading and the speed bar is where you've got to), and the status line. That line shows flight assist in its own colour (`style::assistOn` blue for FA ON, `style::assistOff` orange for FA OFF), followed by cruise state in the accent: `[J] CRUISE`, `CRUISE CHARGING n%`, `MASS LOCKED` or `[J] DROP`.
+- Centre: an Elite-style 3D scanner. The ellipse is the ship's horizontal plane seen from above and behind, forward up the scope; each contact sits on the plane at its ship-relative position with a stalk up or down to its height. NPC ships show as bars, the station as an accent-orange square (ringed when targeted), and your own ship as a gold dot at the centre. The range is `scannerRange = 25000` units.
 - Right: heading (000–359, with 000 along world `+z`) and pitch in degrees, centre-zero bars for the current yaw and pitch rates, and the target compass. The compass dot shows where the target lies relative to the nose: filled when ahead, hollow red when behind. Underneath are the target's name, distance and closing speed (positive while the gap shrinks).
 
 **In view:**
@@ -1109,15 +1177,61 @@ Targeting itself is world state: `World::target` holds a `TargetLock`, and `targ
 
 Chart positions come from `generateGalaxyLayout()` in `procgen/galaxy.h++`, which stores a `mapPosition` (light years from the core) on every `SystemInfo`. Systems lie on a two-armed logarithmic spiral with a central bulge, kept at least 6 LY apart so each stays clickable. The layout uses its own RNG stream, so it never disturbs the per-system seeds that rebuild each system. System 0, where you start, sits near the outer end of an arm, about 440 LY from the galactic core — the game's end goal, marked on the chart.
 
-Arrow keys pick the system that best continues in that direction (`distance / alignment²`, ignoring anything more than 60° off), and the view recentres when the selection nears the edge. The panel shows the selected system's distance, distance to the core, economy, trade, planets, station, asteroid belts, traffic and exports, plus the jump button. Dots are coloured by economy tier: grey for Poor, white for Developing, cyan for Progressive.
+Arrow keys pick the system that best continues in that direction (`distance / alignment²`, ignoring anything more than 60° off), and the view recentres when the selection nears the edge. The panel shows the selected system's distance, distance to the core, economy, trade, planets, station, asteroid belts, traffic and exports, plus the jump button. Dots are coloured by economy tier: grey for Poor, white for Developing, accent orange for Progressive (`style::economy*`).
 
 Jumping starts the hyperspace sequence described under [Travel Animations](#travel-animations); partway through the tunnel, `SystemScene::enterSystem()` regenerates the destination from its seed. Jumps are refused while docked, under the docking computer, or while another jump is in progress. There's no jump range or fuel yet; `galacticDistance()` is there for when there is.
 
 ## The System Map
 
-`include/ui/system_map.h++` holds `SystemMap`, opened with `M`. It's a top-down (`x`/`z`) view of the current system: orbits are to scale and drawn live, while body sizes are not (at true scale every planet would be a single pixel), which the map says in its corner. The station is drawn just outside its host, because its real orbit would sit inside the host's dot. NPC traffic shows as dots, and you as an amber arrow along your heading. A scale bar picks a round length that comes out 60–150 pixels long.
+`include/ui/system_map.h++` holds `SystemMap`, opened with `M`. It's a top-down (`x`/`z`) view of the current system: orbits are to scale and drawn live, while body sizes are not (at true scale every planet would be a single pixel), which the map says in its corner. The station is drawn just outside its host, because its real orbit would sit inside the host's dot. NPC traffic shows as dots, and you as a gold arrow along your heading. A scale bar picks a round length that comes out 60–150 pixels long.
 
 The panel lists the star and every planet, with each planet named after its system plus its orbital order (`planetDisplayName()`, e.g. "JorEl Minor II") and your altitude above each. The highlighted body's radius, orbit, orbital speed, rings and station are shown underneath.
+
+## Seeds And Determinism
+
+Everything procedural comes from one number, the galaxy seed (`1337` in `main.cpp` for now), split into independent random streams so that nothing interferes with anything else:
+
+| Stream | Seeded from | Drives |
+| --- | --- | --- |
+| System seed | `deriveSystemSeed(galaxySeed, index)` | the on-paper `SystemInfo` rolls, then the star, planets and station placement |
+| Chart layout | `galaxySeed ^ constant` | every system's position on the galactic chart |
+| Star belts | `systemSeed ^ constant` | where belts go, their size, density and shapes |
+| Planet belts | `systemSeed ^ another constant` | which planets get debris belts, and their shapes |
+| Belt cells | `hash(beltSeed, cell x, y, z)` | the rocks in each 5,000-unit cell of a belt |
+| Loose-rock shapes | `systemSeed ^ constant` | the shapes of drifting rocks |
+| Drifting-rock spawns | `World::driftRng`, seeded `systemSeed ^ constant` on entry | where lone rocks appear; since spawns follow the player, the result depends on how you fly |
+| NPCs | `World::npcRng`, seeded from `std::random_device` | NPC spawns and decisions — deliberately different every run, so traffic never repeats |
+
+Three rules keep this stable:
+
+- **Append-only rolls.** Each stream draws its numbers in a fixed order. A new feature that needs randomness either gets its own stream (as belts did), or appends its rolls after every existing one (as the NPC traffic multiplier and belt count did in `generateSystemInfo()`). Inserting a roll in the middle would change every value drawn after it, and so every system in the galaxy.
+- **Roll even when the result is discarded.** `generatePlanetBelts()` rolls a full set of values for every planet, even the ones that end up without a belt. One planet's outcome then never shifts another's.
+- **Streams instead of shared state.** Systems are rebuilt from scratch on entry, and belt rocks are regenerated on demand. So the same system's geography (star, planets, station, belts and every belt rock) is always exactly the same: the same rocks come round every orbit, and come back when you return. Only the living parts, NPC traffic and drifting rocks, vary.
+
+**One caveat: platforms.** The C++ standard fixes `std::mt19937`'s output exactly, but leaves the distributions (`uniform_int_distribution`, `normal_distribution`, `poisson_distribution` and so on) to each standard library. macOS (libc++) and Linux with GCC (libstdc++) therefore build different, equally valid galaxies from the same seed. On any one machine the galaxy never changes. If you ever need identical galaxies everywhere (shared seeds, saves moving between machines), replace the `std::` distributions in `procgen/` with small hand-written ones.
+
+## Colours And The Stylesheet
+
+Every colour the game draws with lives in `include/ui/style.h++`, in the `style` namespace. Renderers, maps and scenes refer to names like `style::accent`, `style::scannerStation` or `style::tunnelRing`; none of them writes a raw `sf::Color(...)` for anything visible. To re-theme the game, edit that one file and rebuild.
+
+The file is grouped by where colours appear:
+
+| Group | Covers |
+| --- | --- |
+| Palette | the core colours: `accent` (the UI orange, `rgb(248, 132, 63)`), `assistOn` (FA ON, `rgb(61, 69, 170)`), `assistOff` (FA OFF, the accent), text greys, `warning`, `caution`, `highlight` |
+| Panels | map side panels, the highlighted list row, readout boxes, menu veils |
+| Buttons | primary (accent-filled) and secondary (accent-outlined) buttons |
+| HUD | dashboard, flight markers, target brackets, bars, the scanner and its contacts, the compass, the tapes, the asteroid-field warning |
+| Maps | chart rings, route, selection and economy colours; system-map orbits, bodies, station, traffic, belts |
+| Scenes | system name, key hints, docking status, messages, the hyperspace countdown and tunnel text |
+| World | ship wireframes, the station's two-colour gradient, stars, planets, rings, asteroids, belt dust |
+| Travel | cruise streaks, charge and burst lines, flashes, and the hyperspace stretch and tunnel |
+
+Most UI entries are defined in terms of the palette, for example `scannerStation = accent` and `chartSelection = accent`. Changing `accent` alone therefore re-colours every UI highlight, and you can override any single entry to break it away. The travel effects deliberately stay a cold blue-white, after Star Wars, so they read as something happening to space rather than to the interface.
+
+**Alpha.** Some colours are faded at draw time: streaks fading along their length, flashes, planet grid shading, rocks fading in at the edge of draw distance. For those, the renderer takes the stylesheet colour and replaces only its alpha with `style::withAlpha(colour, alpha)`; the alpha written in the stylesheet is just the default. `withAlpha` accepts an int (clamped to 0–255) or a float.
+
+**Adding a colour.** Add a named entry to the right group in `style.h++`, give it a one-line comment saying where it appears, and use the name in your renderer.
 
 ## Adding Your Own World Object
 
@@ -1181,7 +1295,7 @@ For a simple projected point:
 const auto projected = projector.project(beacon.position, camera, viewport);
 ```
 
-For a full line model, follow the pattern in `cube_renderer.h++`: view matrix, clip line, project both endpoints, draw.
+For a full line model, follow the pattern in `station_renderer.h++`: transform each model vertex to world space, then through the view matrix, cull hidden edges, clip each line, project both endpoints, and draw.
 
 ### 5. Wire It Into Main
 
@@ -1191,7 +1305,7 @@ const BeaconRenderer beaconRenderer(projectionConfig);
 beaconRenderer.draw(window, world.beacon, camera);
 ```
 
-Guard the draw call the same way `cubeActive` already gates cube drawing, if the object is optional per scene.
+Guard the draw call the same way `stationActive` gates station drawing, if the object is optional per scene. Pick its colour from the stylesheet (add an entry to `include/ui/style.h++`) rather than writing an `sf::Color` in the renderer.
 
 ## Adding Your Own Physics
 
@@ -1213,14 +1327,8 @@ inline void updateWorldPhysics(World& world, float dt)
     integrateShipPhysics(world.playerShip, dt, shipGravity);
     applyLinearDrag(world.playerShip, 0.02f, dt);
 
-    orbital::integrateOrbitalPhysics(world.planets, world.star.position, world.star.mass, dt);
-    updateStationOrbit(world, dt);
-    updateNpcShips(world, dt);
-
-    if (world.cubeActive)
-        updateCube(world.cube, dt);
-
-    updateWorldCollisions(world);
+    // ...the rest of the step as it is today: planets, belts, rocks, station, NPCs, collisions
+    // (see "One Physics Step" above for the full order).
 }
 ```
 
@@ -1303,10 +1411,13 @@ Keep these boundaries intact:
 - Camera decides the view; it reads world state but doesn't change it.
 - Rendering reads state and draws — it never mutates gameplay state.
 - Projection math stays inside `Projector`.
+- Colours come from `include/ui/style.h++`; no renderer or scene writes a raw `sf::Color` for anything visible.
+- Procedural rolls are append-only: a new roll goes after every existing one, so existing systems never change.
 
 ## Useful Files To Start With
 
 - `src/main.cpp`: the whole frame loop, end to end.
+- `include/ui/style.h++`: every colour in the game.
 - `include/scenes/main_menu.h++`: menu input, mouse hover, and overlay rendering.
 - `include/scenes/system_scene.h++`: the reused, galaxy-driven scene — regenerating a `World` from a seed on entry.
 - `include/scenes/default_scene.h++`: a minimal, hand-authored world for quick testing outside procgen.
@@ -1335,11 +1446,12 @@ This is still intentionally small:
 - No depth buffer and no triangle rasterizer — everything visible is either a projected line, a projected point, or an SFML shape primitive.
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
-- There's no real warp/travel scene yet — jumping from the galactic chart is instant, with no jump range or fuel — and `EnterSystem` always enters system 0 regardless of which system you were last in.
+- Hyperspace has no jump range or fuel yet, and `EnterSystem` (PLAY on the menu) always enters system 0 regardless of which system you were last in.
 - The economy layer computes prices per system but has no trading UI, no inventory, and no supply/demand — it's generated data with nowhere to spend it yet.
-- Only one station gets built per system even when `SystemInfo::stationCount` rolls higher, and there's no dedicated `Station` type — it's the same `Cube` used for the old test object, repurposed.
+- Only one station gets built per system even when `SystemInfo::stationCount` rolls higher.
 - No true fixed time-step accumulator; physics is split into sub-steps of at most 1/120 s, but their size still follows the frame time.
 - No real asset-management system beyond loading a font and an OBJ file at scene construction.
+- Generated galaxies are deterministic per standard library, not across them (see [Seeds And Determinism](#seeds-and-determinism)).
 - Only the station can be targeted; NPC ships and planets show on the scanner and maps but can't be locked yet.
 - NPC ships ignore asteroids (they fly straight through rocks), and rocks can't be mined or shot yet.
 - Drifting rocks only exist around the player: they are a population kept topped up within about 50,000 units of you, not objects with a life of their own across the system.

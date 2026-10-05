@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 26/07/2026.
 //
+// Newtonian gravity: the gravitational acceleration between bodies, circular-orbit velocities,
+// and the N-body integration step that moves the planets each frame.
+//
 
 #ifndef DUSK_ORBITAL_PHYSICS_H
 #define DUSK_ORBITAL_PHYSICS_H

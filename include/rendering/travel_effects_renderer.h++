@@ -7,6 +7,7 @@
 
 #include "math/Mat4.h++"
 #include "rendering/projector.h++"
+#include "ui/style.h++"
 #include "systems/ship_physics.h++"
 #include "systems/travel_effects.h++"
 #include "tools/camera.h++"
@@ -37,11 +38,16 @@
  */
 class TravelEffectsRenderer {
 public:
+    /** Uses the same projection as ships and stations (the starfield-sized far plane). */
     explicit TravelEffectsRenderer(ProjectionConfig projection = {})
         : projector_(projection)
     {
     }
 
+    /**
+     * Draws whichever effects are active. The hyperspace phases replace everything else; otherwise
+     * cruise streaks, charge gathering, the engage burst and the drop flash can all layer together.
+     */
     void draw(sf::RenderTarget& target, const World& world, const Camera& camera, const TravelEffects& effects) const
     {
         const sf::Vector2u size = target.getSize();
@@ -60,7 +66,7 @@ public:
             {
                 const float p = effects.phaseProgress;
                 drawStarStretch(target, world, camera, viewport, vanishing, 0.04f + 7.f * std::pow(p, 2.2f), 1.f);
-                drawFlash(target, viewport, std::pow(std::clamp((p - 0.82f) / 0.18f, 0.f, 1.f), 2.f) * 255.f, sf::Color(235, 245, 255));
+                drawFlash(target, viewport, std::pow(std::clamp((p - 0.82f) / 0.18f, 0.f, 1.f), 2.f) * 255.f, style::hyperspaceFlash);
                 return;
             }
 
@@ -68,7 +74,7 @@ public:
             {
                 const float p = effects.phaseProgress;
                 drawStarStretch(target, world, camera, viewport, vanishing, 7.f * std::pow(1.f - p, 2.6f), 1.f - p * 0.4f);
-                drawFlash(target, viewport, std::pow(std::clamp(1.f - p / 0.3f, 0.f, 1.f), 1.5f) * 255.f, sf::Color(235, 245, 255));
+                drawFlash(target, viewport, std::pow(std::clamp(1.f - p / 0.3f, 0.f, 1.f), 1.5f) * 255.f, style::hyperspaceFlash);
                 return;
             }
 
@@ -89,13 +95,13 @@ public:
         if (effects.cruiseEngageBurst > 0.f)
         {
             drawBurst(target, vanishing, reach, effects.cruiseEngageBurst);
-            drawFlash(target, viewport, std::pow(effects.cruiseEngageBurst, 3.f) * 150.f, sf::Color::White);
+            drawFlash(target, viewport, std::pow(effects.cruiseEngageBurst, 3.f) * 150.f, style::engageFlash);
         }
 
         if (effects.cruiseDropFlash > 0.f)
         {
             drawDropRing(target, vanishing, reach, effects.cruiseDropFlash);
-            drawFlash(target, viewport, std::pow(effects.cruiseDropFlash, 2.f) * 110.f, sf::Color(220, 235, 255));
+            drawFlash(target, viewport, std::pow(effects.cruiseDropFlash, 2.f) * 110.f, style::dropFlash);
         }
     }
 
@@ -113,6 +119,7 @@ private:
         return {viewport.width * 0.5f, viewport.height * 0.5f};
     }
 
+    /** A full-screen wash of `color` at `alpha` (0-255); skipped when effectively invisible. */
     static void drawFlash(sf::RenderTarget& target, const Viewport& viewport, float alpha, sf::Color color)
     {
         if (alpha < 1.f)
@@ -166,8 +173,8 @@ private:
         lines.reserve(world.starfield.stars().size() * 2);
 
         const auto head = static_cast<std::uint8_t>(80.f + 150.f * intensity);
-        const sf::Color headColor(225, 235, 255, head);
-        const sf::Color tailColor(150, 190, 255, 0);
+        const sf::Color headColor = style::withAlpha(style::cruiseStreakHead, static_cast<int>(head));
+        const sf::Color tailColor = style::cruiseStreakTail;
 
         for (const Star& star : world.starfield.stars())
         {
@@ -205,7 +212,7 @@ private:
             const sf::Vector2f direction = {std::cos(angle), std::sin(angle)};
             const auto alpha = static_cast<std::uint8_t>(std::clamp(charge * 170.f * (0.3f + phase), 0.f, 255.f));
 
-            addLine(lines, centre + direction * outer, centre + direction * inner, sf::Color(170, 215, 255, 0), sf::Color(200, 230, 255, alpha));
+            addLine(lines, centre + direction * outer, centre + direction * inner, style::gatherLineOuter, style::withAlpha(style::gatherLineInner, static_cast<int>(alpha)));
         }
 
         target.draw(lines.data(), lines.size(), sf::PrimitiveType::Lines);
@@ -216,7 +223,7 @@ private:
         ring.setOrigin({ringRadius, ringRadius});
         ring.setPosition(centre);
         ring.setFillColor(sf::Color::Transparent);
-        ring.setOutlineColor(sf::Color(170, 225, 255, static_cast<std::uint8_t>(60.f + 150.f * charge)));
+        ring.setOutlineColor(style::withAlpha(style::gatherRing, 60.f + 150.f * charge));
         ring.setOutlineThickness(1.5f);
         target.draw(ring);
     }
@@ -238,7 +245,7 @@ private:
             const sf::Vector2f direction = {std::cos(angle), std::sin(angle)};
             const auto alpha = static_cast<std::uint8_t>(230.f * burst);
 
-            addLine(lines, centre + direction * inner, centre + direction * outer, sf::Color(255, 255, 255, alpha), sf::Color(160, 210, 255, 0));
+            addLine(lines, centre + direction * inner, centre + direction * outer, style::withAlpha(style::burstLineHead, static_cast<int>(alpha)), style::burstLineTail);
         }
 
         target.draw(lines.data(), lines.size(), sf::PrimitiveType::Lines);
@@ -252,7 +259,7 @@ private:
         ring.setOrigin({radius, radius});
         ring.setPosition(centre);
         ring.setFillColor(sf::Color::Transparent);
-        ring.setOutlineColor(sf::Color(200, 230, 255, static_cast<std::uint8_t>(200.f * flash)));
+        ring.setOutlineColor(style::withAlpha(style::dropRing, 200.f * flash));
         ring.setOutlineThickness(2.f);
         target.draw(ring);
     }
@@ -278,8 +285,8 @@ private:
         lines.reserve(world.starfield.stars().size() * 2);
 
         const auto alpha = static_cast<std::uint8_t>(std::clamp(255.f * brightness, 0.f, 255.f));
-        const sf::Color inner(170, 205, 255, static_cast<std::uint8_t>(alpha / 3));
-        const sf::Color outer(240, 248, 255, alpha);
+        const sf::Color inner = style::withAlpha(style::stretchInner, static_cast<int>(alpha / 3));
+        const sf::Color outer = style::withAlpha(style::stretchOuter, static_cast<int>(alpha));
 
         for (const Star& star : world.starfield.stars())
         {
@@ -311,7 +318,7 @@ private:
         const float reach = std::hypot(viewport.width, viewport.height);
 
         sf::RectangleShape space({viewport.width, viewport.height});
-        space.setFillColor(sf::Color(3, 7, 22));
+        space.setFillColor(style::tunnelBackground);
         target.draw(space);
 
         const auto centreAt = [&](float depth)
@@ -347,8 +354,8 @@ private:
                 lines,
                 centreAt(depth + length) + direction * radiusFar,
                 centreAt(depth) + direction * radiusNear,
-                sf::Color(120, 170, 255, 0),
-                sf::Color(200, 230, 255, alpha)
+                style::tunnelStreakTail,
+                style::withAlpha(style::tunnelStreakHead, static_cast<int>(alpha))
             );
         }
 
@@ -369,7 +376,7 @@ private:
             ring.setOrigin({radius, radius});
             ring.setPosition(centreAt(depth));
             ring.setFillColor(sf::Color::Transparent);
-            ring.setOutlineColor(sf::Color(235, 245, 255, static_cast<std::uint8_t>(30.f + 200.f * nearness * nearness)));
+            ring.setOutlineColor(style::withAlpha(style::tunnelRing, 30.f + 200.f * nearness * nearness));
             ring.setOutlineThickness(1.f + 1.5f * nearness);
             target.draw(ring);
         }
@@ -378,7 +385,7 @@ private:
         const float p = effects.phaseProgress;
         const float whiteIn = std::pow(std::clamp(1.f - p / 0.12f, 0.f, 1.f), 1.5f);
         const float whiteOut = std::pow(std::clamp((p - 0.9f) / 0.1f, 0.f, 1.f), 2.f);
-        drawFlash(target, viewport, std::max(whiteIn, whiteOut) * 255.f, sf::Color(235, 245, 255));
+        drawFlash(target, viewport, std::max(whiteIn, whiteOut) * 255.f, style::hyperspaceFlash);
     }
 };
 

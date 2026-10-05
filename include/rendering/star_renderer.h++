@@ -1,12 +1,15 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// Draws the background starfield as small dots, sized and faded by brightness and distance.
+//
 
 #ifndef DUSK_STAR_RENDERER_H
 #define DUSK_STAR_RENDERER_H
 
 #include "objects/star.h++"
 #include "rendering/projector.h++"
+#include "ui/style.h++"
 #include "tools/camera.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
@@ -72,7 +75,7 @@ public:
             shape.setRadius(radius);
             shape.setOrigin({radius, radius});
             shape.setPosition({projected->position.x, projected->position.y});
-            shape.setFillColor(sf::Color(255, 255, 255, alpha));
+            shape.setFillColor(style::withAlpha(style::starfield, static_cast<int>(alpha)));
 
             target.draw(shape);
         }

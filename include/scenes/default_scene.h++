@@ -1,6 +1,8 @@
 //
 // Created by Mykyta Khomiakov on 24/07/2026.
 //
+// A bare test scene (no system generation), kept for experimenting with ships and projection.
+//
 
 #ifndef DUSK_DEFAULT_SCENE_H
 #define DUSK_DEFAULT_SCENE_H
@@ -32,6 +34,7 @@ public:
         return world_;
     }
 
+    /** Read-only access to this scene's world. */
     const World& world() const override
     {
         return world_;

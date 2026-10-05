@@ -1,6 +1,10 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// The space station: its placement and orientation in the world, its Elite-style spin about the
+// docking axis, its docking slot (the "mouth" ships fly into) and its loaded wireframe model.
+// (The file keeps its historical name from when the station was a placeholder cube.)
+//
 
 #ifndef DUSK_STATION_H
 #define DUSK_STATION_H

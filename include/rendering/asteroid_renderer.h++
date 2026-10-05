@@ -9,6 +9,7 @@
 #include "objects/asteroid.h++"
 #include "procgen/asteroid_generation.h++"
 #include "rendering/projector.h++"
+#include "ui/style.h++"
 #include "tools/camera.h++"
 #include "world/world.h++"
 #include <SFML/Graphics.hpp>
@@ -37,6 +38,7 @@ public:
     {
     }
 
+    /** Draws belt dust first (so rocks sit on top), then every rock near the camera. */
     void draw(sf::RenderTarget& target, const World& world, const Camera& camera) const
     {
         if (world.asteroidBelts.empty() && world.driftingAsteroids.empty())
@@ -88,12 +90,14 @@ private:
         return std::any_of(world.planets.begin(), world.planets.end(), blocks);
     }
 
+    /** Pixels per unit of tangent at the camera's field of view: screen size = world size * focal / depth. */
     static float focalLength(const Camera& camera, const Viewport& viewport)
     {
         constexpr float degreesToRadians = 3.14159265358979323846f / 180.f;
         return (viewport.height * 0.5f) / std::tan(camera.fov * degreesToRadians * 0.5f);
     }
 
+    /** Projects each belt's dust points (turned with the belt) as single pixels, skipping any hidden behind a body. */
     void drawDust(
         sf::RenderTarget& target,
         const World& world,
@@ -122,7 +126,7 @@ private:
                 if (!projected)
                     continue;
 
-                points.push_back(sf::Vertex({projected->position.x, projected->position.y}, sf::Color(120, 115, 105)));
+                points.push_back(sf::Vertex({projected->position.x, projected->position.y}, style::beltDust));
             }
         }
 
@@ -138,6 +142,7 @@ private:
         std::vector<bool> faceVisible;
     };
 
+    /** Gathers every belt rock and drifting rock within draw distance into one batch and draws it in two calls. */
     void drawRocks(
         sf::RenderTarget& target,
         const World& world,
@@ -224,7 +229,7 @@ private:
             if (screenRadius < 1.5f)
             {
                 const auto alpha = static_cast<std::uint8_t>(200.f * fade);
-                batch.dots.push_back(sf::Vertex({projected->position.x, projected->position.y}, sf::Color(200, 195, 185, alpha)));
+                batch.dots.push_back(sf::Vertex({projected->position.x, projected->position.y}, style::withAlpha(style::asteroidDot, static_cast<int>(alpha))));
                 return;
             }
         }
@@ -259,7 +264,7 @@ private:
         }
 
         const auto alpha = static_cast<std::uint8_t>(235.f * fade);
-        const sf::Color color(210, 205, 195, alpha);
+        const sf::Color color = style::withAlpha(style::asteroidLine, static_cast<int>(alpha));
 
         for (const AsteroidShape::Edge& edge : shape.edges)
         {

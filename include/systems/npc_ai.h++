@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 26/07/2026.
 //
+// Simple-reflex NPC behaviour: pick a destination, steer toward it while avoiding bodies, use
+// the cruise drive on long legs, dock at the station, and warp in and out of the system.
+//
 
 #ifndef DUSK_NPC_AI_H
 #define DUSK_NPC_AI_H

@@ -1,6 +1,8 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// The endless starfield: a fixed pool of stars in a cube that wraps around the camera.
+//
 
 #ifndef DUSK_STARFIELD_H
 #define DUSK_STARFIELD_H

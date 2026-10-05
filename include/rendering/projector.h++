@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// The heart of the manual 3D renderer: builds the view matrix from a Camera, clips lines against
+// the view frustum in camera space, and projects camera-space points onto the screen.
+//
 
 #ifndef DUSK_PROJECTOR_H
 #define DUSK_PROJECTOR_H
@@ -312,6 +315,7 @@ private:
 
     static constexpr float pi = 3.14159265358979323846f;
 
+    /** Degrees to radians. */
     static float degreesToRadians(float degrees)
     {
         return degrees * pi / 180.f;

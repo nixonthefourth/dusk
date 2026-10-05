@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// The flight HUD: dashboard (speed, scanner, attitude, target compass), heading and pitch
+// tapes, flight markers, and target brackets. Reads world state only; changes nothing.
+//
 
 #ifndef DUSK_HUD_RENDERER_H
 #define DUSK_HUD_RENDERER_H
@@ -11,6 +14,7 @@
 #include "systems/ship_physics.h++"
 #include "tools/camera.h++"
 #include "ui/format.h++"
+#include "ui/style.h++"
 #include "world/world.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
@@ -42,6 +46,7 @@ public:
     {
     }
 
+    /** Draws the whole HUD: in-view markers and tapes first, then the dashboard on top. */
     void draw(sf::RenderTarget& target, const World& world, const Camera& camera) const
     {
         const sf::Vector2u size = target.getSize();
@@ -64,11 +69,6 @@ private:
     sf::Font font_;
     Projector projector_;
 
-    static inline const sf::Color accent = sf::Color(110, 220, 255);
-    static inline const sf::Color dim = sf::Color(90, 100, 110);
-    static inline const sf::Color faint = sf::Color(50, 60, 70);
-    static inline const sf::Color warning = sf::Color(240, 90, 90);
-    static inline const sf::Color amber = sf::Color(255, 190, 90);
 
     static constexpr float pi = 3.14159265358979323846f;
     static constexpr float degrees = 180.f / pi;
@@ -83,12 +83,14 @@ private:
         target.draw(rectangle);
     }
 
+    /** A single one-pixel screen-space line. */
     static void drawLine(sf::RenderTarget& target, sf::Vector2f a, sf::Vector2f b, sf::Color color)
     {
         const sf::Vertex line[] = {sf::Vertex(a, color), sf::Vertex(b, color)};
         target.draw(line, 2, sf::PrimitiveType::Lines);
     }
 
+    /** An ellipse made by scaling a unit circle; the outline thickness is divided back down so it stays one pixel. */
     static void drawEllipse(
         sf::RenderTarget& target,
         sf::Vector2f center,
@@ -107,8 +109,8 @@ private:
         target.draw(ellipse);
     }
 
-    /** Draws text with its top-left at `position`, or aligned by `alignX` (0 left, 0.5 centre, 1 right). */
-    void drawText(
+    /** Draws text with its top-left at `position`, or aligned by `alignX` (0 left, 0.5 centre, 1 right); returns its width. */
+    float drawText(
         sf::RenderTarget& target,
         const std::string& string,
         sf::Vector2f position,
@@ -123,6 +125,9 @@ private:
         text.setOrigin({bounds.position.x + bounds.size.x * alignX, 0.f});
         text.setPosition(position);
         target.draw(text);
+
+        // Width of what was drawn, so callers can place text after it.
+        return bounds.size.x;
     }
 
     /** Ship-local coordinates of a world point: x right, y up, z forward. */
@@ -132,6 +137,7 @@ private:
         return {dot(offset, shipRight(ship)), dot(offset, shipUp(ship)), dot(offset, shipForward(ship))};
     }
 
+    /** Height of the 3D view above the dashboard, in pixels. */
     static float viewHeight(const Viewport& viewport)
     {
         return viewport.height - dashboardHeight;
@@ -157,7 +163,7 @@ private:
             return sf::Vector2f{projected->position.x, projected->position.y};
         };
 
-        const sf::Color markerColor(110, 220, 255, 220);
+        const sf::Color markerColor = style::flightMarker;
 
         if (const auto nose = directionOnScreen(shipForward(ship)))
         {
@@ -190,8 +196,8 @@ private:
         }
         else if (const auto retrograde = directionOnScreen(travel * -1.f))
         {
-            drawLine(target, {retrograde->x - 6.f, retrograde->y - 6.f}, {retrograde->x + 6.f, retrograde->y + 6.f}, warning);
-            drawLine(target, {retrograde->x - 6.f, retrograde->y + 6.f}, {retrograde->x + 6.f, retrograde->y - 6.f}, warning);
+            drawLine(target, {retrograde->x - 6.f, retrograde->y - 6.f}, {retrograde->x + 6.f, retrograde->y + 6.f}, style::retrogradeMarker);
+            drawLine(target, {retrograde->x - 6.f, retrograde->y + 6.f}, {retrograde->x + 6.f, retrograde->y - 6.f}, style::retrogradeMarker);
         }
     }
 
@@ -230,12 +236,12 @@ private:
                 for (const float sy : {-1.f, 1.f})
                 {
                     const sf::Vector2f p = {c.x + sx * halfSize, c.y + sy * halfSize};
-                    drawLine(target, p, {p.x - sx * corner, p.y}, accent);
-                    drawLine(target, p, {p.x, p.y - sy * corner}, accent);
+                    drawLine(target, p, {p.x - sx * corner, p.y}, style::targetMarker);
+                    drawLine(target, p, {p.x, p.y - sy * corner}, style::targetMarker);
                 }
             }
 
-            drawText(target, label, {c.x, c.y + halfSize + 4.f}, 16, accent, 0.5f);
+            drawText(target, label, {c.x, c.y + halfSize + 4.f}, 16, style::targetMarker, 0.5f);
             return;
         }
 
@@ -257,10 +263,10 @@ private:
         arrow.setPoint(0, tip + direction * 10.f);
         arrow.setPoint(1, tip - direction * 6.f + side * 8.f);
         arrow.setPoint(2, tip - direction * 6.f - side * 8.f);
-        arrow.setFillColor(accent);
+        arrow.setFillColor(style::targetMarker);
         target.draw(arrow);
 
-        drawText(target, label, {tip.x - direction.x * 26.f, tip.y - direction.y * 26.f - 8.f}, 15, accent, 0.5f);
+        drawText(target, label, {tip.x - direction.x * 26.f, tip.y - direction.y * 26.f - 8.f}, 15, style::targetMarker, 0.5f);
     }
 
     /** Bounding radius of the station's model, used to size the target brackets. */
@@ -297,7 +303,7 @@ private:
         const float pixelsPerDegree = width / visibleSpan;
         const float heading = headingDegrees(ship);
 
-        drawLine(target, {centreX - width * 0.5f, baseline}, {centreX + width * 0.5f, baseline}, dim);
+        drawLine(target, {centreX - width * 0.5f, baseline}, {centreX + width * 0.5f, baseline}, style::tapeMinorTick);
 
         const int first = static_cast<int>(std::floor((heading - visibleSpan * 0.5f) / 5.f)) * 5;
 
@@ -310,10 +316,10 @@ private:
 
             const int wrapped = ((tick % 360) + 360) % 360;
             const bool major = wrapped % 30 == 0;
-            drawLine(target, {x, baseline}, {x, baseline - (major ? 9.f : 4.f)}, major ? sf::Color::White : dim);
+            drawLine(target, {x, baseline}, {x, baseline - (major ? 9.f : 4.f)}, major ? style::tapeMajorTick : style::tapeMinorTick);
 
             if (major)
-                drawText(target, formatHeading(static_cast<float>(wrapped)), {x, baseline + 2.f}, 14, dim, 0.5f);
+                drawText(target, formatHeading(static_cast<float>(wrapped)), {x, baseline + 2.f}, 14, style::tapeMinorTick, 0.5f);
         }
 
         // Caret and readout.
@@ -321,11 +327,11 @@ private:
         caret.setPoint(0, {centreX, baseline - 1.f});
         caret.setPoint(1, {centreX - 5.f, baseline - 9.f});
         caret.setPoint(2, {centreX + 5.f, baseline - 9.f});
-        caret.setFillColor(accent);
+        caret.setFillColor(style::tapeCaret);
         target.draw(caret);
 
-        drawRect(target, {centreX - 22.f, 2.f}, {44.f, 20.f}, sf::Color(8, 12, 18, 220));
-        drawText(target, formatHeading(heading), {centreX, 1.f}, 18, accent, 0.5f);
+        drawRect(target, {centreX - 22.f, 2.f}, {44.f, 20.f}, style::readoutBoxFill);
+        drawText(target, formatHeading(heading), {centreX, 1.f}, 18, style::tapeValue, 0.5f);
     }
 
     /** Pitch tape down the right of the view: ticks every 5 degrees, labels every 10. */
@@ -338,7 +344,7 @@ private:
         const float pixelsPerDegree = height / visibleSpan;
         const float pitch = ship.pitch * degrees;
 
-        drawLine(target, {x, centreY - height * 0.5f}, {x, centreY + height * 0.5f}, dim);
+        drawLine(target, {x, centreY - height * 0.5f}, {x, centreY + height * 0.5f}, style::tapeMinorTick);
 
         const int first = static_cast<int>(std::floor((pitch - visibleSpan * 0.5f) / 5.f)) * 5;
 
@@ -350,21 +356,21 @@ private:
                 continue;
 
             const bool major = tick % 10 == 0;
-            drawLine(target, {x, y}, {x + (major ? 9.f : 4.f), y}, tick == 0 ? accent : (major ? sf::Color::White : dim));
+            drawLine(target, {x, y}, {x + (major ? 9.f : 4.f), y}, tick == 0 ? style::tapeCaret : (major ? style::tapeMajorTick : style::tapeMinorTick));
 
             if (major)
-                drawText(target, formatSigned(static_cast<float>(tick)), {x + 12.f, y - 9.f}, 14, tick == 0 ? accent : dim);
+                drawText(target, formatSigned(static_cast<float>(tick)), {x + 12.f, y - 9.f}, 14, tick == 0 ? style::tapeCaret : style::tapeMinorTick);
         }
 
         sf::ConvexShape caret(3);
         caret.setPoint(0, {x - 1.f, centreY});
         caret.setPoint(1, {x - 9.f, centreY - 5.f});
         caret.setPoint(2, {x - 9.f, centreY + 5.f});
-        caret.setFillColor(accent);
+        caret.setFillColor(style::tapeCaret);
         target.draw(caret);
 
-        drawRect(target, {x - 52.f, centreY - 10.f}, {40.f, 20.f}, sf::Color(8, 12, 18, 220));
-        drawText(target, formatSigned(pitch), {x - 32.f, centreY - 11.f}, 18, accent, 0.5f);
+        drawRect(target, {x - 52.f, centreY - 10.f}, {40.f, 20.f}, style::readoutBoxFill);
+        drawText(target, formatSigned(pitch), {x - 32.f, centreY - 11.f}, 18, style::tapeValue, 0.5f);
     }
 
     /* ---- Dashboard ---------------------------------------------------------------------------- */
@@ -372,8 +378,8 @@ private:
     void drawDashboardBackground(sf::RenderTarget& target, const Viewport& viewport) const
     {
         const float top = viewport.height - dashboardHeight;
-        drawRect(target, {0.f, top}, {viewport.width, dashboardHeight}, sf::Color(4, 8, 12, 200));
-        drawLine(target, {0.f, top}, {viewport.width, top}, faint);
+        drawRect(target, {0.f, top}, {viewport.width, dashboardHeight}, style::dashboardFill);
+        drawLine(target, {0.f, top}, {viewport.width, top}, style::dashboardEdge);
     }
 
     /** A labelled horizontal bar filled from the left. */
@@ -386,9 +392,9 @@ private:
         sf::Color color
     ) const
     {
-        drawText(target, label, {position.x, position.y - 8.f}, 15, dim);
+        drawText(target, label, {position.x, position.y - 8.f}, 15, style::textDim);
         const float barX = position.x + 34.f;
-        drawRect(target, {barX, position.y - 2.f}, {width, 6.f}, faint);
+        drawRect(target, {barX, position.y - 2.f}, {width, 6.f}, style::lineFaint);
         drawRect(target, {barX, position.y - 2.f}, {width * std::clamp(fraction, 0.f, 1.f), 6.f}, color);
     }
 
@@ -401,14 +407,14 @@ private:
         float value
     ) const
     {
-        drawText(target, label, {position.x, position.y - 8.f}, 15, dim);
+        drawText(target, label, {position.x, position.y - 8.f}, 15, style::textDim);
         const float barX = position.x + 38.f;
         const float middle = barX + width * 0.5f;
         const float fill = std::clamp(value, -1.f, 1.f) * width * 0.5f;
 
-        drawRect(target, {barX, position.y - 2.f}, {width, 6.f}, faint);
-        drawRect(target, {std::min(middle, middle + fill), position.y - 2.f}, {std::abs(fill), 6.f}, accent);
-        drawLine(target, {middle, position.y - 5.f}, {middle, position.y + 6.f}, sf::Color::White);
+        drawRect(target, {barX, position.y - 2.f}, {width, 6.f}, style::lineFaint);
+        drawRect(target, {std::min(middle, middle + fill), position.y - 2.f}, {std::abs(fill), 6.f}, style::rateBar);
+        drawLine(target, {middle, position.y - 5.f}, {middle, position.y + 6.f}, style::rateBarCentre);
     }
 
     /** Left block: speed readout, throttle and speed bars, flight-mode flags. */
@@ -417,10 +423,10 @@ private:
         const float top = viewport.height - dashboardHeight;
         const float x = 16.f;
         const float barWidth = std::min(150.f, viewport.width * 0.5f - 175.f);
-        const sf::Color throttleColor = ship.reverseThrust ? warning : accent;
+        const sf::Color throttleColor = ship.reverseThrust ? style::throttleReverse : style::throttleForward;
 
-        drawText(target, ship.cruiseEngaged ? "CRUISE" : "SPEED", {x, top + 10.f}, 15, dim);
-        drawText(target, std::to_string(static_cast<int>(std::round(shipSpeed(ship)))), {x + 60.f, top + 2.f}, 28, sf::Color::White);
+        drawText(target, ship.cruiseEngaged ? "CRUISE" : "SPEED", {x, top + 10.f}, 15, style::textDim);
+        drawText(target, std::to_string(static_cast<int>(std::round(shipSpeed(ship)))), {x + 60.f, top + 2.f}, 28, style::textPrimary);
         drawText(target, ship.reverseThrust ? "REV" : "FWD", {x + 60.f + barWidth * 0.6f, top + 10.f}, 15, throttleColor);
 
         const float speedScale = ship.cruiseEngaged
@@ -428,20 +434,24 @@ private:
             : ship.maxSpeed * (ship.reverseThrust ? ship.reverseSpeedFraction : 1.f);
 
         drawFillBar(target, "THR", {x, top + 50.f}, barWidth, ship.throttle, throttleColor);
-        drawFillBar(target, "SPD", {x, top + 70.f}, barWidth, speedScale > 0.f ? shipSpeed(ship) / speedScale : 0.f, sf::Color::White);
+        drawFillBar(target, "SPD", {x, top + 70.f}, barWidth, speedScale > 0.f ? shipSpeed(ship) / speedScale : 0.f, style::speedBar);
 
-        std::string flags = ship.flightAssist ? "FA ON" : "FA OFF";
+        // Flight-assist state gets its own colour (blue when on, orange when off); the cruise
+        // status that follows it is drawn separately in the accent.
+        const std::string assist = ship.flightAssist ? "FA ON" : "FA OFF";
+        std::string cruise;
 
         if (ship.cruiseEngaged)
-            flags += "   [J] DROP";
+            cruise = "[J] DROP";
         else if (cruiseCharging(ship))
-            flags += "   CRUISE CHARGING " + std::to_string(static_cast<int>(ship.cruiseCharge * 100.f)) + "%";
+            cruise = "CRUISE CHARGING " + std::to_string(static_cast<int>(ship.cruiseCharge * 100.f)) + "%";
         else if (shipMassLocked(ship))
-            flags += "   MASS LOCKED";
+            cruise = "MASS LOCKED";
         else
-            flags += "   [J] CRUISE";
+            cruise = "[J] CRUISE";
 
-        drawText(target, flags, {x, top + 88.f}, 17, ship.flightAssist ? accent : amber);
+        const float assistWidth = drawText(target, assist, {x, top + 88.f}, 17, ship.flightAssist ? style::assistOn : style::assistOff);
+        drawText(target, cruise, {x + assistWidth + 16.f, top + 88.f}, 17, style::accent);
     }
 
     /**
@@ -456,17 +466,17 @@ private:
         const float a = std::min(120.f, viewport.width * 0.15f);
         const sf::Vector2f radii = {a, a * 0.36f};
 
-        drawEllipse(target, centre, radii, sf::Color(70, 120, 140), sf::Color(0, 22, 32, 170));
-        drawEllipse(target, centre, radii * 0.5f, faint);
-        drawLine(target, {centre.x - radii.x, centre.y}, {centre.x + radii.x, centre.y}, faint);
-        drawLine(target, {centre.x, centre.y - radii.y}, {centre.x, centre.y + radii.y}, faint);
+        drawEllipse(target, centre, radii, style::scopeOutline, style::scopeFill);
+        drawEllipse(target, centre, radii * 0.5f, style::scopeGrid);
+        drawLine(target, {centre.x - radii.x, centre.y}, {centre.x + radii.x, centre.y}, style::scopeGrid);
+        drawLine(target, {centre.x, centre.y - radii.y}, {centre.x, centre.y + radii.y}, style::scopeGrid);
 
         // Field-of-view wedge.
         const float wedge = 0.78f;
-        drawLine(target, centre, {centre.x - radii.x * std::sin(wedge), centre.y - radii.y * std::cos(wedge)}, dim);
-        drawLine(target, centre, {centre.x + radii.x * std::sin(wedge), centre.y - radii.y * std::cos(wedge)}, dim);
+        drawLine(target, centre, {centre.x - radii.x * std::sin(wedge), centre.y - radii.y * std::cos(wedge)}, style::scopeWedge);
+        drawLine(target, centre, {centre.x + radii.x * std::sin(wedge), centre.y - radii.y * std::cos(wedge)}, style::scopeWedge);
 
-        drawText(target, formatWorldDistance(scannerRange), {centre.x + radii.x + 4.f, centre.y - 9.f}, 13, dim);
+        drawText(target, formatWorldDistance(scannerRange), {centre.x + radii.x + 4.f, centre.y - 9.f}, 13, style::textDim);
 
         const Ship& ship = world.playerShip;
 
@@ -511,8 +521,8 @@ private:
 
         // Rocks big enough to matter, as dim specks with faint stalks; drawn first so ships and
         // the station stay on top.
-        const sf::Color rockColor(125, 118, 105);
-        const sf::Color rockStalk(70, 66, 60);
+        const sf::Color rockColor = style::scannerRock;
+        const sf::Color rockStalk = style::scannerRockStalk;
 
         const auto plotRock = [&](const Asteroid& rock)
         {
@@ -541,23 +551,23 @@ private:
         for (const NpcShip& npc : world.npcShips)
         {
             if (npc.isVisible())
-                plot(npc.ship.position, sf::Color(230, 230, 230), false, false);
+                plot(npc.ship.position, style::scannerShip, false, false);
         }
 
         if (world.stationActive)
-            plot(world.station.position, accent, true, world.target.type == TargetType::Station);
+            plot(world.station.position, style::scannerStation, true, world.target.type == TargetType::Station);
 
         // Own ship at the centre.
-        drawRect(target, {centre.x - 2.f, centre.y - 2.f}, {4.f, 4.f}, amber);
+        drawRect(target, {centre.x - 2.f, centre.y - 2.f}, {4.f, 4.f}, style::scannerOwnShip);
     }
 
-    /** Amber warning above the scanner while the ship is inside an asteroid belt. */
+    /** Caution-coloured warning above the scanner while the ship is inside an asteroid belt. */
     void drawFieldWarning(sf::RenderTarget& target, const World& world, const Viewport& viewport) const
     {
         if (!insideAsteroidBelt(world, world.playerShip.position))
             return;
 
-        drawText(target, "ASTEROID FIELD", {viewport.width * 0.5f, viewport.height - dashboardHeight - 24.f}, 17, amber, 0.5f);
+        drawText(target, "ASTEROID FIELD", {viewport.width * 0.5f, viewport.height - dashboardHeight - 24.f}, 17, style::fieldWarning, 0.5f);
     }
 
     /** Right block: heading and pitch, turn-rate bars, target compass and target readout. */
@@ -569,10 +579,10 @@ private:
         const float x = viewport.width * 0.5f + a + 34.f;
         const float barWidth = std::max(60.f, viewport.width - x - 130.f);
 
-        drawText(target, "HDG", {x, top + 10.f}, 15, dim);
-        drawText(target, formatHeading(headingDegrees(ship)), {x + 32.f, top + 6.f}, 21, sf::Color::White);
-        drawText(target, "PITCH", {x + 82.f, top + 10.f}, 15, dim);
-        drawText(target, formatSigned(ship.pitch * degrees), {x + 128.f, top + 6.f}, 21, sf::Color::White);
+        drawText(target, "HDG", {x, top + 10.f}, 15, style::textDim);
+        drawText(target, formatHeading(headingDegrees(ship)), {x + 32.f, top + 6.f}, 21, style::textPrimary);
+        drawText(target, "PITCH", {x + 82.f, top + 10.f}, 15, style::textDim);
+        drawText(target, formatSigned(ship.pitch * degrees), {x + 128.f, top + 6.f}, 21, style::textPrimary);
 
         drawCentreBar(target, "YAW", {x, top + 46.f}, barWidth, ship.yawSpeed > 0.f ? ship.yawRate / ship.yawSpeed : 0.f);
         drawCentreBar(target, "PCH", {x, top + 64.f}, barWidth, ship.pitchSpeed > 0.f ? ship.pitchRate / ship.pitchSpeed : 0.f);
@@ -585,18 +595,18 @@ private:
         sf::CircleShape dial(radius, 32);
         dial.setOrigin({radius, radius});
         dial.setPosition(compass);
-        dial.setFillColor(sf::Color(0, 22, 32, 170));
-        dial.setOutlineColor(sf::Color(70, 120, 140));
+        dial.setFillColor(style::compassFill);
+        dial.setOutlineColor(style::compassOutline);
         dial.setOutlineThickness(1.f);
         target.draw(dial);
-        drawLine(target, {compass.x - radius, compass.y}, {compass.x + radius, compass.y}, faint);
-        drawLine(target, {compass.x, compass.y - radius}, {compass.x, compass.y + radius}, faint);
+        drawLine(target, {compass.x - radius, compass.y}, {compass.x + radius, compass.y}, style::scopeGrid);
+        drawLine(target, {compass.x, compass.y - radius}, {compass.x, compass.y + radius}, style::scopeGrid);
 
         const auto position = targetPosition(world);
 
         if (!position)
         {
-            drawText(target, "NO TARGET   [T] LOCK", {x, top + 88.f}, 17, dim);
+            drawText(target, "NO TARGET   [T] LOCK", {x, top + 88.f}, 17, style::textDim);
             return;
         }
 
@@ -609,12 +619,12 @@ private:
         sf::CircleShape marker(3.5f, 12);
         marker.setOrigin({3.5f, 3.5f});
         marker.setPosition(dotPosition);
-        marker.setFillColor(ahead ? accent : sf::Color::Transparent);
-        marker.setOutlineColor(ahead ? accent : warning);
+        marker.setFillColor(ahead ? style::compassAhead : sf::Color::Transparent);
+        marker.setOutlineColor(ahead ? style::compassAhead : style::compassBehind);
         marker.setOutlineThickness(1.5f);
         target.draw(marker);
 
-        drawText(target, "STN", {compass.x, compass.y + radius + 2.f}, 13, dim, 0.5f);
+        drawText(target, "STN", {compass.x, compass.y + radius + 2.f}, 13, style::textDim, 0.5f);
 
         // Closing speed: positive while the gap shrinks.
         const Vec3 toTarget = *position - ship.position;
@@ -626,7 +636,7 @@ private:
             std::string(targetLabel(world)) + "  " + formatWorldDistance(gap) + "   CLOSING " + formatSigned(closing),
             {x, top + 88.f},
             17,
-            accent
+            style::targetMarker
         );
     }
 };

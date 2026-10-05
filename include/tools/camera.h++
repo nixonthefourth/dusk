@@ -1,6 +1,8 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// The Camera: position, yaw/pitch/roll, field of view. Set each frame by the chase or showcase camera.
+//
 
 #ifndef DUSK_CAMERA_H
 #define DUSK_CAMERA_H

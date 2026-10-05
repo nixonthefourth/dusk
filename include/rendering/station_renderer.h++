@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// Draws the station wireframe in its world orientation and spin, with hidden-line removal and
+// a two-colour gradient along each line.
+//
 
 #ifndef DUSK_STATION_RENDERER_H
 #define DUSK_STATION_RENDERER_H
@@ -10,6 +13,7 @@
 #include "model/vector_model.h++"
 #include "objects/cube.h++"
 #include "rendering/projector.h++"
+#include "ui/style.h++"
 #include "tools/camera.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
@@ -81,11 +85,11 @@ public:
             {
                 sf::Vertex(
                     {projectedStart->position.x, projectedStart->position.y},
-                    sf::Color(80, 220, 255)
+                    style::stationLineStart
                 ),
                 sf::Vertex(
                     {projectedEnd->position.x, projectedEnd->position.y},
-                    sf::Color(255, 240, 120)
+                    style::stationLineEnd
                 )
             };
 
@@ -103,16 +107,19 @@ private:
 
     Projector projector_;
 
+    /** Guards against malformed models whose lines or faces point past the vertex list. */
     static bool isValidVertexIndex(int index, std::size_t vertexCount)
     {
         return index >= 0 && static_cast<std::size_t>(index) < vertexCount;
     }
 
+    /** An edge identified by its two vertex indices, smallest first, so A-B and B-A match. */
     static EdgeKey edgeKeyFor(int a, int b)
     {
         return std::minmax(a, b);
     }
 
+    /** Adds a triangle's three edges to a set. */
     static void addFaceEdges(std::set<EdgeKey>& edges, const VectorFace& face)
     {
         edges.insert(edgeKeyFor(face.a, face.b));

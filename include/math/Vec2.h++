@@ -1,6 +1,8 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// 2D vector type and helpers, used for screen-space maths and galactic-chart positions.
+//
 
 #ifndef DUSK_VEC2_H
 #define DUSK_VEC2_H

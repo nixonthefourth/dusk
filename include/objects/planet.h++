@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 24/07/2026.
 //
+// Stellar bodies. The same Planet type represents both the system's star (isStar = true) and its
+// planets: position, velocity, radius, mass, and an optional decorative ring.
+//
 
 #ifndef DUSK_PLANET_H
 #define DUSK_PLANET_H

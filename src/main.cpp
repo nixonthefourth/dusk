@@ -1,3 +1,9 @@
+//
+// Entry point and main loop: creates the window, scene manager and renderers, then every frame
+// handles events, applies ship input, runs physics in bounded sub-steps, updates the camera and
+// streaming, and draws the world, travel effects, HUD and scene overlay in that order.
+//
+
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -6,6 +12,7 @@
 #include "rendering/hud_renderer.h++"
 #include "rendering/asteroid_renderer.h++"
 #include "rendering/travel_effects_renderer.h++"
+#include "ui/style.h++"
 #include "rendering/planet_renderer.h++"
 #include "rendering/ship_renderer.h++"
 #include "rendering/star_renderer.h++"
@@ -16,6 +23,7 @@
 #include "procgen/galaxy.h++"
 #include "scenes/system_scene.h++"
 
+/** Builds the window, scenes and renderers, then runs the game loop until the window closes. */
 int main() {
     sf::RenderWindow window(
         sf::VideoMode({800, 600}),
@@ -38,6 +46,10 @@ int main() {
     ShipInputState shipInputState;
     ShipCameraRig shipCameraRig;
 
+    // Renderers. There is no depth buffer: everything is drawn back to front in a fixed order
+    // (see the bottom of the loop), and each renderer only reads the world.
+    //
+    // Ships, stations, rocks and stars share a far plane the size of the starfield.
     const ProjectionConfig projectionConfig = {1.f, sceneManager.world().starfield.radius()};
 
     // Stars and planets are hundreds of thousands of units away, far past the starfield-sized far
@@ -54,6 +66,8 @@ int main() {
     const ShipRenderer shipRenderer(projectionConfig);
     const HudRenderer hudRenderer;
 
+    // Swaps scenes when the active one asks to (PLAY on the menu, EXIT), and resets per-scene
+    // state that lives out here: edge-triggered key tracking and the camera spring.
     auto applySceneTransition = [&](SceneTransition transition) {
         if (transition == SceneTransition::None)
             return;
@@ -88,6 +102,8 @@ int main() {
         constexpr float maxFrameTime = 0.1f;
         const float dt = std::min(clock.restart().asSeconds(), maxFrameTime);
 
+        // Events: closing the window, Escape (unless the scene wants it, e.g. to close a map), and
+        // everything else straight to the active scene.
         while (const auto event = window.pollEvent())
         {
             if (event->is<sf::Event::Closed>())
@@ -109,6 +125,8 @@ int main() {
 
         World& world = sceneManager.world();
 
+        // Held keys become pilot intent (throttle, turn demands, toggles), unless the scene has the
+        // keyboard (a map is open, the docking computer or a hyperspace jump is flying).
         if (sceneManager.activeScene().acceptsShipInput())
             updateShipFromKeyboard(world.playerShip, dt, shipInputState);
 
@@ -120,13 +138,18 @@ int main() {
 
         for (int step = 0; step < physicsSteps; ++step)
             sceneManager.activeScene().updatePhysics(physicsDt);
+
+        // The camera follows the ship once per frame (it smooths internally), then the starfield
+        // re-wraps around the camera's new position.
         sceneManager.activeScene().updateCamera(camera, dt, shipCameraRig);
         sceneManager.activeScene().updateStreaming(camera);
         applySceneTransition(sceneManager.activeScene().consumeTransition());
 
         World& renderWorld = sceneManager.world();
 
-        window.clear(sf::Color::Black);
+        // Draw order is depth order: distant stars, then stellar bodies, rocks, the station and
+        // ships, then the travel effects, the HUD, and finally the scene's screen-space overlay.
+        window.clear(style::background);
         starRenderer.draw(window, renderWorld.starfield.stars(), camera);
         planetRenderer.drawSystem(window, renderWorld.star, renderWorld.planets, camera);
         asteroidRenderer.draw(window, renderWorld, camera);

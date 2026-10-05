@@ -1,6 +1,8 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// Draws ship wireframes, hiding edges whose every adjacent face points away from the camera.
+//
 
 #ifndef DUSK_SHIP_RENDERER_H
 #define DUSK_SHIP_RENDERER_H
@@ -9,6 +11,7 @@
 #include "math/Vec3.h++"
 #include "objects/ship.h++"
 #include "rendering/projector.h++"
+#include "ui/style.h++"
 #include "tools/camera.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
@@ -76,11 +79,11 @@ public:
             {
                 sf::Vertex(
                     {projectedStart->position.x, projectedStart->position.y},
-                    sf::Color(255, 255, 255)
+                    style::shipWireframe
                 ),
                 sf::Vertex(
                     {projectedEnd->position.x, projectedEnd->position.y},
-                    sf::Color(255, 255, 255)
+                    style::shipWireframe
                 )
             };
 
@@ -98,16 +101,19 @@ private:
 
     Projector projector_;
 
+    /** Guards against malformed models whose lines or faces point past the vertex list. */
     static bool isValidVertexIndex(int index, std::size_t vertexCount)
     {
         return index >= 0 && static_cast<std::size_t>(index) < vertexCount;
     }
 
+    /** An edge identified by its two vertex indices, smallest first, so A-B and B-A match. */
     static EdgeKey edgeKeyFor(int a, int b)
     {
         return std::minmax(a, b);
     }
 
+    /** Adds a triangle's three edges to a set. */
     static void addFaceEdges(std::set<EdgeKey>& edges, const VectorFace& face)
     {
         edges.insert(edgeKeyFor(face.a, face.b));
@@ -115,12 +121,14 @@ private:
         edges.insert(edgeKeyFor(face.c, face.a));
     }
 
+    /** False for degenerate (zero-area) triangles, which have no meaningful facing. */
     static bool hasArea(const Vec3& a, const Vec3& b, const Vec3& c)
     {
         const Vec3 normal = cross(b - a, c - a);
         return dot(normal, normal) > 0.f;
     }
 
+    /** Collects every face edge, and separately the edges of faces that face the camera. */
     FaceEdgeVisibility classifyFaceEdges(
         const VectorModel& model,
         const std::vector<Vec3>& cameraVertices
@@ -153,6 +161,10 @@ private:
         return result;
     }
 
+    /**
+     * A line is drawn unless it is a face edge and none of its faces face the camera. Lines that
+     * aren't face edges at all (decorative detail) are always drawn, as is everything if the model has no faces.
+     */
     static bool lineSurvivesFaceCulling(
         const VectorLine& line,
         const FaceEdgeVisibility& faceEdges

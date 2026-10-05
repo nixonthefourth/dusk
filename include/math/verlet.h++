@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 24/07/2026.
 //
+// Velocity Verlet integration steps. Every moving body in the game (ships, planets) advances
+// position and velocity through these two functions.
+//
 
 #ifndef DUSK_VERLET_H
 #define DUSK_VERLET_H

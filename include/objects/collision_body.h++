@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 24/07/2026.
 //
+// Collision bookkeeping: the hits an object registered this physics step, and helpers to query
+// them. Detection itself lives in world.h++; this file only stores and reports results.
+//
 
 #ifndef DUSK_COLLISION_BODY_H
 #define DUSK_COLLISION_BODY_H
@@ -41,11 +44,13 @@ struct CollisionBody {
     /** Hits registered during the latest world physics update. */
     std::vector<CollisionHit> hits;
 
+    /** True if anything at all hit this object during the latest physics step. */
     bool isColliding() const
     {
         return !hits.empty();
     }
 
+    /** True if an object of the given kind (planet, station, ...) hit this one this step. */
     bool collidingWith(CollisionObjectType type) const
     {
         return std::any_of(
@@ -57,6 +62,7 @@ struct CollisionBody {
         );
     }
 
+    /** True if one specific object (kind plus index, e.g. planet 2) hit this one this step. */
     bool collidingWith(CollisionObjectType type, std::size_t index) const
     {
         return std::any_of(
@@ -68,6 +74,7 @@ struct CollisionBody {
         );
     }
 
+    /** Forgets last step's hits; World calls this before running detection again. */
     void clear()
     {
         hits.clear();

@@ -1,6 +1,10 @@
 //
 // Created by Mykyta Khomiakov on 24/07/2026.
 //
+// Wavefront OBJ loading. Reads vertices and faces from an .obj file, applies import transforms
+// (flips, rotation, scale, re-centring, offset) and turns the result into a VectorModel: vertices,
+// outward-wound triangle faces, and the unique edges between them as drawable lines.
+//
 
 #ifndef DUSK_OBJ_LOADER_H
 #define DUSK_OBJ_LOADER_H

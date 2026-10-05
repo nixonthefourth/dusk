@@ -1,6 +1,8 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// A minimal 4x4 matrix, used only for the world-to-camera (view) transform built by the Projector.
+//
 
 #ifndef DUSK_MAT4_H
 #define DUSK_MAT4_H

@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 16/09/2026.
 //
+// The docking computer: a kinematic autopilot that flies the ship to the station, lines it up
+// with the rotating docking slot, flies it in, and launches it again, avoiding planets en route.
+//
 
 #ifndef DUSK_DOCKING_COMPUTER_H
 #define DUSK_DOCKING_COMPUTER_H
@@ -134,12 +137,17 @@ inline bool canCancel(const DockingComputer& computer)
     return computer.phase == DockingPhase::Approach || computer.phase == DockingPhase::Align;
 }
 
+/** Moves the docking computer to a new phase and restarts that phase's timer. */
 inline void setPhase(DockingComputer& computer, DockingPhase phase)
 {
     computer.phase = phase;
     computer.phaseTimer = 0.f;
 }
 
+/**
+ * Shows a centred message for `seconds`; it fades over its last second. Also used by the scene for
+ * non-docking messages (arrivals, aborted jumps).
+ */
 inline void showMessage(DockingComputer& computer, std::string text, float seconds = 2.5f)
 {
     computer.message = std::move(text);

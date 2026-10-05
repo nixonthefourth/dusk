@@ -1,6 +1,8 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// A free-flying debug camera (WASD/QE to move, arrows to look), independent of the ship.
+//
 
 #ifndef DUSK_CAMERA_CONTROLLER_H
 #define DUSK_CAMERA_CONTROLLER_H

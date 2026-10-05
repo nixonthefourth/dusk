@@ -1,6 +1,10 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// The Ship: position, velocity and orientation, the flight-model tuning (thrust, speed, turn
+// rates, cruise), pilot intent written by the input layer, and the wireframe model. Also the
+// orientation helpers (forward/right/up vectors, local-to-world transform) used everywhere.
+//
 
 #ifndef DUSK_SHIP_H
 #define DUSK_SHIP_H

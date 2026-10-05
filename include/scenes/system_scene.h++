@@ -1,6 +1,10 @@
 //
 // Created by Mykyta Khomiakov on 26/07/2026.
 //
+// The main game scene: one star system, rebuilt from its seed on entry. Owns the docking
+// computer, the station menu, the galactic chart and system map, target locking, and the
+// hyperspace jump sequence between systems.
+//
 
 #ifndef DUSK_SYSTEM_SCENE_H
 #define DUSK_SYSTEM_SCENE_H
@@ -14,6 +18,7 @@
 #include "ui/galaxy_map.h++"
 #include "ui/menu_button.h++"
 #include "ui/system_map.h++"
+#include "ui/style.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
 #include <cmath>
@@ -40,18 +45,18 @@ public:
           stayText_(font_, "STAY", 42),
           leaveText_(font_, "LEAVE", 42)
     {
-        statusText_.setFillColor(sf::Color(110, 220, 255));
-        hintText_.setFillColor(sf::Color(90, 100, 110));
+        statusText_.setFillColor(style::dockingStatus);
+        hintText_.setFillColor(style::keyHints);
         hintText_.setLineSpacing(0.95f);
         hintText_.setPosition({4.f, 38.f});
-        messageText_.setFillColor(sf::Color::White);
+        messageText_.setFillColor(style::message);
         messageText_.setStyle(sf::Text::Bold);
-        menuTitle_.setFillColor(sf::Color::White);
+        menuTitle_.setFillColor(style::stationMenuTitle);
         menuTitle_.setStyle(sf::Text::Bold);
         stayText_.setStyle(sf::Text::Bold);
         leaveText_.setStyle(sf::Text::Bold);
 
-        label_.setFillColor(sf::Color::White);
+        label_.setFillColor(style::systemLabel);
         label_.setStyle(sf::Text::Bold);
         enterSystem(startingSystemIndex);
     }
@@ -66,11 +71,16 @@ public:
         return world_;
     }
 
+    /** Read-only access to the current system's world. */
     const World& world() const override
     {
         return world_;
     }
 
+    /**
+     * Routes input by priority: nothing during the jump itself, then an open map, then the station
+     * menu, then the flight keys (G, M, T, C, and while docked Enter/L).
+     */
     void handleEvent(const sf::Event& event, const sf::RenderWindow& window) override
     {
         // Once the jump itself starts, the sequence plays out untouched.
@@ -225,6 +235,7 @@ public:
         return docking_;
     }
 
+    /** True while the docked station menu is showing. */
     bool stationMenuOpen() const
     {
         return stationMenuOpen_;
@@ -236,6 +247,10 @@ public:
         return !docking::controlsShip(docking_) && mapView_ == MapView::None && !inHyperspaceSequence();
     }
 
+    /**
+     * One physics sub-step: the world (with the player under autopilot when docking), the docking
+     * computer, then the cruise and hyperspace animation timers.
+     */
     void updatePhysics(float dt) override
     {
         const bool autopilot = docking::controlsShip(docking_);
@@ -251,6 +266,10 @@ public:
         updateHyperspace(dt);
     }
 
+    /**
+     * Screen-space drawing over the 3D view: a full-screen map if one is open, the hyperspace text
+     * during a jump, otherwise the system name, key hints, docking status and station menu.
+     */
     void drawOverlay(sf::RenderTarget& target) override
     {
         if (mapView_ == MapView::Galaxy)
@@ -478,6 +497,7 @@ private:
         label_.setString(info.name);
     }
 
+    /** Shows the station menu with STAY selected; called automatically when docking completes. */
     void openStationMenu()
     {
         stationMenuOpen_ = true;
@@ -493,11 +513,16 @@ private:
             docking::launch(docking_);
     }
 
+    /** Screen rectangle of a station-menu button in a centred stack of two. */
     static sf::FloatRect menuButtonBounds(sf::Vector2u targetSize, int option)
     {
         return ui::stackedButtonBounds(targetSize, option, 2, 30.f);
     }
 
+    /**
+     * Up/Down (or the mouse) choose between STAY and LEAVE; Enter, Space or a click confirms.
+     * LEAVE launches the ship; STAY simply closes the menu.
+     */
     void handleStationMenuEvent(const sf::Event& event, const sf::RenderWindow& window)
     {
         if (const auto* keyPressed = event.getIf<sf::Event::KeyPressed>())
@@ -674,16 +699,16 @@ private:
         if (hyperspace_.phase == HyperspacePhase::Countdown)
         {
             const int secondsLeft = std::max(1, static_cast<int>(std::ceil(countdownTime - hyperspace_.time)));
-            drawCentredText(target, "HYPERSPACE", height * 0.16f, 30, sf::Color::White);
-            drawCentredText(target, std::to_string(secondsLeft), height * 0.16f + 34.f, 64, sf::Color(110, 220, 255));
-            drawCentredText(target, destination + "   " + distance + "      [ESC] ABORT", height * 0.16f + 112.f, 18, sf::Color(150, 160, 170));
+            drawCentredText(target, "HYPERSPACE", height * 0.16f, 30, style::countdownTitle);
+            drawCentredText(target, std::to_string(secondsLeft), height * 0.16f + 34.f, 64, style::countdownNumber);
+            drawCentredText(target, destination + "   " + distance + "      [ESC] ABORT", height * 0.16f + 112.f, 18, style::countdownDetail);
             return;
         }
 
         if (hyperspace_.phase == HyperspacePhase::Tunnel)
         {
-            drawCentredText(target, "HYPERSPACE", height - 74.f, 26, sf::Color(235, 245, 255));
-            drawCentredText(target, destination + "   " + distance, height - 42.f, 18, sf::Color(150, 190, 230));
+            drawCentredText(target, "HYPERSPACE", height - 74.f, 26, style::tunnelTitle);
+            drawCentredText(target, destination + "   " + distance, height - 42.f, 18, style::tunnelDetail);
         }
     }
 
@@ -695,6 +720,7 @@ private:
         return docking_.phase == DockingPhase::Idle && hyperspace_.phase == HyperspacePhase::None;
     }
 
+    /** Text shown on the chart's jump button when a jump isn't possible right now. */
     std::string jumpBlockedReason() const
     {
         if (hyperspace_.phase != HyperspacePhase::None)
@@ -703,18 +729,21 @@ private:
         return docking_.phase == DockingPhase::Docked ? "LAUNCH FIRST" : "DOCKING IN PROGRESS";
     }
 
+    /** Opens the galactic chart centred on the current system. */
     void openGalaxyMap()
     {
         galaxyMap_.open(galaxy_, currentSystemIndex_);
         mapView_ = MapView::Galaxy;
     }
 
+    /** Opens the system map with the first planet highlighted. */
     void openSystemMap()
     {
         systemMap_.open();
         mapView_ = MapView::System;
     }
 
+    /** Passes input to the chart, then acts on what it returns: close it, or start a jump countdown. */
     void handleGalaxyMapEvent(const sf::Event& event, const sf::RenderWindow& window)
     {
         switch (galaxyMap_.handleEvent(event, window, galaxy_, currentSystemIndex_, jumpAvailable()))
@@ -742,6 +771,10 @@ private:
         }
     }
 
+    /**
+     * Passes input to the system map, then acts on what it returns: close, switch to the chart, or
+     * toggle the station target lock.
+     */
     void handleSystemMapEvent(const sf::Event& event, const sf::RenderWindow& window)
     {
         switch (systemMap_.handleEvent(event, window, world_))
@@ -764,6 +797,7 @@ private:
         }
     }
 
+    /** The docking computer's status (bottom right, above the dashboard) and any fading centred message. */
     void drawDockingStatus(sf::RenderTarget& target)
     {
         const sf::Vector2u size = target.getSize();
@@ -789,18 +823,19 @@ private:
         {
             messageText_.setString(docking_.message);
             const std::uint8_t alpha = static_cast<std::uint8_t>(255.f * std::min(1.f, docking_.messageTimer));
-            messageText_.setFillColor(sf::Color(255, 255, 255, alpha));
+            messageText_.setFillColor(style::withAlpha(style::message, static_cast<int>(alpha)));
             ui::centerText(messageText_, {static_cast<float>(size.x) * 0.5f, static_cast<float>(size.y) * 0.22f});
             target.draw(messageText_);
         }
     }
 
+    /** Veils the view and draws the station name over the STAY and LEAVE buttons. */
     void drawStationMenu(sf::RenderTarget& target)
     {
         const sf::Vector2u size = target.getSize();
 
         sf::RectangleShape veil({static_cast<float>(size.x), static_cast<float>(size.y)});
-        veil.setFillColor(sf::Color(0, 0, 0, 150));
+        veil.setFillColor(style::stationMenuVeil);
         target.draw(veil);
 
         menuTitle_.setString(currentSystemName_ + " STATION");

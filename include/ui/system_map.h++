@@ -8,6 +8,7 @@
 #include "objects/ship.h++"
 #include "ui/format.h++"
 #include "ui/menu_button.h++"
+#include "ui/style.h++"
 #include "world/world.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
@@ -50,12 +51,17 @@ class SystemMap {
 public:
     static constexpr float panelWidth = 250.f;
 
+    /** Resets the highlight to the first planet each time the map opens. */
     void open()
     {
         highlighted_ = 0;
         hovered_ = -2;
     }
 
+    /**
+     * Handles one input event and returns what the scene should do. Up/Down cycle the highlight
+     * through the star and planets; clicks on a body or a list row highlight it.
+     */
     SystemMapAction handleEvent(const sf::Event& event, const sf::RenderWindow& window, const World& world)
     {
         const sf::Vector2u size = window.getSize();
@@ -109,12 +115,13 @@ public:
         return SystemMapAction::None;
     }
 
+    /** Draws the map full-screen: orbits, belts, star, planets, station, traffic, you, scale bar, panel. */
     void draw(sf::RenderTarget& target, const sf::Font& font, const World& world, const std::string& systemName) const
     {
         const sf::Vector2u size = target.getSize();
 
         sf::RectangleShape backdrop({static_cast<float>(size.x), static_cast<float>(size.y)});
-        backdrop.setFillColor(sf::Color::Black);
+        backdrop.setFillColor(style::background);
         target.draw(backdrop);
 
         drawOrbits(target, world, size);
@@ -135,9 +142,8 @@ private:
     /** Body under the mouse, or -2 for none. */
     int hovered_ = -2;
 
-    static inline const sf::Color accent = sf::Color(110, 220, 255);
-    static inline const sf::Color dim = sf::Color(90, 100, 110);
 
+    /** Width of the map area, left of the info panel. */
     static float mapWidth(sf::Vector2u size)
     {
         return static_cast<float>(size.x) - panelWidth;
@@ -160,6 +166,7 @@ private:
         return std::min(mapWidth(size), static_cast<float>(size.y)) * 0.44f / extent;
     }
 
+    /** Top-down projection: world x to screen right, world z to screen up, star at the map centre. */
     static sf::Vector2f toScreen(const Vec3& position, const World& world, sf::Vector2u size)
     {
         const float scale = mapScale(world, size);
@@ -214,12 +221,14 @@ private:
         return row - 1; // row 0 is the star
     }
 
+    /** A single one-pixel line. */
     static void drawLine(sf::RenderTarget& target, sf::Vector2f a, sf::Vector2f b, sf::Color color)
     {
         const sf::Vertex line[] = {sf::Vertex(a, color), sf::Vertex(b, color)};
         target.draw(line, 2, sf::PrimitiveType::Lines);
     }
 
+    /** A circle with separate outline and fill colours (the fill defaults to transparent). */
     static void drawCircle(
         sf::RenderTarget& target,
         sf::Vector2f center,
@@ -239,6 +248,7 @@ private:
         target.draw(circle);
     }
 
+    /** Text with its top-left corner at `position`. */
     static void drawLabel(
         sf::RenderTarget& target,
         const sf::Font& font,
@@ -254,6 +264,7 @@ private:
         target.draw(text);
     }
 
+    /** Each planet's current orbital radius as a circle around the star, the highlighted one in the accent. */
     void drawOrbits(sf::RenderTarget& target, const World& world, sf::Vector2u size) const
     {
         const sf::Vector2f star = toScreen(world.star.position, world, size);
@@ -264,7 +275,7 @@ private:
             const Planet& planet = world.planets[index];
             const float orbit = std::hypot(planet.position.x - world.star.position.x, planet.position.z - world.star.position.z) * scale;
             const bool lit = static_cast<int>(index) == highlighted_;
-            drawCircle(target, star, orbit, lit ? sf::Color(110, 220, 255, 120) : sf::Color(55, 62, 70), sf::Color::Transparent, 1.f, 128);
+            drawCircle(target, star, orbit, lit ? style::mapOrbitHighlight : style::mapOrbit, sf::Color::Transparent, 1.f, 128);
         }
     }
 
@@ -273,8 +284,8 @@ private:
     {
         const sf::Vector2f star = toScreen(world.star.position, world, size);
         const float scale = mapScale(world, size);
-        const sf::Color edge(120, 112, 98);
-        const sf::Color speck(150, 140, 120, 170);
+        const sf::Color edge = style::mapBeltEdge;
+        const sf::Color speck = style::mapBeltSpeck;
 
         for (const AsteroidBelt& belt : world.asteroidBelts)
         {
@@ -284,7 +295,7 @@ private:
                 const Planet& host = world.planets[static_cast<std::size_t>(belt.hostPlanetIndex)];
                 const sf::Vector2f hostScreen = toScreen(host.position, world, size);
                 const float halo = planetPixelRadius(host) + 5.f;
-                const sf::Color haloColor(200, 185, 150);
+                const sf::Color haloColor = style::mapBeltHalo;
                 std::vector<sf::Vertex> haloPoints;
 
                 for (const float ring : {halo, halo + 2.5f})
@@ -332,15 +343,17 @@ private:
         }
     }
 
+    /** The star as a filled disc, ringed when highlighted. */
     void drawStar(sf::RenderTarget& target, const World& world, sf::Vector2u size) const
     {
         const sf::Vector2f star = toScreen(world.star.position, world, size);
-        drawCircle(target, star, starPixelRadius, sf::Color::White, sf::Color::White);
+        drawCircle(target, star, starPixelRadius, style::mapStar, style::mapStar);
 
         if (highlighted_ == -1 || hovered_ == -1)
-            drawCircle(target, star, starPixelRadius + 5.f, accent);
+            drawCircle(target, star, starPixelRadius + 5.f, style::mapHighlight);
     }
 
+    /** Each planet as a small globe icon (size hints at its real size), with its ring and numeral. */
     void drawPlanets(sf::RenderTarget& target, const sf::Font& font, const World& world, sf::Vector2u size) const
     {
         for (std::size_t index = 0; index < world.planets.size(); ++index)
@@ -350,11 +363,11 @@ private:
             const float radius = planetPixelRadius(planet);
             const bool lit = static_cast<int>(index) == highlighted_ || static_cast<int>(index) == hovered_;
 
-            drawCircle(target, screen, radius, lit ? accent : sf::Color::White, sf::Color::Black, 1.5f);
+            drawCircle(target, screen, radius, lit ? style::mapHighlight : style::mapPlanet, style::mapPlanetFill, 1.5f);
 
             // A hint of the wireframe globe: one meridian, one equator.
-            drawLine(target, {screen.x - radius, screen.y}, {screen.x + radius, screen.y}, sf::Color(255, 255, 255, 110));
-            drawLine(target, {screen.x, screen.y - radius}, {screen.x, screen.y + radius}, sf::Color(255, 255, 255, 110));
+            drawLine(target, {screen.x - radius, screen.y}, {screen.x + radius, screen.y}, style::mapPlanetCross);
+            drawLine(target, {screen.x, screen.y - radius}, {screen.x, screen.y + radius}, style::mapPlanetCross);
 
             if (planet.hasRing)
             {
@@ -364,15 +377,15 @@ private:
                 ring.setScale({radius * 1.9f, radius * 0.5f});
                 ring.setRotation(sf::degrees(planet.ringRotationDegrees));
                 ring.setFillColor(sf::Color::Transparent);
-                ring.setOutlineColor(sf::Color(255, 255, 255, 150));
+                ring.setOutlineColor(style::mapPlanetRing);
                 ring.setOutlineThickness(1.f / radius);
                 target.draw(ring);
             }
 
             if (lit)
-                drawCircle(target, screen, radius + 5.f, accent);
+                drawCircle(target, screen, radius + 5.f, style::mapHighlight);
 
-            drawLabel(target, font, romanNumeral(static_cast<int>(index) + 1), {screen.x + radius + 5.f, screen.y - radius - 14.f}, 16, lit ? accent : dim);
+            drawLabel(target, font, romanNumeral(static_cast<int>(index) + 1), {screen.x + radius + 5.f, screen.y - radius - 14.f}, 16, lit ? style::mapHighlight : style::textDim);
         }
     }
 
@@ -397,21 +410,22 @@ private:
         sf::RectangleShape square({6.f, 6.f});
         square.setOrigin({3.f, 3.f});
         square.setPosition(screen);
-        square.setFillColor(accent);
+        square.setFillColor(style::mapStation);
         target.draw(square);
 
         if (world.target.type == TargetType::Station)
         {
-            drawCircle(target, screen, 8.f, accent, sf::Color::Transparent, 1.f, 4);
-            drawCircle(target, screen, 11.f, accent, sf::Color::Transparent, 1.f, 4);
+            drawCircle(target, screen, 8.f, style::mapHighlight, sf::Color::Transparent, 1.f, 4);
+            drawCircle(target, screen, 11.f, style::mapHighlight, sf::Color::Transparent, 1.f, 4);
         }
     }
 
+    /** Every visible NPC ship as a small dot. */
     static void drawTraffic(sf::RenderTarget& target, const World& world, sf::Vector2u size)
     {
         sf::CircleShape dot(1.5f, 6);
         dot.setOrigin({1.5f, 1.5f});
-        dot.setFillColor(sf::Color(200, 200, 200));
+        dot.setFillColor(style::mapTraffic);
 
         for (const NpcShip& npc : world.npcShips)
         {
@@ -435,10 +449,11 @@ private:
         arrow.setPoint(0, screen + forward * 10.f);
         arrow.setPoint(1, screen - forward * 6.f + side * 6.f);
         arrow.setPoint(2, screen - forward * 6.f - side * 6.f);
-        arrow.setFillColor(sf::Color(255, 190, 90));
+        arrow.setFillColor(style::mapPlayer);
         target.draw(arrow);
     }
 
+    /** A scale bar of a round length (10K, 25K, 50K...) that comes out 60-150 pixels long. */
     static void drawScaleBar(sf::RenderTarget& target, const sf::Font& font, const World& world, sf::Vector2u size)
     {
         const float scale = mapScale(world, size);
@@ -457,15 +472,16 @@ private:
         const float pixels = length * scale;
         const float x = 20.f;
         const float y = static_cast<float>(size.y) - 26.f;
-        const sf::Color color(150, 150, 150);
+        const sf::Color color = style::mapScaleBar;
 
         drawLine(target, {x, y}, {x + pixels, y}, color);
         drawLine(target, {x, y - 4.f}, {x, y + 4.f}, color);
         drawLine(target, {x + pixels, y - 4.f}, {x + pixels, y + 4.f}, color);
         drawLabel(target, font, formatWorldDistance(length), {x + pixels + 8.f, y - 11.f}, 15, color);
-        drawLabel(target, font, "BODY SIZES NOT TO SCALE", {x, y - 26.f}, 14, dim);
+        drawLabel(target, font, "BODY SIZES NOT TO SCALE", {x, y - 26.f}, 14, style::textDim);
     }
 
+    /** The right-hand panel: the body list with distances, and the highlighted body's details. */
     void drawPanel(
         sf::RenderTarget& target,
         const sf::Font& font,
@@ -479,14 +495,14 @@ private:
 
         sf::RectangleShape panel({panelWidth, height});
         panel.setPosition({left, 0.f});
-        panel.setFillColor(sf::Color(8, 12, 18));
-        panel.setOutlineColor(sf::Color(60, 70, 78));
+        panel.setFillColor(style::panelFill);
+        panel.setOutlineColor(style::panelOutline);
         panel.setOutlineThickness(1.f);
         target.draw(panel);
 
         const float x = left + 20.f;
-        drawLabel(target, font, "SYSTEM MAP", {x, 16.f}, 18, dim);
-        drawLabel(target, font, systemName, {x, 40.f}, 30, sf::Color::White);
+        drawLabel(target, font, "SYSTEM MAP", {x, 16.f}, 18, style::textDim);
+        drawLabel(target, font, systemName, {x, 40.f}, 30, style::textPrimary);
 
         const Ship& ship = world.playerShip;
 
@@ -500,7 +516,7 @@ private:
             {
                 sf::RectangleShape bar({panelWidth - 24.f, listRowHeight - 2.f});
                 bar.setPosition({left + 12.f, y});
-                bar.setFillColor(sf::Color(24, 44, 56));
+                bar.setFillColor(style::panelRowHighlight);
                 target.draw(bar);
             }
 
@@ -510,8 +526,8 @@ private:
             if (row >= 0 && row == world.stationHostPlanetIndex && world.stationActive)
                 name += "  + STATION";
 
-            drawLabel(target, font, name, {x, y + 1.f}, 17, lit ? accent : sf::Color::White);
-            drawLabel(target, font, formatWorldDistance(length(body.position - ship.position) - body.radius), {left + panelWidth - 78.f, y + 1.f}, 17, dim);
+            drawLabel(target, font, name, {x, y + 1.f}, 17, lit ? style::mapHighlight : style::textPrimary);
+            drawLabel(target, font, formatWorldDistance(length(body.position - ship.position) - body.radius), {left + panelWidth - 78.f, y + 1.f}, 17, style::textDim);
         }
 
         // Details of the highlighted body.
@@ -519,13 +535,13 @@ private:
         const Planet& body = highlighted_ < 0 ? world.star : world.planets[static_cast<std::size_t>(highlighted_)];
         const std::string title = highlighted_ < 0 ? systemName + " (STAR)" : planetDisplayName(systemName, highlighted_);
 
-        drawLabel(target, font, title, {x, y}, 19, accent);
+        drawLabel(target, font, title, {x, y}, 19, style::mapHighlight);
         y += 28.f;
 
         const auto row = [&](const std::string& label, const std::string& value)
         {
-            drawLabel(target, font, label, {x, y}, 16, dim);
-            drawLabel(target, font, value, {x + 100.f, y}, 16, sf::Color::White);
+            drawLabel(target, font, label, {x, y}, 16, style::textDim);
+            drawLabel(target, font, value, {x + 100.f, y}, 16, style::textPrimary);
             y += 21.f;
         };
 
@@ -561,9 +577,9 @@ private:
 
         row("ALTITUDE", formatWorldDistance(std::max(0.f, length(body.position - ship.position) - body.radius)));
 
-        drawLabel(target, font, "UP/DOWN / CLICK  select", {x, height - 58.f}, 15, dim);
-        drawLabel(target, font, world.stationActive ? "T  target station" : "NO STATION HERE", {x, height - 40.f}, 15, dim);
-        drawLabel(target, font, "G  galaxy   M  close", {x, height - 22.f}, 15, dim);
+        drawLabel(target, font, "UP/DOWN / CLICK  select", {x, height - 58.f}, 15, style::textDim);
+        drawLabel(target, font, world.stationActive ? "T  target station" : "NO STATION HERE", {x, height - 40.f}, 15, style::textDim);
+        drawLabel(target, font, "G  galaxy   M  close", {x, height - 22.f}, 15, style::textDim);
     }
 };
 

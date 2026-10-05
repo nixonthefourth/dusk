@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 24/07/2026.
 //
+// The Scene interface. main.cpp only ever talks to the active scene through these hooks:
+// input, physics, camera, travel effects, overlay drawing and scene transitions.
+//
 
 #ifndef DUSK_SCENE_H
 #define DUSK_SCENE_H

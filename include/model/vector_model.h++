@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 24/07/2026.
 //
+// The wireframe model format shared by ships and stations: local-space vertices, triangle faces
+// (used for hidden-line removal) and the line segments that are actually drawn.
+//
 
 #ifndef DUSK_VECTOR_MODEL_H
 #define DUSK_VECTOR_MODEL_H

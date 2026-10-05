@@ -1,6 +1,10 @@
 //
 // Created by Mykyta Khomiakov on 26/07/2026.
 //
+// Cheap, "on paper" system facts rolled from a system seed: name, economy tier, occupation,
+// goods, and how many planets, stations, NPC ships and asteroid belts it has. Order of rolls
+// matters: new rolls are always appended last so existing systems never change.
+//
 
 #ifndef DUSK_STATISTICAL_H
 #define DUSK_STATISTICAL_H
@@ -236,6 +240,10 @@ inline int generateBeltCount(std::mt19937& rng)
     return roll < 0.85f ? 1 : 2;
 }
 
+/**
+ * Rolls every on-paper fact about one system from its seed, in a fixed order. New rolls must
+ * only ever be appended at the end, otherwise every existing system would change.
+ */
 inline SystemInfo generateSystemInfo(std::uint32_t systemSeed)
 {
     std::mt19937 rng(systemSeed);

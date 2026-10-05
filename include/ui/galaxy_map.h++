@@ -8,6 +8,7 @@
 #include "math/Vec2.h++"
 #include "procgen/galaxy.h++"
 #include "ui/menu_button.h++"
+#include "ui/style.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
 #include <cmath>
@@ -40,11 +41,13 @@ public:
         mouseDown_ = false;
     }
 
+    /** Index of the currently selected system. */
     int selected() const
     {
         return selected_;
     }
 
+    /** Handles one input event and returns what the scene should do (nothing, close, or jump). */
     GalaxyMapAction handleEvent(
         const sf::Event& event,
         const sf::RenderWindow& window,
@@ -164,6 +167,7 @@ public:
         return GalaxyMapAction::None;
     }
 
+    /** Draws the chart full-screen: backdrop, core marker and range rings, every system, then the panel. */
     void draw(
         sf::RenderTarget& target,
         const sf::Font& font,
@@ -178,7 +182,7 @@ public:
         const float height = static_cast<float>(size.y);
 
         sf::RectangleShape backdrop({width, height});
-        backdrop.setFillColor(sf::Color::Black);
+        backdrop.setFillColor(style::background);
         target.draw(backdrop);
 
         drawCore(target, font, size);
@@ -200,19 +204,20 @@ private:
     static constexpr float minZoom = 1.f;
     static constexpr float maxZoom = 16.f;
 
-    static inline const sf::Color accent = sf::Color(110, 220, 255);
-    static inline const sf::Color dim = sf::Color(90, 100, 110);
 
+    /** A jump needs the scene's permission and a destination other than where you already are. */
     bool canJump(int currentIndex, bool jumpAvailable) const
     {
         return jumpAvailable && selected_ != currentIndex;
     }
 
+    /** Width of the chart area, left of the info panel. */
     static float mapWidth(sf::Vector2u size)
     {
         return static_cast<float>(size.x) - panelWidth;
     }
 
+    /** Chart scale: at zoom 1 the whole galaxy fits the chart area; each zoom step doubles it. */
     float pixelsPerLightYear(sf::Vector2u size) const
     {
         const float fit = std::min(mapWidth(size), static_cast<float>(size.y)) * 0.46f / galaxyRadius;
@@ -237,6 +242,7 @@ private:
         clampView();
     }
 
+    /** Keeps the view centre inside the galactic disc, so you can't pan off into nothing. */
     void clampView()
     {
         viewCenter_.x = std::clamp(viewCenter_.x, -galaxyRadius, galaxyRadius);
@@ -317,30 +323,34 @@ private:
         }
     }
 
+    /** Screen rectangle of the JUMP button near the bottom of the panel. */
     static sf::FloatRect jumpButtonBounds(sf::Vector2u size)
     {
         const float x = static_cast<float>(size.x) - panelWidth + 20.f;
         return {{x, static_cast<float>(size.y) - 112.f}, {panelWidth - 40.f, 44.f}};
     }
 
+    /** Dot colour for a system, by economy tier (set in the stylesheet). */
     static sf::Color systemColor(const SystemInfo& info)
     {
         switch (info.economyTier)
         {
-            case EconomyTier::Poor: return sf::Color(130, 130, 130);
-            case EconomyTier::Developing: return sf::Color(225, 225, 225);
-            case EconomyTier::Progressive: return accent;
+            case EconomyTier::Poor: return style::economyPoor;
+            case EconomyTier::Developing: return style::economyDeveloping;
+            case EconomyTier::Progressive: return style::economyProgressive;
         }
 
-        return sf::Color::White;
+        return style::economyDeveloping;
     }
 
+    /** A single one-pixel line. */
     static void drawLine(sf::RenderTarget& target, sf::Vector2f a, sf::Vector2f b, sf::Color color)
     {
         const sf::Vertex line[] = {sf::Vertex(a, color), sf::Vertex(b, color)};
         target.draw(line, 2, sf::PrimitiveType::Lines);
     }
 
+    /** An unfilled circle. */
     static void drawRing(sf::RenderTarget& target, sf::Vector2f center, float radius, sf::Color color, float thickness = 1.f)
     {
         sf::CircleShape ring(radius, 32);
@@ -352,6 +362,7 @@ private:
         target.draw(ring);
     }
 
+    /** Text with its top-left corner at `position`. */
     static void drawLabel(
         sf::RenderTarget& target,
         const sf::Font& font,
@@ -367,6 +378,7 @@ private:
         target.draw(text);
     }
 
+    /** Light years with one decimal place, e.g. "7.2 LY". */
     static std::string formatDistance(float lightYears)
     {
         char buffer[32];
@@ -381,15 +393,19 @@ private:
         const float scale = pixelsPerLightYear(size);
 
         for (float ring = 100.f; ring <= galaxyRadius; ring += 100.f)
-            drawRing(target, core, ring * scale, sf::Color(40, 46, 54));
+            drawRing(target, core, ring * scale, style::chartRangeRing);
 
-        const sf::Color coreColor(255, 190, 90);
+        const sf::Color coreColor = style::chartCore;
         drawLine(target, {core.x - 10.f, core.y}, {core.x + 10.f, core.y}, coreColor);
         drawLine(target, {core.x, core.y - 10.f}, {core.x, core.y + 10.f}, coreColor);
         drawRing(target, core, 5.f, coreColor);
         drawLabel(target, font, "GALACTIC CORE", {core.x + 10.f, core.y + 6.f}, 16, coreColor);
     }
 
+    /**
+     * Every system as a dot coloured by economy, then the route line, hover ring, you-are-here
+     * diamond and selection reticle on top. Names appear when zoomed right in.
+     */
     void drawSystems(
         sf::RenderTarget& target,
         const sf::Font& font,
@@ -418,7 +434,7 @@ private:
             target.draw(dot);
 
             if (showNames && screen.x < mapRight - 60.f)
-                drawLabel(target, font, info.name, {screen.x + 6.f, screen.y - 8.f}, 14, dim);
+                drawLabel(target, font, info.name, {screen.x + 6.f, screen.y - 8.f}, 14, style::textDim);
         }
 
         const SystemInfo& current = galaxy.systems[static_cast<std::size_t>(currentIndex)];
@@ -428,17 +444,17 @@ private:
 
         if (selected_ != currentIndex)
         {
-            drawLine(target, currentScreen, selectedScreen, sf::Color(110, 220, 255, 140));
+            drawLine(target, currentScreen, selectedScreen, style::chartRoute);
 
             const sf::Vector2f middle = (currentScreen + selectedScreen) * 0.5f;
-            drawLabel(target, font, formatDistance(galacticDistance(current, selected)), {middle.x + 6.f, middle.y}, 15, accent);
+            drawLabel(target, font, formatDistance(galacticDistance(current, selected)), {middle.x + 6.f, middle.y}, 15, style::chartSelection);
         }
 
         if (hovered_ >= 0 && hovered_ != selected_)
         {
             const sf::Vector2f hoverScreen = toScreen(galaxy.systems[static_cast<std::size_t>(hovered_)].mapPosition, size);
-            drawRing(target, hoverScreen, 7.f, sf::Color(200, 200, 200));
-            drawLabel(target, font, galaxy.systems[static_cast<std::size_t>(hovered_)].name, {hoverScreen.x + 9.f, hoverScreen.y - 9.f}, 16, sf::Color::White);
+            drawRing(target, hoverScreen, 7.f, style::chartHover);
+            drawLabel(target, font, galaxy.systems[static_cast<std::size_t>(hovered_)].name, {hoverScreen.x + 9.f, hoverScreen.y - 9.f}, 16, style::textPrimary);
         }
 
         // You-are-here diamond.
@@ -446,7 +462,7 @@ private:
         here.setOrigin({7.f, 7.f});
         here.setPosition(currentScreen);
         here.setFillColor(sf::Color::Transparent);
-        here.setOutlineColor(sf::Color::White);
+        here.setOutlineColor(style::chartHere);
         here.setOutlineThickness(2.f);
         target.draw(here);
 
@@ -454,17 +470,18 @@ private:
         const float r = 11.f;
         const float c = 5.f;
         const sf::Vector2f s = selectedScreen;
-        drawLine(target, {s.x - r, s.y - r}, {s.x - r + c, s.y - r}, accent);
-        drawLine(target, {s.x - r, s.y - r}, {s.x - r, s.y - r + c}, accent);
-        drawLine(target, {s.x + r, s.y - r}, {s.x + r - c, s.y - r}, accent);
-        drawLine(target, {s.x + r, s.y - r}, {s.x + r, s.y - r + c}, accent);
-        drawLine(target, {s.x - r, s.y + r}, {s.x - r + c, s.y + r}, accent);
-        drawLine(target, {s.x - r, s.y + r}, {s.x - r, s.y + r - c}, accent);
-        drawLine(target, {s.x + r, s.y + r}, {s.x + r - c, s.y + r}, accent);
-        drawLine(target, {s.x + r, s.y + r}, {s.x + r, s.y + r - c}, accent);
-        drawLabel(target, font, selected.name, {s.x + 14.f, s.y - 10.f}, 18, accent);
+        drawLine(target, {s.x - r, s.y - r}, {s.x - r + c, s.y - r}, style::chartSelection);
+        drawLine(target, {s.x - r, s.y - r}, {s.x - r, s.y - r + c}, style::chartSelection);
+        drawLine(target, {s.x + r, s.y - r}, {s.x + r - c, s.y - r}, style::chartSelection);
+        drawLine(target, {s.x + r, s.y - r}, {s.x + r, s.y - r + c}, style::chartSelection);
+        drawLine(target, {s.x - r, s.y + r}, {s.x - r + c, s.y + r}, style::chartSelection);
+        drawLine(target, {s.x - r, s.y + r}, {s.x - r, s.y + r - c}, style::chartSelection);
+        drawLine(target, {s.x + r, s.y + r}, {s.x + r - c, s.y + r}, style::chartSelection);
+        drawLine(target, {s.x + r, s.y + r}, {s.x + r, s.y + r - c}, style::chartSelection);
+        drawLabel(target, font, selected.name, {s.x + 14.f, s.y - 10.f}, 18, style::chartSelection);
     }
 
+    /** The right-hand panel: the selected system's details, its exports, the JUMP button and key hints. */
     void drawPanel(
         sf::RenderTarget& target,
         const sf::Font& font,
@@ -480,8 +497,8 @@ private:
 
         sf::RectangleShape panel({panelWidth, height});
         panel.setPosition({left, 0.f});
-        panel.setFillColor(sf::Color(8, 12, 18));
-        panel.setOutlineColor(sf::Color(60, 70, 78));
+        panel.setFillColor(style::panelFill);
+        panel.setOutlineColor(style::panelOutline);
         panel.setOutlineThickness(1.f);
         target.draw(panel);
 
@@ -490,19 +507,19 @@ private:
         const float x = left + 20.f;
         float y = 16.f;
 
-        drawLabel(target, font, "GALACTIC CHART", {x, y}, 18, dim);
+        drawLabel(target, font, "GALACTIC CHART", {x, y}, 18, style::textDim);
         y += 26.f;
-        drawLabel(target, font, info.name, {x, y}, 32, sf::Color::White);
+        drawLabel(target, font, info.name, {x, y}, 32, style::textPrimary);
         y += 44.f;
 
-        const auto row = [&](const std::string& label, const std::string& value, sf::Color color = sf::Color::White)
+        const auto row = [&](const std::string& label, const std::string& value, sf::Color color = style::textPrimary)
         {
-            drawLabel(target, font, label, {x, y}, 17, dim);
+            drawLabel(target, font, label, {x, y}, 17, style::textDim);
             drawLabel(target, font, value, {x + 84.f, y}, 17, color);
             y += 23.f;
         };
 
-        row("DISTANCE", selected_ == currentIndex ? "YOU ARE HERE" : formatDistance(galacticDistance(current, info)), accent);
+        row("DISTANCE", selected_ == currentIndex ? "YOU ARE HERE" : formatDistance(galacticDistance(current, info)), style::accent);
         row("TO CORE", formatDistance(length(info.mapPosition)));
         row("ECONOMY", economyTierName(info.economyTier), systemColor(info));
         row("TRADE", info.occupation);
@@ -512,7 +529,7 @@ private:
         row("TRAFFIC", std::to_string(info.npcShipCount) + " SHIPS");
 
         y += 6.f;
-        drawLabel(target, font, "EXPORTS", {x, y}, 17, dim);
+        drawLabel(target, font, "EXPORTS", {x, y}, 17, style::textDim);
         y += 23.f;
 
         for (const std::string& good : info.goods)
@@ -520,7 +537,7 @@ private:
             if (y > height - 150.f)
                 break;
 
-            drawLabel(target, font, good, {x + 10.f, y}, 17, sf::Color::White);
+            drawLabel(target, font, good, {x + 10.f, y}, 17, style::textPrimary);
             y += 21.f;
         }
 
@@ -529,9 +546,9 @@ private:
         sf::Text jumpText(font, enabled ? "JUMP" : (selected_ == currentIndex ? "CURRENT SYSTEM" : jumpBlockedReason), enabled ? 28 : 18);
         ui::drawButton(target, button, jumpText, enabled, enabled);
 
-        drawLabel(target, font, "ARROWS / CLICK  select", {x, height - 58.f}, 15, dim);
-        drawLabel(target, font, "WHEEL / +-  zoom   DRAG  pan", {x, height - 40.f}, 15, dim);
-        drawLabel(target, font, "ENTER  jump   H  home   G  close", {x, height - 22.f}, 15, dim);
+        drawLabel(target, font, "ARROWS / CLICK  select", {x, height - 58.f}, 15, style::textDim);
+        drawLabel(target, font, "WHEEL / +-  zoom   DRAG  pan", {x, height - 40.f}, 15, style::textDim);
+        drawLabel(target, font, "ENTER  jump   H  home   G  close", {x, height - 22.f}, 15, style::textDim);
     }
 };
 

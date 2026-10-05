@@ -1,6 +1,10 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// The World: everything that exists in a system (star, planets, station, ships, asteroid belts,
+// drifting rocks) plus the per-step update that moves it all: gravity, orbits, the station's
+// orbit, NPCs, belts, collisions and contact responses.
+//
 
 #ifndef DUSK_WORLD_H
 #define DUSK_WORLD_H

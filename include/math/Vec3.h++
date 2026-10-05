@@ -1,6 +1,8 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// 3D vector type and helpers (arithmetic, dot, cross, length, normalise), the basis of all world maths.
+//
 
 #ifndef DUSK_VEC3_H
 #define DUSK_VEC3_H

@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 24/07/2026.
 //
+// Draws the star (a filled disc) and planets (shaded latitude/longitude grids with an outline and
+// optional ring), back to front, with a far plane large enough to cover a whole system.
+//
 
 #ifndef DUSK_PLANET_RENDERER_H
 #define DUSK_PLANET_RENDERER_H
@@ -8,6 +11,7 @@
 #include "math/Mat4.h++"
 #include "objects/planet.h++"
 #include "rendering/projector.h++"
+#include "ui/style.h++"
 #include "tools/camera.h++"
 #include <SFML/Graphics.hpp>
 #include <algorithm>
@@ -74,11 +78,13 @@ private:
 
     static constexpr float pi = 3.14159265358979323846f;
 
+    /** Degrees to radians. */
     static float degreesToRadians(float degrees)
     {
         return degrees * pi / 180.f;
     }
 
+    /** Pixels per unit of tangent at the camera's vertical field of view. */
     static float focalLengthFor(const Camera& camera, const Viewport& viewport)
     {
         return (viewport.height * 0.5f) / std::tan(degreesToRadians(camera.fov) * 0.5f);
@@ -155,6 +161,7 @@ private:
             drawPlanet(target, projectedPlanet, camera, viewport, viewMatrix);
     }
 
+    /** Draws one body: a dot when tiny, a filled disc for the star, or a shaded grid, outline and ring for a planet. */
     void drawPlanet(
         sf::RenderTarget& target,
         const ProjectedPlanet& projectedPlanet,
@@ -204,10 +211,11 @@ private:
         sf::CircleShape dot(dotRadius, 8);
         dot.setOrigin({dotRadius, dotRadius});
         dot.setPosition(center);
-        dot.setFillColor(isStar ? sf::Color::White : sf::Color(255, 255, 255, 200));
+        dot.setFillColor(isStar ? style::distantStarDot : style::distantPlanetDot);
         target.draw(dot);
     }
 
+    /** Draws a planet's latitude and longitude lines, denser when the planet fills more of the screen. */
     void drawSphereGrid(
         sf::RenderTarget& target,
         const Planet& planet,
@@ -252,10 +260,11 @@ private:
         sf::CircleShape disc(radius, 96);
         disc.setOrigin({radius, radius});
         disc.setPosition(center);
-        disc.setFillColor(sf::Color::White);
+        disc.setFillColor(style::starDisc);
         target.draw(disc);
     }
 
+    /** One horizontal ring of the grid, at the given latitude, as a chain of short segments. */
     void drawLatitudeRing(
         std::vector<sf::Vertex>& lines,
         const Planet& planet,
@@ -277,6 +286,7 @@ private:
         }
     }
 
+    /** One full meridian (a great circle through both poles) at the given longitude. */
     void drawMeridianRing(
         std::vector<sf::Vertex>& lines,
         const Planet& planet,
@@ -327,6 +337,7 @@ private:
         lines.push_back(sf::Vertex({projectedEnd->position.x, projectedEnd->position.y}, color));
     }
 
+    /** World position of the point at `angle` around the latitude ring at `latitude` (radians). */
     static Vec3 latitudePoint(const Planet& planet, float latitude, float angle)
     {
         const float ringRadius = planet.radius * std::cos(latitude);
@@ -338,6 +349,7 @@ private:
         };
     }
 
+    /** World position of the point at `angle` (from the equator) along the meridian at `longitude`. */
     static Vec3 meridianPoint(const Planet& planet, float longitude, float angle)
     {
         const float horizontalRadius = planet.radius * std::cos(angle);
@@ -349,6 +361,10 @@ private:
         };
     }
 
+    /**
+     * Shades a grid segment by how directly it faces the camera: lines on the near side are bright,
+     * lines wrapping round the back fade to faint. This is what makes the wireframe read as a solid sphere.
+     */
     static sf::Color lineColorFor(
         const Planet& planet,
         const Camera& camera,
@@ -364,20 +380,22 @@ private:
         const float visibility = std::clamp((facing + 0.25f) / 1.25f, 0.f, 1.f);
         const float alpha = std::clamp((42.f + visibility * 190.f) * alphaScale, 0.f, 255.f);
 
-        return sf::Color(255, 255, 255, static_cast<std::uint8_t>(alpha));
+        return style::withAlpha(style::planetGrid, alpha);
     }
 
+    /** The planet's outline: a circle at its true on-screen radius, never thicker than three pixels. */
     static void drawSilhouette(sf::RenderTarget& target, sf::Vector2f center, float radius)
     {
         sf::CircleShape silhouette(radius, 128);
         silhouette.setOrigin({radius, radius});
         silhouette.setPosition(center);
         silhouette.setFillColor(sf::Color::Transparent);
-        silhouette.setOutlineColor(sf::Color(255, 255, 255, 240));
+        silhouette.setOutlineColor(style::planetSilhouette);
         silhouette.setOutlineThickness(std::clamp(radius * 0.006f, 1.f, 3.f));
         target.draw(silhouette);
     }
 
+    /** A decorative planetary ring: a flattened, tilted ellipse around the planet's screen position. */
     static void drawRing(
         sf::RenderTarget& target,
         const Planet& planet,
@@ -391,7 +409,7 @@ private:
         ring.setScale({radius * 1.95f, radius * planet.ringFlattening});
         ring.setRotation(sf::degrees(planet.ringRotationDegrees));
         ring.setFillColor(sf::Color::Transparent);
-        ring.setOutlineColor(sf::Color(255, 255, 255, 150));
+        ring.setOutlineColor(style::planetRing);
         ring.setOutlineThickness(std::max(0.012f, 0.035f / radius));
         target.draw(ring);
     }

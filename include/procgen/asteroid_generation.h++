@@ -50,6 +50,10 @@ namespace procgen {
         return value;
     }
 
+    /**
+     * Seed for one streaming cell: the belt seed and the cell's integer coordinates, hashed together.
+     * The same cell always gets the same seed, so its rocks are identical every time they're generated.
+     */
     inline std::uint32_t cellSeed(std::uint32_t beltSeed, int x, int y, int z)
     {
         std::uint32_t h = mixHash(beltSeed ^ 0x9E3779B9U);

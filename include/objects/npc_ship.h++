@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 26/07/2026.
 //
+// NPC ships: a regular Ship body with a small simple-reflex state machine on top
+// (inactive, warping in, roaming, docked, warping out). Behaviour lives in systems/npc_ai.h++.
+//
 
 #ifndef DUSK_NPC_SHIP_H
 #define DUSK_NPC_SHIP_H

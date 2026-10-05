@@ -1,11 +1,14 @@
 //
 // Created by Mykyta Khomiakov on 16/09/2026.
 //
+// Shared button helpers for menus: layout of stacked buttons, drawing, and text centring.
+//
 
 #ifndef DUSK_MENU_BUTTON_H
 #define DUSK_MENU_BUTTON_H
 
 #include <SFML/Graphics.hpp>
+#include "ui/style.h++"
 
 /** Small shared helpers for the black/white box buttons used by the menus. */
 namespace ui {
@@ -52,12 +55,12 @@ inline void drawButton(
 {
     sf::RectangleShape button(bounds.size);
     button.setPosition(bounds.position);
-    button.setFillColor(primary ? sf::Color::White : sf::Color::Black);
-    button.setOutlineColor(primary ? sf::Color::Black : sf::Color::White);
+    button.setFillColor(primary ? style::buttonPrimaryFill : style::buttonSecondaryFill);
+    button.setOutlineColor(primary ? style::buttonPrimaryOutline : style::buttonSecondaryOutline);
     button.setOutlineThickness(hovered ? 3.f : 2.f);
     target.draw(button);
 
-    label.setFillColor(primary ? sf::Color::Black : sf::Color::White);
+    label.setFillColor(primary ? style::buttonPrimaryText : style::buttonSecondaryText);
     centerText(label, bounds.getCenter());
     target.draw(label);
 }

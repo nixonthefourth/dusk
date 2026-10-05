@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// Keyboard input for the ship (written as intent: throttle, turn demands, mode toggles) and the
+// two ship cameras: the spring-mounted chase camera and the orbiting showcase camera.
+//
 
 #ifndef DUSK_SHIP_CONTROLLER_H
 #define DUSK_SHIP_CONTROLLER_H

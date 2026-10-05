@@ -1,3 +1,8 @@
+//
+// System generation: the star, planets on their orbital shells, the station's placement around
+// its host, and the player's spawn pose. All of it scaled so planets dwarf the ship.
+//
+
 #ifndef DUSK_PLANET_GENERATION_H
 #define DUSK_PLANET_GENERATION_H
 

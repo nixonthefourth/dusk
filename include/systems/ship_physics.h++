@@ -1,6 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 22/07/2026.
 //
+// The ship flight model: flight assist, manual (Newtonian) thrust, rate-controlled rotation, the
+// cruise drive with its charge-up and mass locking, all fed through velocity Verlet.
+//
 
 #ifndef DUSK_SHIP_PHYSICS_H
 #define DUSK_SHIP_PHYSICS_H
