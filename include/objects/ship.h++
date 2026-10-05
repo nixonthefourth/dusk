@@ -164,6 +164,15 @@ struct Ship {
     /** True while the in-system cruise drive is engaged. */
     bool cruiseEngaged = false;
 
+    /**
+     * Cruise spool-up progress in [0, 1) while the drive is charging, or a negative value when it
+     * isn't. The pilot's J starts a charge; NPCs engage instantly through engageCruise().
+     */
+    float cruiseCharge = -1.f;
+
+    /** Seconds the drive takes to charge before cruise engages. */
+    float cruiseChargeTime = 1.2f;
+
     /** Cruise speed at full throttle, in world units per second. */
     float cruiseMaxSpeed = 30000.f;
 

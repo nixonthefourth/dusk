@@ -59,6 +59,18 @@ struct ShipCameraSettings {
     /** Ship acceleration is capped at this before driving the spring, so jumps and cruise drops give a lurch, not a teleport. */
     float maxDrivingAcceleration = 20000.f;
 
+    /** Field of view in normal flight, in degrees. */
+    float baseFov = 90.f;
+
+    /** Extra field of view at full cruise speed: the view stretches as the ship gets going. */
+    float cruiseFovBoost = 14.f;
+
+    /** How far the view narrows (degrees) at the end of a cruise charge, just before it punches out. */
+    float chargeFovPull = 5.f;
+
+    /** How quickly the field of view follows its target, per second. */
+    float fovResponse = 3.f;
+
     /** Distance used by the showcase orbit camera. */
     float showcaseDistance = 1400.f;
 
@@ -85,6 +97,12 @@ struct ShipCameraRig {
 
     /** False until the first update, so the camera doesn't start with a lurch. */
     bool primed = false;
+
+    /** Current field-of-view offset from baseFov, eased toward its target each frame. */
+    float fovOffset = 0.f;
+
+    /** Extra field of view requested by the scene (e.g. the hyperspace jump), added on top. */
+    float sceneFovOffset = 0.f;
 };
 
 /** Tracks edge-triggered ship input such as reverse-thrust, flight-assist and cruise toggling. */
@@ -164,10 +182,14 @@ inline void updateShipFromKeyboard(Ship& ship, float dt, ShipInputState& inputSt
 
     if (keyPressedThisFrame(sf::Keyboard::Key::J, inputState.cruiseToggleWasDown))
     {
+        // J drops out of cruise, cancels a charge in progress, or starts charging the drive
+        // (refused while mass-locked; the HUD shows why).
         if (ship.cruiseEngaged)
             disengageCruise(ship);
+        else if (cruiseCharging(ship))
+            cancelCruiseCharge(ship);
         else
-            engageCruise(ship); // refused while mass-locked; the HUD shows why
+            beginCruiseCharge(ship);
     }
 
     ship.throttle = std::clamp(ship.throttle, 0.f, 1.f);
@@ -309,6 +331,29 @@ inline void updateCameraToFollowShip(
     camera.yaw = ship.yaw;
     camera.pitch = std::clamp(ship.pitch - settings.lookDownDegrees * degreesToRadians, -maxCameraPitch, maxCameraPitch);
     camera.roll = 0.f;
+
+    // Field of view: draws in slightly while the cruise drive charges, then widens with speed
+    // once it engages, so the view itself conveys the jump to cruise.
+    float targetOffset = 0.f;
+
+    if (cruiseCharging(ship))
+    {
+        targetOffset = -settings.chargeFovPull * ship.cruiseCharge;
+    }
+    else if (ship.cruiseMaxSpeed > ship.maxSpeed)
+    {
+        const float cruiseFraction = std::clamp(
+            (length(ship.velocity) - ship.maxSpeed) / (ship.cruiseMaxSpeed - ship.maxSpeed),
+            0.f,
+            1.f
+        );
+        targetOffset = settings.cruiseFovBoost * std::sqrt(cruiseFraction);
+    }
+
+    if (dt > 0.f)
+        rig.fovOffset += (targetOffset - rig.fovOffset) * (1.f - std::exp(-settings.fovResponse * dt));
+
+    camera.fov = settings.baseFov + rig.fovOffset + rig.sceneFovOffset;
 }
 
 /** Orbits the camera around the ship to show off its wireframe model. */
@@ -320,6 +365,8 @@ inline void updateCameraToShowcaseShip(
     const ShipCameraSettings& settings = {}
 )
 {
+    camera.fov = settings.baseFov;
+
     rig.showcaseAngle = wrapAngle(rig.showcaseAngle + settings.showcaseSpeed * dt);
 
     const Vec3 worldUp = {0.f, 1.f, 0.f};

@@ -434,6 +434,8 @@ private:
 
         if (ship.cruiseEngaged)
             flags += "   [J] DROP";
+        else if (cruiseCharging(ship))
+            flags += "   CRUISE CHARGING " + std::to_string(static_cast<int>(ship.cruiseCharge * 100.f)) + "%";
         else if (shipMassLocked(ship))
             flags += "   MASS LOCKED";
         else

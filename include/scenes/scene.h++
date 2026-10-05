@@ -5,6 +5,7 @@
 #ifndef DUSK_SCENE_H
 #define DUSK_SCENE_H
 
+#include "systems/travel_effects.h++"
 #include <SFML/Graphics/RenderTarget.hpp>
 #include <SFML/Graphics/RenderWindow.hpp>
 #include <SFML/Window/Event.hpp>
@@ -44,6 +45,12 @@ public:
     virtual bool acceptsShipInput() const
     {
         return true;
+    }
+
+    /** Travel-animation state (cruise bursts, hyperspace jump) for the effects renderer. */
+    virtual TravelEffects travelEffects() const
+    {
+        return {};
     }
 
     /** Whether the scene wants Escape for itself (e.g. to close a map) instead of quitting the game. */

@@ -74,7 +74,7 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [x] Flight assist: velocity-holding thruster control, switchable back to raw Newtonian flight
   - [x] In-system cruise drive with mass locking
   - [ ] Towed cargo mass affects ship handling (every thruster already divides by `mass`, so this is mostly bookkeeping)
-- [~] Phase-space warp between system nodes — jumping from the galactic chart is instant for now, with no travel scene
+- [x] Phase-space warp between system nodes — a countdown, jump and hyperspace-tunnel sequence (see [Travel Animations](#travel-animations))
 - [x] Galactic map
 - [x] System map
 - [ ] Spaceships
@@ -156,7 +156,7 @@ Flight controls:
 - `E`: pitch nose down.
 - `Shift` (hold): precision turning, about a third of the normal turn rate.
 - `F`: toggle flight assist.
-- `J`: engage/disengage the cruise drive (refused while mass-locked).
+- `J`: charge the cruise drive (it engages after 1.2 s; press again to cancel), or drop out of cruise. Refused while mass-locked.
 - `Arrow Up`: hold to orbit the camera around the ship (showcase mode) instead of chasing it.
 - `Escape`: quit.
 
@@ -171,7 +171,7 @@ On the galactic chart:
 
 - Arrow keys step to the nearest system in that direction; a mouse click selects; hovering shows a system's name.
 - Mouse wheel or `+`/`-` zooms; dragging pans; `H` returns to your current system.
-- `Enter`, `Space` or the `JUMP` button jumps to the selected system. Jumping is unavailable while docked or while the docking computer is flying.
+- `Enter`, `Space` or the `JUMP` button starts a hyperspace jump to the selected system: a 5-second countdown (you can keep flying; `Escape` aborts it), then the jump itself. Jumping is unavailable while docked, while the docking computer is flying, or while another jump is under way.
 - `G` or `Escape` closes the chart.
 
 On the system map:
@@ -193,7 +193,7 @@ With flight assist on (the default), throttle is a speed demand: `W`/`S` choose 
 
 With flight assist off (`F`), movement is purely velocity-based, as before: throttle is a fraction of main-engine thrust, easing off it only stops adding acceleration, and the ship keeps drifting on whatever velocity it built up. To brake in that mode, tap `Arrow Down` to switch to reverse thrust, hold `W`, and ease off near a stop.
 
-To cross a system, fly clear of the nearest planet, star or station until the readout stops saying `MASS LOCKED`, then press `J`. Cruise speed follows throttle up to 30,000 units per second, tapers off automatically as you approach a body, and drops out at its mass-lock boundary near normal-space top speed. The HUD's prograde ring shows where you are actually travelling: put it on a target to fly straight at it.
+To cross a system, fly clear of the nearest planet, star or station until the readout stops saying `MASS LOCKED`, then press `J` and let the drive charge. Cruise speed follows throttle up to 30,000 units per second, tapers off automatically as you approach a body, and drops out at its mass-lock boundary near normal-space top speed. The HUD's prograde ring shows where you are actually travelling: put it on a target to fly straight at it.
 
 ## Project Layout
 
@@ -238,6 +238,7 @@ include/
 
   systems/
     ship_physics.h++
+    travel_effects.h++
     orbital_physics.h++
     npc_ai.h++
     docking_computer.h++
@@ -263,6 +264,7 @@ include/
     star_renderer.h++
     planet_renderer.h++
     asteroid_renderer.h++
+    travel_effects_renderer.h++
     station_renderer.h++
     ship_renderer.h++
     hud_renderer.h++
@@ -631,7 +633,7 @@ Masses are set in `planet_generation.h++`. A star's mass is `750 × radius`, whi
 
 Procedural generation lives in `include/procgen/`, split across three files with very different jobs:
 
-- `statistical.h++` generates the cheap, "on-paper" facts about a system — a pronounceable procedural name, an `EconomyTier` (Poor/Developing/Progressive, weighted toward Poor), a dominant occupation, 2–4 goods it best sells, and rolled counts for planets, stations, NPC ships and asteroid belts. NPC counts are then scaled by `npcTrafficMultiplier` (currently 2.0, i.e. double the base traffic); because counts are small whole numbers, the fractional ship is settled by a dice roll drawn after every other roll, so the galaxy-wide average rises by exactly that factor without changing anything else about any system. All of this is packed into a `SystemInfo` and is cheap enough to generate and hold 1000 of at once, up front.
+- `statistical.h++` generates the cheap, "on-paper" facts about a system — a pronounceable procedural name, an `EconomyTier` (Poor/Developing/Progressive, weighted toward Poor), a dominant occupation, 2–4 goods it best sells, and rolled counts for planets, stations, NPC ships and asteroid belts. NPC counts are then scaled by `npcTrafficMultiplier` (currently 3.0, i.e. triple the base traffic); because counts are small whole numbers, the fractional ship is settled by a dice roll drawn after every other roll, so the galaxy-wide average rises by exactly that factor without changing anything else about any system. All of this is packed into a `SystemInfo` and is cheap enough to generate and hold 1000 of at once, up front.
 - `galaxy.h++` derives a stable per-system seed from one galaxy seed plus a system index (`deriveSystemSeed()`), and calls `generateSystemInfo()` for every system to build the full `Galaxy` roster.
 - `planet_generation.h++` is where a `SystemInfo` actually becomes a playable `World`: it builds the star, places planets in outward, non-overlapping orbital shells with a real circular-orbit starting velocity, optionally places a station in orbit around a random planet, and works out a spawn pose (`shipSpawnPose()`): a few kilometres out from the station, facing it with its host planet filling the view behind, or facing the innermost planet in systems with no station.
 
@@ -816,6 +818,30 @@ There's no depth buffer, so both layers skip anything whose line of sight passes
 Rocks of 250 units and up appear on the scanner as dim specks with faint stalks, and an amber `ASTEROID FIELD` warning shows while you're inside any belt.
 
 On the system map, star belts are drawn as turning speckled bands. A planet with a debris belt gets a dotted halo, and its details show `DEBRIS BELT: YES`. The galactic chart lists each system's star belts.
+
+## Travel Animations
+
+Travel has two animated sequences, drawn by `TravelEffectsRenderer` (`include/rendering/travel_effects_renderer.h++`). It runs after the 3D world and before the HUD. It reads the `World` and a small `TravelEffects` struct (`include/systems/travel_effects.h++`) that the active scene hands over through `Scene::travelEffects()`. Everything radiates from the vanishing point of the ship's nose rather than the screen centre, so the effects line up with the direction you're actually flying.
+
+### Cruise
+
+- **Charge.** `J` no longer engages cruise instantly: it starts a 1.2-second charge (`Ship::cruiseCharge`, advanced in `updateCruiseCharge()`). A mass lock aborts the charge, and the HUD shows its progress. While it charges, lines of energy converge on the nose, a ring tightens around it, and the field of view draws in by a few degrees, like a held breath. NPCs still engage instantly through `engageCruise()`.
+- **Engage.** The gathered lines burst outward with a quick white flash, and the view widens as speed builds: `ShipCameraSettings::cruiseFovBoost` adds up to 14° at full cruise speed, on top of the spring camera stretching back.
+- **Cruising.** Every star is motion-blurred into a streak along the direction of travel, up to 15,000 world units long at full cruise. Nearby stars smear across the view while distant ones barely stretch, which reads as depth as well as speed.
+- **Drop-out.** A soft flash, and a ring expands from the nose.
+
+`SystemScene` spots engage and drop-out by comparing each step's cruise state with the last, and runs the two short timers (`cruiseEngageBurst`, `cruiseDropFlash`) that drive the burst and the flash.
+
+### Hyperspace
+
+Jumping from the galactic chart runs a four-phase sequence (`HyperspacePhase`), stepped by `SystemScene::updateHyperspace()`:
+
+1. **Countdown** (5 s). A nod to Elite's: "HYPERSPACE" with the seconds ticking down, the destination and its distance. You can keep flying, the docking computer is locked out, and `Escape` aborts the jump. In the last 1.5 seconds energy gathers at the nose, as with a cruise charge, and the view draws in.
+2. **Accelerate** (1.3 s). The Star Wars moment: every star stretches outward from the vanishing point into a streak, slowly then faster and faster (stretch ∝ t^2.2). The field of view swings out by up to 35°, and the screen whites out at the end.
+3. **Tunnel** (2.8 s). Hyperspace, drawn opaque over everything. Its white rings bloom out of the centre and race past the edges, the way the original Elite drew hyperspace. Each ring sits at a depth that slides toward the viewer, and is drawn at radius `focal / depth`. Pale blue streaks rush past on the same depth scheme, and the tunnel's centre drifts in a slow loop so it seems to twist and bank. 40% of the way through, `enterSystem()` swaps the destination in unseen.
+4. **Arrive** (1.1 s). A flash, then the streaks collapse back into the new system's stars as the field of view settles, and "ARRIVED IN …" appears.
+
+The HUD and flight controls are off from Accelerate through Arrive, and any open map closes when the jump begins. The phase lengths are constants at the top of the hyperspace state in `system_scene.h++` if you want the sequence longer or snappier.
 
 ## The Starfield
 
@@ -1084,7 +1110,7 @@ Chart positions come from `generateGalaxyLayout()` in `procgen/galaxy.h++`, whic
 
 Arrow keys pick the system that best continues in that direction (`distance / alignment²`, ignoring anything more than 60° off), and the view recentres when the selection nears the edge. The panel shows the selected system's distance, distance to the core, economy, trade, planets, station, asteroid belts, traffic and exports, plus the jump button. Dots are coloured by economy tier: grey for Poor, white for Developing, cyan for Progressive.
 
-Jumping is still instant — `SystemScene::enterSystem()` regenerates the destination from its seed, exactly as the old `[`/`]` cycling did — and is refused while docked or under the docking computer. There's no jump range or fuel yet; `galacticDistance()` is there for when there is.
+Jumping starts the hyperspace sequence described under [Travel Animations](#travel-animations); partway through the tunnel, `SystemScene::enterSystem()` regenerates the destination from its seed. Jumps are refused while docked, under the docking computer, or while another jump is in progress. There's no jump range or fuel yet; `galacticDistance()` is there for when there is.
 
 ## The System Map
 

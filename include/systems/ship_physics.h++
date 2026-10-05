@@ -198,6 +198,49 @@ inline bool engageCruise(Ship& ship)
     return true;
 }
 
+/** True while the cruise drive is spooling up. */
+inline bool cruiseCharging(const Ship& ship)
+{
+    return ship.cruiseCharge >= 0.f;
+}
+
+/** Starts charging the cruise drive (refused while mass-locked or already cruising). Returns whether it started. */
+inline bool beginCruiseCharge(Ship& ship)
+{
+    if (ship.cruiseEngaged || cruiseCharging(ship) || shipMassLocked(ship))
+        return false;
+
+    ship.cruiseCharge = 0.f;
+    return true;
+}
+
+/** Abandons a charge in progress. */
+inline void cancelCruiseCharge(Ship& ship)
+{
+    ship.cruiseCharge = -1.f;
+}
+
+/** Advances a charge; a mass lock aborts it, and a full charge engages cruise. */
+inline void updateCruiseCharge(Ship& ship, float dt)
+{
+    if (!cruiseCharging(ship))
+        return;
+
+    if (shipMassLocked(ship))
+    {
+        cancelCruiseCharge(ship);
+        return;
+    }
+
+    ship.cruiseCharge += dt / std::max(0.01f, ship.cruiseChargeTime);
+
+    if (ship.cruiseCharge >= 1.f)
+    {
+        cancelCruiseCharge(ship);
+        engageCruise(ship);
+    }
+}
+
 /** Drops out of cruise: speed collapses to normal-space limits and throttle is re-pointed at it. */
 inline void disengageCruise(Ship& ship)
 {
@@ -251,6 +294,7 @@ inline void integrateShipPhysics(Ship& ship, float dt, const Vec3& externalAccel
     ship.previousPosition = ship.position;
 
     integrateShipRotation(ship, dt);
+    updateCruiseCharge(ship, dt);
 
     if (ship.cruiseEngaged && shipMassLocked(ship))
         disengageCruise(ship);

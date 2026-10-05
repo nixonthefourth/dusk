@@ -5,6 +5,7 @@
 #include "rendering/station_renderer.h++"
 #include "rendering/hud_renderer.h++"
 #include "rendering/asteroid_renderer.h++"
+#include "rendering/travel_effects_renderer.h++"
 #include "rendering/planet_renderer.h++"
 #include "rendering/ship_renderer.h++"
 #include "rendering/star_renderer.h++"
@@ -48,6 +49,7 @@ int main() {
 
     // Rocks are only drawn near the camera; belt dust spans the whole system like the planets.
     const AsteroidRenderer asteroidRenderer(projectionConfig, bodyProjectionConfig);
+    const TravelEffectsRenderer travelEffectsRenderer(projectionConfig);
     const StationRenderer stationRenderer(projectionConfig);
     const ShipRenderer shipRenderer(projectionConfig);
     const HudRenderer hudRenderer;
@@ -139,6 +141,10 @@ int main() {
             if (npc.isVisible())
                 shipRenderer.draw(window, npc.ship, camera);
         }
+
+        // Cruise and hyperspace animations sit over the 3D view and under the HUD; the hyperspace
+        // tunnel covers the whole view.
+        travelEffectsRenderer.draw(window, renderWorld, camera, sceneManager.activeScene().travelEffects());
 
         if (sceneManager.activeScene().showsHud())
             hudRenderer.draw(window, renderWorld, camera);

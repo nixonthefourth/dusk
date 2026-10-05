@@ -482,6 +482,7 @@ inline void update(DockingComputer& computer, World& world, float dt)
 
     Ship& ship = world.playerShip;
     disengageCruise(ship);
+    cancelCruiseCharge(ship);
     ship.previousPosition = ship.position;
     ship.throttle = 0.f;
     ship.reverseThrust = false;

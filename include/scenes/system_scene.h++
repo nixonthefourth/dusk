@@ -73,6 +73,10 @@ public:
 
     void handleEvent(const sf::Event& event, const sf::RenderWindow& window) override
     {
+        // Once the jump itself starts, the sequence plays out untouched.
+        if (inHyperspaceSequence())
+            return;
+
         if (mapView_ == MapView::Galaxy)
         {
             handleGalaxyMapEvent(event, window);
@@ -96,6 +100,13 @@ public:
         if (!keyPressed)
             return;
 
+        if (hyperspace_.phase == HyperspacePhase::Countdown && keyPressed->code == sf::Keyboard::Key::Escape)
+        {
+            hyperspace_ = {};
+            docking::showMessage(docking_, "HYPERSPACE ABORTED", 2.f);
+            return;
+        }
+
         switch (keyPressed->code)
         {
             case sf::Keyboard::Key::G:
@@ -117,6 +128,12 @@ public:
         // C toggles the docking computer (Elite's docking-computer key).
         if (keyPressed->code == sf::Keyboard::Key::C)
         {
+            if (hyperspace_.phase == HyperspacePhase::Countdown)
+            {
+                docking::showMessage(docking_, "HYPERSPACE COUNTDOWN IN PROGRESS", 2.f);
+                return;
+            }
+
             if (docking_.phase == DockingPhase::Idle)
             {
                 // The docking computer flies to the station, so lock it as the target too.
@@ -141,16 +158,65 @@ public:
         }
     }
 
-    /** Escape closes an open map instead of quitting the game. */
+    /** Escape closes an open map, or aborts a hyperspace countdown, instead of quitting the game. */
     bool capturesEscape() const override
     {
-        return mapView_ != MapView::None;
+        return mapView_ != MapView::None || hyperspace_.phase != HyperspacePhase::None;
     }
 
-    /** The flight HUD is hidden while a full-screen map is up. */
+    /** The flight HUD is hidden while a full-screen map is up, and for the jump itself. */
     bool showsHud() const override
     {
-        return mapView_ == MapView::None;
+        return mapView_ == MapView::None && !inHyperspaceSequence();
+    }
+
+    /** Travel-animation state for the effects renderer. */
+    TravelEffects travelEffects() const override
+    {
+        TravelEffects effects;
+        effects.hyperspacePhase = hyperspace_.phase;
+        effects.phaseTime = hyperspace_.time;
+        effects.cruiseEngageBurst = cruiseEngageBurst_;
+        effects.cruiseDropFlash = cruiseDropFlash_;
+
+        const float duration = hyperspacePhaseDuration(hyperspace_.phase);
+
+        if (hyperspace_.phase == HyperspacePhase::Countdown)
+        {
+            // During the countdown, "progress" is how far the final gathering has got.
+            effects.phaseProgress = std::clamp((hyperspace_.time - (duration - countdownGatherTime)) / countdownGatherTime, 0.f, 1.f);
+        }
+        else if (duration > 0.f)
+        {
+            effects.phaseProgress = std::clamp(hyperspace_.time / duration, 0.f, 1.f);
+        }
+
+        return effects;
+    }
+
+    /** Hyperspace widens the view as the stars stretch, then lets it settle on arrival. */
+    void updateCamera(Camera& camera, float dt, ShipCameraRig& rig) override
+    {
+        const float duration = hyperspacePhaseDuration(hyperspace_.phase);
+        const float progress = duration > 0.f ? std::clamp(hyperspace_.time / duration, 0.f, 1.f) : 0.f;
+
+        switch (hyperspace_.phase)
+        {
+            case HyperspacePhase::Countdown:
+            {
+                // A held breath in the last moments of the countdown.
+                const float gather = std::clamp((hyperspace_.time - (duration - countdownGatherTime)) / countdownGatherTime, 0.f, 1.f);
+                rig.sceneFovOffset = -5.f * gather;
+                break;
+            }
+
+            case HyperspacePhase::Accelerate: rig.sceneFovOffset = -5.f + 40.f * progress * progress; break;
+            case HyperspacePhase::Tunnel: rig.sceneFovOffset = 35.f; break;
+            case HyperspacePhase::Arrive: rig.sceneFovOffset = 35.f * (1.f - progress) * (1.f - progress); break;
+            case HyperspacePhase::None: rig.sceneFovOffset = 0.f; break;
+        }
+
+        Scene::updateCamera(camera, dt, rig);
     }
 
     /** Read-only view of the docking computer, e.g. for debugging or future HUD elements. */
@@ -167,7 +233,7 @@ public:
     /** The player flies the ship only while the docking computer is idle and no map has the keyboard. */
     bool acceptsShipInput() const override
     {
-        return !docking::controlsShip(docking_) && mapView_ == MapView::None;
+        return !docking::controlsShip(docking_) && mapView_ == MapView::None && !inHyperspaceSequence();
     }
 
     void updatePhysics(float dt) override
@@ -180,6 +246,9 @@ public:
 
         if (phaseBefore != DockingPhase::Docked && docking_.phase == DockingPhase::Docked)
             openStationMenu();
+
+        updateCruiseTransitionEffects(dt);
+        updateHyperspace(dt);
     }
 
     void drawOverlay(sf::RenderTarget& target) override
@@ -196,9 +265,18 @@ public:
             return;
         }
 
+        if (inHyperspaceSequence())
+        {
+            drawHyperspaceText(target);
+            return;
+        }
+
         target.draw(label_);
         target.draw(hintText_); // a short column under the system name, clear of the heading tape
         drawDockingStatus(target);
+
+        if (hyperspace_.phase == HyperspacePhase::Countdown)
+            drawHyperspaceText(target);
 
         if (stationMenuOpen_)
             drawStationMenu(target);
@@ -228,6 +306,31 @@ private:
     GalaxyMap galaxyMap_;
     SystemMap systemMap_;
 
+    /** The hyperspace jump in progress, if any. */
+    struct HyperspaceJump {
+        HyperspacePhase phase = HyperspacePhase::None;
+        float time = 0.f;
+        int destination = -1;
+        float distance = 0.f;
+        bool arrived = false; // destination already swapped in
+    };
+
+    HyperspaceJump hyperspace_;
+
+    /** Seconds each hyperspace phase lasts. The countdown is a nod to Elite's; shortened to keep it snappy. */
+    static constexpr float countdownTime = 5.f;
+    static constexpr float accelerateTime = 1.3f;
+    static constexpr float tunnelTime = 2.8f;
+    static constexpr float arriveTime = 1.1f;
+
+    /** How long, at the end of the countdown, energy visibly gathers at the nose. */
+    static constexpr float countdownGatherTime = 1.5f;
+
+    /** Cruise animation timers, each running 1 to 0, and last step's cruise state for spotting changes. */
+    float cruiseEngageBurst_ = 0.f;
+    float cruiseDropFlash_ = 0.f;
+    bool wasCruising_ = false;
+
     /** Highlighted station-menu option: 0 = STAY, 1 = LEAVE. */
     int menuSelection_ = 0;
 
@@ -246,6 +349,9 @@ private:
         world_ = World();
         docking_ = DockingComputer();
         stationMenuOpen_ = false;
+        wasCruising_ = false;
+        cruiseEngageBurst_ = 0.f;
+        cruiseDropFlash_ = 0.f;
 
         world_.star = procgen::generateStar(rng);
 
@@ -457,16 +563,143 @@ private:
         }
     }
 
+    /* ---- Travel animations ------------------------------------------------------------------- */
+
+    static float hyperspacePhaseDuration(HyperspacePhase phase)
+    {
+        switch (phase)
+        {
+            case HyperspacePhase::Countdown: return countdownTime;
+            case HyperspacePhase::Accelerate: return accelerateTime;
+            case HyperspacePhase::Tunnel: return tunnelTime;
+            case HyperspacePhase::Arrive: return arriveTime;
+            case HyperspacePhase::None: break;
+        }
+
+        return 0.f;
+    }
+
+    /** True from the moment the stars start stretching until the new system has settled. */
+    bool inHyperspaceSequence() const
+    {
+        return hyperspace_.phase == HyperspacePhase::Accelerate ||
+               hyperspace_.phase == HyperspacePhase::Tunnel ||
+               hyperspace_.phase == HyperspacePhase::Arrive;
+    }
+
+    /** Fires the burst when cruise engages and the flash when it drops out, then lets both fade. */
+    void updateCruiseTransitionEffects(float dt)
+    {
+        const bool cruising = world_.playerShip.cruiseEngaged;
+
+        if (cruising && !wasCruising_)
+            cruiseEngageBurst_ = 1.f;
+        else if (!cruising && wasCruising_)
+            cruiseDropFlash_ = 1.f;
+
+        wasCruising_ = cruising;
+        cruiseEngageBurst_ = std::max(0.f, cruiseEngageBurst_ - dt / 0.6f);
+        cruiseDropFlash_ = std::max(0.f, cruiseDropFlash_ - dt / 0.4f);
+    }
+
+    /** Steps the hyperspace sequence through its phases, swapping the destination in mid-tunnel. */
+    void updateHyperspace(float dt)
+    {
+        if (hyperspace_.phase == HyperspacePhase::None)
+            return;
+
+        hyperspace_.time += dt;
+
+        // Swap systems while the tunnel hides everything (40% of the way through).
+        if (hyperspace_.phase == HyperspacePhase::Tunnel && !hyperspace_.arrived && hyperspace_.time >= tunnelTime * 0.4f)
+        {
+            const HyperspaceJump jump = hyperspace_;
+            enterSystem(jump.destination);
+            hyperspace_ = jump;
+            hyperspace_.arrived = true;
+        }
+
+        if (hyperspace_.time < hyperspacePhaseDuration(hyperspace_.phase))
+            return;
+
+        hyperspace_.time = 0.f;
+
+        switch (hyperspace_.phase)
+        {
+            case HyperspacePhase::Countdown:
+                // The jump takes over the screen: any open map gives way to it.
+                hyperspace_.phase = HyperspacePhase::Accelerate;
+                mapView_ = MapView::None;
+                cancelCruiseCharge(world_.playerShip);
+                break;
+            case HyperspacePhase::Accelerate: hyperspace_.phase = HyperspacePhase::Tunnel; break;
+
+            case HyperspacePhase::Tunnel:
+            {
+                hyperspace_.phase = HyperspacePhase::Arrive;
+
+                char message[96];
+                std::snprintf(message, sizeof(message), "ARRIVED IN %s  (%.1f LY)", currentSystemName_.c_str(), hyperspace_.distance);
+                docking::showMessage(docking_, message, 3.5f);
+                break;
+            }
+
+            case HyperspacePhase::Arrive:
+            case HyperspacePhase::None:
+                hyperspace_ = {};
+                break;
+        }
+    }
+
+    /** Centred text with its top at `y`. */
+    void drawCentredText(sf::RenderTarget& target, const std::string& string, float y, unsigned size, sf::Color color)
+    {
+        sf::Text text(font_, string, size);
+        text.setFillColor(color);
+        const sf::FloatRect bounds = text.getLocalBounds();
+        text.setOrigin({bounds.position.x + bounds.size.x * 0.5f, bounds.position.y});
+        text.setPosition({static_cast<float>(target.getSize().x) * 0.5f, y});
+        target.draw(text);
+    }
+
+    /** Elite-style countdown, then the destination readout inside the tunnel. */
+    void drawHyperspaceText(sf::RenderTarget& target)
+    {
+        const float height = static_cast<float>(target.getSize().y);
+        const std::string& destination = galaxy_.systems[static_cast<std::size_t>(std::max(0, hyperspace_.destination))].name;
+
+        char distance[32];
+        std::snprintf(distance, sizeof(distance), "%.1f LY", hyperspace_.distance);
+
+        if (hyperspace_.phase == HyperspacePhase::Countdown)
+        {
+            const int secondsLeft = std::max(1, static_cast<int>(std::ceil(countdownTime - hyperspace_.time)));
+            drawCentredText(target, "HYPERSPACE", height * 0.16f, 30, sf::Color::White);
+            drawCentredText(target, std::to_string(secondsLeft), height * 0.16f + 34.f, 64, sf::Color(110, 220, 255));
+            drawCentredText(target, destination + "   " + distance + "      [ESC] ABORT", height * 0.16f + 112.f, 18, sf::Color(150, 160, 170));
+            return;
+        }
+
+        if (hyperspace_.phase == HyperspacePhase::Tunnel)
+        {
+            drawCentredText(target, "HYPERSPACE", height - 74.f, 26, sf::Color(235, 245, 255));
+            drawCentredText(target, destination + "   " + distance, height - 42.f, 18, sf::Color(150, 190, 230));
+        }
+    }
+
     /* ---- Maps -------------------------------------------------------------------------------- */
 
     /** Jumps are only possible in free flight: not docked, not under the docking computer. */
     bool jumpAvailable() const
     {
-        return docking_.phase == DockingPhase::Idle;
+        return docking_.phase == DockingPhase::Idle && hyperspace_.phase == HyperspacePhase::None;
     }
 
     std::string jumpBlockedReason() const
     {
+        if (hyperspace_.phase != HyperspacePhase::None)
+            return "JUMP IN PROGRESS";
+
         return docking_.phase == DockingPhase::Docked ? "LAUNCH FIRST" : "DOCKING IN PROGRESS";
     }
 
@@ -492,19 +725,15 @@ private:
 
             case GalaxyMapAction::Jump:
             {
-                // Stand-in for the warp scene: regenerate the destination from its seed, instantly.
-                const int destination = galaxyMap_.selected();
-                const float distance = galacticDistance(
+                // Start the countdown; the sequence swaps the destination in mid-tunnel.
+                hyperspace_ = {};
+                hyperspace_.phase = HyperspacePhase::Countdown;
+                hyperspace_.destination = galaxyMap_.selected();
+                hyperspace_.distance = galacticDistance(
                     galaxy_.systems[static_cast<std::size_t>(currentSystemIndex_)],
-                    galaxy_.systems[static_cast<std::size_t>(destination)]
+                    galaxy_.systems[static_cast<std::size_t>(hyperspace_.destination)]
                 );
-
-                enterSystem(destination);
                 mapView_ = MapView::None;
-
-                char message[96];
-                std::snprintf(message, sizeof(message), "ARRIVED IN %s  (%.1f LY)", currentSystemName_.c_str(), distance);
-                docking::showMessage(docking_, message, 3.f);
                 break;
             }
 
