@@ -14,7 +14,7 @@
 #include <cmath>
 
 /** Galaxy-wide base fuel price in credits per tonne, before the system's economy adjusts it. */
-constexpr float baseFuelPricePerTonne = 12.f;
+constexpr float baseFuelPricePerTonne = 15.f;
 
 /** Fuel price in a system: dearer in poor systems, cheaper in progressive ones (economyTierMultiplier()). */
 inline float fuelPricePerTonne(const SystemInfo& info)

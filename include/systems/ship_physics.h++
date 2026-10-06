@@ -8,6 +8,7 @@
 #ifndef DUSK_SHIP_PHYSICS_H
 #define DUSK_SHIP_PHYSICS_H
 
+#include "objects/fuel_tank.h++"
 #include "objects/ship.h++"
 #include "math/verlet.h++"
 #include <algorithm>
@@ -45,10 +46,14 @@ inline float shipTotalMass(const Ship& ship)
     return ship.mass + std::max(0.f, ship.fuel) + std::max(0.f, ship.cargoMass);
 }
 
-/** The mass the handling is tuned at: the hull with half a tank. */
+/**
+ * The mass the handling is tuned at: the hull with half of the *standard* tank. It is fixed on
+ * purpose. Were it to follow the fitted tank, a bigger tank would raise the reference and make the
+ * ship turn faster at the same weight, the opposite of what extra capacity should do.
+ */
 inline float shipReferenceMass(const Ship& ship)
 {
-    return ship.mass + ship.fuelCapacity * 0.5f;
+    return ship.mass + baseFuelCapacity * 0.5f;
 }
 
 /**

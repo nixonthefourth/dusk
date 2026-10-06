@@ -129,7 +129,7 @@ struct Ship {
     /* ---- Fuel ------------------------------------------------------------------------------- */
 
     /** Tank size and current fuel, in tonnes. Fuel counts toward the ship's mass. */
-    float fuelCapacity = 6.f;
+    float fuelCapacity = 6.f;   // the standard tank; SystemScene sets it from the fitted tank module
     float fuel = 6.f;
 
     /** Hyperspace cost: a full 6 t tank reaches 40 light years. */

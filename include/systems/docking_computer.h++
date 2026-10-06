@@ -74,13 +74,13 @@ constexpr float approachDistance = 1600.f;
  * now hundreds of thousands of units across, so the far leg runs at cruise-like speed; distance,
  * surface clearance and the station's own motion still throttle it right down near the end.
  */
-constexpr float maxApproachSpeed = 20000.f;
+constexpr float maxApproachSpeed = 1400.f;
 
 /** Approach speed per unit of remaining distance; gives a smooth slowdown on arrival. */
 constexpr float approachSpeedGain = 0.9f;
 
 /** How quickly the ship's velocity converges on the commanded velocity (per second). */
-constexpr float velocityResponse = 3.f;
+constexpr float velocityResponse = 2.5f;
 
 /** Position error at which the approach point counts as reached, and the error allowed before entry. */
 constexpr float approachArrivalRadius = 60.f;

@@ -51,6 +51,8 @@ add_executable(dusk src/main.cpp
         include/systems/trading.h++
         include/systems/upgrades.h++
         include/objects/cargo.h++
+        include/objects/fuel_tank.h++
+        include/systems/docking_fees.h++
         include/ui/menu_button.h++
         include/ui/format.h++
         include/ui/galaxy_map.h++

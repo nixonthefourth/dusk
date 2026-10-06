@@ -20,7 +20,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - One reused `SystemScene` that regenerates its entire world from a system's own seed the moment you enter it, so system #217 always looks and plays out the same way.
 - Real orbital mechanics: planets orbit a central star under actual Newtonian gravity, integrated with velocity Verlet, and the star's own gravity pulls on the player ship too.
 - An OBJ-modelled space station procedurally placed in orbit around a random planet, in systems that roll one. It spins Elite-style around its docking axis, with the slot facing along its orbit.
-- A docking computer: press `C` and the ship flies itself to the station, lines up, matches the station's spin, and slides into the docking slot. Once docked, the station screen opens; launching backs the ship out, turns it around, and hands control back.
+- A docking computer (a paid upgrade): press `C` and the ship flies itself to the station, lines up, matches the station's spin, and slides into the docking slot. Once docked, the station screen opens; launching backs the ship out, turns it around, and hands control back.
 - Simple-reflex NPC ships that roam, avoid planets and stars, occasionally head to the station and dock, and periodically "warp out" and back in — no memory, no planning, just current-state reflexes.
 - A living trade economy: every system has its own market, prices follow supply and demand, you buy and sell at stations, and 300 simple-reflex trader agents move goods between systems on their own. Tech systems now really export tech goods, a bug that had left the best goods almost unobtainable.
 - A camera that chases the ship from behind, plus an orbit "showcase" mode.
@@ -38,6 +38,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - A recycled, endless-feeling starfield.
 - Frustum clipping for both points and line segments, with a small side guard-band so things don't visibly pop in at the frustum edges.
 - A system's star drawn as a solid filled disc, and its planets drawn as gridded, optionally ringed wireframes — sorted and drawn back-to-front together, with per-edge visibility shading based on facing direction.
+- Ship upgrades at stations: Cargo Bay Mk1/Mk2, Fuel Tank Mk1/Mk2 (10 t and 14 t tanks, up to 93 LY of jumps) and the docking computer. Every docking costs a Space Union fee.
 - Trading: a market page at every station, a 10 t hold you can enlarge with Cargo Bay Mk1 (15 t) and Mk2 (20 t), and cargo that counts as real mass, so a loaded ship handles like a freighter.
 - Three save slots: name a new commander, save at any station, and load from the main menu or the station screen.
 - Fuel with mass: a 6-tonne tank limits how far you can jump (40 LY full) and how long you can cruise (about ten minutes flat out), and every tonne aboard makes the ship slower to accelerate and to turn.
@@ -106,9 +107,9 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [~] Physics
   - [x] Object-level collision hitboxes
   - [x] Fuel expenditure (mass matters)
-- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear) — the docking computer exists, fitted as standard for now
+- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear) — cargo bays, fuel tanks and the docking computer are for sale; the rest are still to come
 - [x] Save/load: three commander slots, named commanders, saving at stations
-- [~] Docking — automatic docking and launch work, NPCs dock and launch visibly, and the station screen offers refuelling; manual docking is next
+- [~] Docking — automatic docking and launch work, NPCs dock and launch visibly, and the station screen offers refuelling; every docking pays a Space Union fee, and the docking computer is a paid upgrade (a Union tug does the job until you can afford it); manual docking is next
 - [~] Space stations: small, medium, large — one procedurally placed small station (`station_s.obj`) per eligible system today
 - [x] Wireframe graphics style
 - [x] Animations
@@ -178,7 +179,7 @@ Once you're in a system:
 - `G`: open the galactic chart.
 - `M`: open the system map.
 - `T`: lock or clear the target (the station is the only target for now).
-- `C`: engage the docking computer. Press again during the approach or line-up to cancel; once the ship starts entering the slot the sequence is committed. Engaging it also locks the station as your target.
+- `C`: dock. With a docking computer the ship flies itself to the station for the Space Union's 15 CR fee; without one, a Union tug does it for 250 CR (see [Docking Fees](#docking-fees)). The fee is taken when the docking completes, and the prompt shows what it will be. Press again during the approach or line-up to cancel (free); once the ship starts entering the slot the sequence is committed. Engaging it also locks the station as your target.
 
 On the galactic chart:
 
@@ -238,6 +239,7 @@ include/
     asteroid.h++
     commander.h++
     cargo.h++
+    fuel_tank.h++
     star.h++
     collision_body.h++
 
@@ -261,6 +263,7 @@ include/
     save_game.h++
     trading.h++
     upgrades.h++
+    docking_fees.h++
     orbital_physics.h++
     npc_ai.h++
     docking_computer.h++
@@ -755,7 +758,7 @@ Instead of tumbling on Euler angles, a station has an explicit orientation basis
 
 ## Docking Computer
 
-`include/systems/docking_computer.h++` holds a `DockingComputer` state machine, driven by `SystemScene`:
+The docking computer is a ship upgrade (2,500 CR, see [Upgrades](#upgrades)), and every docking pays the Space Union a fee (see [Docking Fees](#docking-fees)); a ship without the computer is docked by the same autopilot, as a Union tug. The autopilot itself is `include/systems/docking_computer.h++`, a `DockingComputer` state machine driven by `SystemScene`:
 
 ```text
 Idle -> Approach -> Align -> Enter -> Docked -> LaunchReverse -> LaunchTurn -> Idle
@@ -917,20 +920,26 @@ A fully loaded freighter is a sluggish one. That only affects flying by hand, si
 
 ### Upgrades
 
-`include/systems/upgrades.h++` holds the catalogue, a table of `ShipUpgrade` entries (name, description, price, module):
+`include/systems/upgrades.h++` holds the catalogue, a table of `ShipUpgrade` entries (name, description, price, kind, tier). There are three kinds, each with its own slot on the ship:
 
-| Upgrade | List price | Notes |
+| Upgrade | List price | Effect |
 | --- | --- | --- |
-| Cargo Bay Mk1 | 1,800 CR | +5 t |
-| Cargo Bay Mk2 | 4,200 CR | +10 t; replaces Mk1 |
+| Cargo Bay Mk1 | 1,800 CR | +5 t of hold, 15 t in all |
+| Cargo Bay Mk2 | 4,200 CR | +10 t of hold, 20 t in all; replaces Mk1 |
+| Fuel Tank Mk1 | 2,000 CR | +4 t of tank, 10 t in all (66.7 LY of jumps) |
+| Fuel Tank Mk2 | 3,500 CR | +8 t of tank, 14 t in all (93.3 LY); replaces Mk1 |
+| Docking Computer | 2,500 CR | auto-docking on `C` for the 15 CR fee (see [Docking Fees](#docking-fees)) |
 
-`offerFor()` works out what an upgrade would cost you and whether you can have it:
+`offerFor()` works out what an upgrade would cost the commander and whether they can have it:
 
-- The module you're replacing is **traded in at half its list price**, so Mk1 → Mk2 costs 4,200 − 900 = 3,300 CR.
-- You can't buy a module you already have (`Installed`) or a lesser one than you have (`HaveBetter`).
-- An upgrade must **leave you at least 200 CR** (`upgradeReserveCredits`), because a commander with an empty purse and an empty hold could never trade again. Even the cheapest tonne anywhere costs 32.6 CR, so the reserve always buys six tonnes. With exactly 3,500 CR the Mk2 over Mk1 is allowed; with 3,499 it isn't (tested).
+- Tiers of one kind **replace one another**, and a kind never affects another (owning a Mk2 cargo bay doesn't make a Mk1 fuel tank "worse").
+- The tier you're replacing is **traded in at half its list price**, so Cargo Bay Mk1 → Mk2 costs 4,200 − 900 = 3,300 CR and Fuel Tank Mk1 → Mk2 costs 3,500 − 1,000 = 2,500 CR. Buying Mk2 directly costs the full list price. The docking computer has no trade-in.
+- You can't buy something you already have (`Installed`) or a lesser tier than you have (`HaveBetter`).
+- An upgrade must **leave you at least 200 CR** (`upgradeReserveCredits`), because a commander with an empty purse and an empty hold could never trade again. Even the cheapest tonne anywhere costs 32.6 CR, so the reserve always buys six tonnes. The boundaries are exact and tested: Fuel Mk1 is refused at 2,199 CR and allowed at 2,200; the docking computer at 2,699 and 2,700; Fuel Mk2 over Mk1 at 2,699 and 2,700.
 
-To add an upgrade, add a row to `upgradeCatalogue()`, give it an effect where the commander or ship is built, and the outfitting page lists it automatically.
+`installUpgrade()` fits an upgrade to the commander, and `buyUpgrade()` takes the credits first. The new tank size reaches the ship at once through `SystemScene::syncShipLoad()`. A bigger tank does **not** fill itself: the fuel aboard stays what it was, and refuelling at the station tops it up.
+
+To add an upgrade, add a row to `upgradeCatalogue()` (and, for a new kind, a case in `installedTier()` and `installUpgrade()`), and the outfitting page lists it automatically.
 
 ### How the numbers were chosen
 
@@ -964,6 +973,7 @@ A save (`SaveGame` in `include/systems/save_game.h++`) holds:
 | `systemIndex`, `systemName` | where you saved; the name is stored for the slot screen only |
 | `fuel` | tonnes aboard |
 | `cargo`, `cargoModule` | tonnes of each good in the hold, and the fitted bay (0 none, 1 Mk1, 2 Mk2) |
+| `fuelTank`, `autoDock` | the fitted fuel tank module (0, 1, 2) and whether the docking computer has been bought |
 | `galaxyTime` | the trading economy's clock, in game seconds |
 | `stocks` | every market stock that has moved a few percent from its baseline |
 | `agents` | all 300 trader agents: where each is, where it's going, what it carries |
@@ -993,7 +1003,7 @@ Setting the `DUSK_SAVE_DIR` environment variable overrides all of these, which i
 A save is a small, readable text file:
 
 ```text
-dusk-save 2
+dusk-save 3
 name=NICK
 credits=853.1
 galaxySeed=1337
@@ -1002,6 +1012,8 @@ systemName=JorEl Minor
 fuel=6
 playTime=312.4
 cargoModule=1
+fuelTank=2
+autoDock=1
 cargo=Base ores,3
 cargo=Food,7
 galaxyTime=2112.4
@@ -1012,7 +1024,7 @@ agent=412,415,2120.6,Wines,50,9
 savedAt=2026-10-05 20:44
 ```
 
-Version 2 added the hold, the bay and the trading economy. Version 1 saves still load: they come back with an empty hold, no bay, and a fresh economy. A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
+Version 2 added the hold, the bay and the trading economy; version 3 added the fuel tank and the docking computer. Older saves still load: a version 1 save comes back with an empty hold, no bay and a fresh economy, and a version 2 save comes back with the standard tank and no docking computer (you'd pay the Union tug until you buy one). A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
 
 Three choices keep it robust:
 
@@ -1049,11 +1061,41 @@ Fuel carries over between systems: `enterSystem()` rebuilds the world but keeps 
 | Half | 18 t | 16.3 s | 1.28 s | 200 u/s² |
 | Full | 21 t | 19.0 s | 1.40 s | 171 u/s² |
 
-The thruster forces are tuned so the ship handles at half a tank exactly as it always did. A full tank is a little sluggish, and a nearly empty one lively.
+The thruster forces are tuned so the ship handles at half a standard tank exactly as it always did. A full tank is a little sluggish, and a nearly empty one lively.
 
-Rotation scales too, through `shipMassRatio()`: total mass divided by the half-tank reference mass. The turn spin-up and stop times are multiplied by the ratio (more inertia for the RCS to fight), and the top turn rate is divided by its square root. Because everything goes through `shipTotalMass()`, cargo slows the ship down in just the same way: a full Mk2 hold on a full tank is 41 t and takes 37 seconds to reach top speed.
+Rotation scales too, through `shipMassRatio()`: total mass divided by a fixed reference mass (the hull plus half of the *standard* 6 t tank, 18 t). The turn spin-up and stop times are multiplied by the ratio (more inertia for the RCS to fight), and the top turn rate is divided by its square root. Because everything goes through `shipTotalMass()`, cargo slows the ship down in just the same way: a full Mk2 hold on a standard full tank is 41 t and takes 37 seconds to reach top speed.
+
+**Tank modules.** `include/objects/fuel_tank.h++` defines the tank sizes: 6 t standard, 10 t with a Mk1 tank (+4 t), 14 t with a Mk2 (+8 t; it replaces Mk1). Jump range is fuel ÷ 0.15 t per light year, so a full tank reaches 40, 66.7 or 93.3 light years. The commander's `fuelTank` module is copied onto `Ship::fuelCapacity` every step, and `enterSystem()` sets the capacity *before* clamping the carried fuel to it, so fuel above 6 t survives a hyperspace jump (tested: a jump of 7.2 LY burned exactly 1.08 t from a 12 t fill on a 14 t tank).
+
+The handling reference mass is fixed on purpose. When it followed the fitted tank, a bigger tank raised the reference and made the ship turn *faster* at the same weight, the opposite of what more capacity should do. Now a ship with 3 t aboard handles identically with a 6 t or a 14 t tank (checked: 16.29 s and 1.28 s for both). Extra capacity costs mass only when you fill it. The heaviest possible loadout, a full Mk2 tank and a full Mk2 hold, is 49 t: 44 seconds to top speed and a 2.25 second 90° turn.
 
 **HUD.** A FUEL bar sits under THR and SPD. It turns red below a fifth of the tank and shows the tonnes left beside it. The total mass is shown at the top right of the speed block, and a gold HOLD bar under the fuel bar shows tonnes of cargo against hold size.
+
+## Docking Fees
+
+Every docking pays the Space Union. The rules are in `include/systems/docking_fees.h++`:
+
+| Ship | Charge |
+| --- | --- |
+| with a docking computer | **15 CR** (`dockingFee`) |
+| without one | **250 CR** (`unionTugFee`): a Union tug flies the ship in |
+
+**Why a tug.** The docking computer is a paid upgrade (2,500 CR), but a new commander has 1,000 CR and there is no manual docking yet. If docking simply required the computer, anyone who launched before affording it could never dock again: no selling, no refuelling, no saving, and no way to earn the money. So without the computer, `C` still docks you, by the same autopilot, for the tug's higher charge. The computer then pays for itself by saving 235 CR on every docking, roughly 11 trips.
+
+**How the price was chosen.** I simulated a greedy trader paying a charge at every docking and counted the trades needed to earn 2,700 CR (the 2,500 CR computer plus the 200 CR reserve) from 1,000 CR:
+
+| Charge per docking | Trades to afford the computer |
+| --- | --- |
+| 15 CR | 4.4 |
+| 150 CR | 5.7 |
+| 250 CR | 6.6 |
+| 450 CR | 8.7 |
+
+At 250 CR the computer is a real early goal (about seven good trades, around 16 minutes from an optimal trader) without being a grind. A human trader will be slower than this simulation.
+
+**When it's charged.** `SystemScene::chargeDockingFee()` takes the fee when a docking *completes*. It is not taken when you cancel (an early cancel is free, tested), and not when a saved game loads you straight into a station, since you didn't dock. A message names the fee, `SPACE UNION DOCKING FEE -15 CR` or `UNION TUG FEE -250 CR`, and the `[C]` prompt shows it beforehand (`[C] DOCKING COMPUTER  15 CR`, `[C] UNION TUG  250 CR`).
+
+**The Union takes at most what you have.** A commander with nothing in their purse and a hold of goods to sell must still be able to dock, or they could never earn their way out. So `chargeForDocking()` takes `min(fee, credits)`: with 100 CR a tug docking costs 100 CR, and with 0 CR it's free. The message adds `(ALL YOU HAD)` when the fee wasn't covered.
 
 ## Station Services
 
@@ -1756,6 +1798,8 @@ This is still intentionally small:
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
 - Missions don't exist yet, so trading is the only way to earn credits.
+- There is no manual docking, which is why a Union tug exists (see [Docking Fees](#docking-fees)). Once manual docking exists, the tug could become a rarely-needed service and the computer a pure convenience.
+- Fuel is only ever bought at stations; there's no fuel scooping from stars, and no way to refuel in open space.
 - Saving is only possible while docked, and a save holds the commander, credits, fuel, hold, bay, system and play time, plus the trading economy. Nothing else about the world is saved; it's regenerated from the seed.
 - Trader agents are galaxy-level, not ships in the 3D scene: you see their effect in stock and prices and in the market page's trader note, but you can't fly up to one or trade with one. The ambient NPC ships you do see don't carry cargo.
 - There is no illegal cargo, no piracy, and no cargo loss: goods can't be stolen, jettisoned or damaged.

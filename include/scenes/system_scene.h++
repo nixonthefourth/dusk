@@ -17,6 +17,7 @@
 #include "systems/docking_computer.h++"
 #include "ui/galaxy_map.h++"
 #include "ui/menu_button.h++"
+#include "systems/docking_fees.h++"
 #include "systems/save_game.h++"
 #include "systems/trading.h++"
 #include "systems/upgrades.h++"
@@ -165,7 +166,14 @@ public:
             {
                 // The docking computer flies to the station, so lock it as the target too.
                 if (docking::engage(docking_, world_))
+                {
                     world_.target.type = TargetType::Station;
+
+                    char note[96];
+                    std::snprintf(note, sizeof(note), commander_.hasDockingComputer ? "DOCKING COMPUTER ENGAGED  (FEE %.0f CR)" : "UNION TUG ENGAGED  (%.0f CR ON ARRIVAL)",
+                                  dockingChargeFor(commander_));
+                    docking::showMessage(docking_, note, 3.f);
+                }
             }
             else
             {
@@ -301,7 +309,10 @@ public:
         docking::update(docking_, world_, dt);
 
         if (phaseBefore != DockingPhase::Docked && docking_.phase == DockingPhase::Docked)
+        {
+            chargeDockingFee();
             openStationMenu();
+        }
 
         // The galaxy's traders carry on while you play, and the ship feels what's in its hold.
         trade_.advance(trade_.time() + static_cast<double>(dt));
@@ -432,8 +443,8 @@ private:
         const float carriedFuel = world_.playerShip.fuel;
 
         world_ = World();
+        syncShipLoad(); // sets the tank size from the fitted module before the carried fuel is clamped to it
         world_.playerShip.fuel = std::min(carriedFuel, world_.playerShip.fuelCapacity);
-        syncShipLoad();
         docking_ = DockingComputer();
         stationMenuOpen_ = false;
         wasCruising_ = false;
@@ -614,7 +625,7 @@ private:
         }
 
         for (const ShipUpgrade& upgrade : upgradeCatalogue())
-            view.upgrades.push_back({upgrade.name, upgrade.description, upgrade.price, offerFor(upgrade, commander_.cargoModule, commander_.credits)});
+            view.upgrades.push_back({upgrade.name, upgrade.description, upgrade.price, offerFor(upgrade, commander_)});
 
         view.saveSlot = saveSlot_;
         view.hasSave = slotSummary_.has_value();
@@ -716,9 +727,28 @@ private:
         return text;
     }
 
-    /** Copies the hold onto the ship, so the thrusters, turn rate and HUD all feel what's carried. */
+    /**
+     * Takes the Space Union's docking fee when a docking completes (not when it's cancelled, and
+     * not when a saved game loads straight into the station), and says what was taken.
+     */
+    void chargeDockingFee()
+    {
+        const bool computer = commander_.hasDockingComputer;
+        const DockingCharge charge = chargeForDocking(commander_);
+        char message[96];
+
+        if (charge.paid + 0.5 >= charge.due)
+            std::snprintf(message, sizeof(message), "%s  -%.0f CR", computer ? "SPACE UNION DOCKING FEE" : "UNION TUG FEE", charge.paid);
+        else
+            std::snprintf(message, sizeof(message), "%s  -%.0f CR (ALL YOU HAD)", computer ? "SPACE UNION DOCKING FEE" : "UNION TUG FEE", charge.paid);
+
+        docking::showMessage(docking_, message, 4.f);
+    }
+
+    /** Copies the hold and the fitted tank onto the ship, so the thrusters, turn rate and HUD all feel them. */
     void syncShipLoad()
     {
+        world_.playerShip.fuelCapacity = commander_.fuelCapacity();
         world_.playerShip.cargoMass = static_cast<float>(commander_.cargo.total());
         world_.playerShip.cargoCapacity = static_cast<float>(commander_.cargoCapacity());
     }
@@ -811,6 +841,8 @@ private:
         save.fuel = world_.playerShip.fuel;
 
         save.cargoModule = static_cast<int>(commander_.cargoModule);
+        save.fuelTank = static_cast<int>(commander_.fuelTank);
+        save.autoDock = commander_.hasDockingComputer;
 
         for (int good = 0; good < goodCount; ++good)
         {
@@ -852,6 +884,8 @@ private:
         commander_.credits = save.credits;
 
         commander_.cargoModule = cargoModuleFromInt(save.cargoModule);
+        commander_.fuelTank = fuelTankFromInt(save.fuelTank);
+        commander_.hasDockingComputer = save.autoDock;
         commander_.cargo = {};
 
         for (const auto& [name, tonnes] : save.cargo)
@@ -1107,7 +1141,12 @@ private:
         std::string status = docking::phaseLabel(docking_.phase);
 
         if (docking_.phase == DockingPhase::Idle && world_.stationActive)
-            status = "[C] DOCKING COMPUTER";
+        {
+            // The prompt says what docking will cost: the computer's fee, or the Union tug's.
+            char prompt[64];
+            std::snprintf(prompt, sizeof(prompt), commander_.hasDockingComputer ? "[C] DOCKING COMPUTER  %.0f CR" : "[C] UNION TUG  %.0f CR", dockingChargeFor(commander_));
+            status = prompt;
+        }
         else if (docking::canCancel(docking_))
             status += "   [C] CANCEL";
         else if (docking_.phase == DockingPhase::Docked && !stationMenuOpen_)

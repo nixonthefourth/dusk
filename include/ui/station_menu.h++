@@ -39,7 +39,7 @@ inline const std::array<StationService, 7> stationServices =
 {{
     {StationPage::Refuel, "REFUEL", true, "Top up the tank. Fuel is priced by the local economy."},
     {StationPage::Market, "MARKET", true, "Buy and sell trade goods. Each system sells what it makes cheap and pays more for what it lacks."},
-    {StationPage::Outfitting, "UPGRADES", true, "Fit a bigger cargo bay. More upgrades will follow."},
+    {StationPage::Outfitting, "UPGRADES", true, "Cargo bays, fuel tanks and a docking computer."},
     {StationPage::Missions, "MISSIONS", false, "Take on courier runs, deliveries and contracts for credits."},
     {StationPage::Garage, "GARAGE", false, "Store, swap and buy ships."},
     {StationPage::SaveGame, "SAVE GAME", true, "Save your progress to this commander's slot, load the last save, or return to the main menu."},
@@ -416,7 +416,8 @@ private:
     /** Height of one row in the market table, and where the table starts on the page (under the title and column heads). */
     static constexpr float marketRowHeight = 21.f;
     static constexpr float tableTop = 66.f;
-    static constexpr float upgradeRowHeight = 58.f;
+    static constexpr float upgradeRowHeight = 46.f;
+    static constexpr float upgradeRowGap = 6.f;
 
     /** Row `index` of the selected page's list: a market line or an upgrade card. */
     sf::FloatRect rowBounds(sf::Vector2u size, int index) const
@@ -426,7 +427,7 @@ private:
         if (selectedPage() == StationPage::Market)
             return {{page.position.x, page.position.y + tableTop + static_cast<float>(index) * marketRowHeight}, {page.size.x, marketRowHeight}};
 
-        return {{page.position.x, page.position.y + 44.f + static_cast<float>(index) * (upgradeRowHeight + 8.f)}, {page.size.x, upgradeRowHeight}};
+        return {{page.position.x, page.position.y + 44.f + static_cast<float>(index) * (upgradeRowHeight + upgradeRowGap)}, {page.size.x, upgradeRowHeight}};
     }
 
     /** The page's action buttons, side by side along its bottom, sharing the width: 0 is the main action. */
@@ -723,8 +724,9 @@ private:
     }
 
     /**
-     * The outfitting page: each upgrade as a card with its description and what it would cost you
-     * (after the trade-in on whatever it replaces), your current hold, and an INSTALL button.
+     * The outfitting page: each upgrade as a compact card with its description and what it would
+     * cost you (after the trade-in on whatever it replaces), a one-line reminder of the rules, and
+     * an INSTALL button. Cards for what you already have show INSTALLED.
      */
     void drawUpgradesPage(sf::RenderTarget& target, const sf::Font& font, const StationMenuView& view, sf::Vector2u size, const sf::FloatRect& page) const
     {
@@ -745,21 +747,21 @@ private:
             target.draw(card);
 
             const bool usable = upgrade.offer.status == UpgradeStatus::Available || upgrade.offer.status == UpgradeStatus::CantAfford;
-            drawText(target, font, upgrade.name, {bounds.position.x + 14.f, bounds.position.y + 7.f}, 22, usable ? style::textPrimary : style::textDim);
-            drawText(target, font, upgrade.description, {bounds.position.x + 14.f, bounds.position.y + 34.f}, 15, style::textSecondary);
+            drawText(target, font, upgrade.name, {bounds.position.x + 12.f, bounds.position.y + 4.f}, 19, usable ? style::textPrimary : style::textDim);
+            drawText(target, font, upgrade.description, {bounds.position.x + 12.f, bounds.position.y + 26.f}, 14, style::textSecondary);
 
             // Right-hand side: the price you'd pay, or why you can't.
-            const float right = bounds.position.x + bounds.size.x - 14.f;
+            const float right = bounds.position.x + bounds.size.x - 12.f;
             char buffer[64];
 
             switch (upgrade.offer.status)
             {
                 case UpgradeStatus::Installed:
-                    drawText(target, font, "INSTALLED", {right, bounds.position.y + 16.f}, 20, style::profit, 1.f);
+                    drawText(target, font, "INSTALLED", {right, bounds.position.y + 12.f}, 18, style::profit, 1.f);
                     break;
 
                 case UpgradeStatus::HaveBetter:
-                    drawText(target, font, "YOU HAVE BETTER", {right, bounds.position.y + 18.f}, 16, style::textDim, 1.f);
+                    drawText(target, font, "YOU HAVE BETTER", {right, bounds.position.y + 14.f}, 14, style::textDim, 1.f);
                     break;
 
                 case UpgradeStatus::Available:
@@ -767,30 +769,21 @@ private:
                 {
                     const bool affordable = upgrade.offer.status == UpgradeStatus::Available;
                     std::snprintf(buffer, sizeof(buffer), "%.0f CR", upgrade.offer.cost);
-                    drawText(target, font, buffer, {right, bounds.position.y + 8.f}, 22, affordable ? style::accent : style::warning, 1.f);
+                    drawText(target, font, buffer, {right, bounds.position.y + 3.f}, 20, affordable ? style::accent : style::warning, 1.f);
 
                     if (upgrade.offer.cost < upgrade.listPrice - 0.5)
-                    {
-                        std::snprintf(buffer, sizeof(buffer), "AFTER TRADE-IN  (LIST %.0f)", upgrade.listPrice);
-                        drawText(target, font, buffer, {right, bounds.position.y + 34.f}, 13, style::textDim, 1.f);
-                    }
+                        drawText(target, font, "AFTER TRADE-IN", {right, bounds.position.y + 27.f}, 12, style::textDim, 1.f);
                     else if (!affordable)
-                    {
-                        drawText(target, font, "NOT ENOUGH CREDITS", {right, bounds.position.y + 34.f}, 13, style::warning, 1.f);
-                    }
+                        drawText(target, font, "NOT ENOUGH CREDITS", {right, bounds.position.y + 27.f}, 12, style::warning, 1.f);
 
                     break;
                 }
             }
         }
 
-        const float infoY = rowBounds(size, static_cast<int>(view.upgrades.size())).position.y + 6.f;
-        char buffer[96];
-        std::snprintf(buffer, sizeof(buffer), "FITTED  %s   HOLD %d t", view.cargoModuleName.c_str(), view.cargoCapacity);
-        drawText(target, font, buffer, {x, infoY}, 17, style::cargoBar);
-        const std::string note = "AN UPGRADE LEAVES YOU AT LEAST " + std::to_string(static_cast<int>(upgradeReserveCredits))
-            + " CR TO TRADE WITH. THE MODULE IT REPLACES IS TRADED IN AT HALF PRICE.";
-        drawParagraph(target, font, note, {x, infoY + 26.f}, page.size.x, 15, style::textDim);
+        const float noteY = rowBounds(size, static_cast<int>(view.upgrades.size())).position.y + 2.f;
+        const std::string note = "KEEPS " + std::to_string(static_cast<int>(upgradeReserveCredits)) + " CR IN RESERVE   REPLACED MODULES TRADE IN AT HALF PRICE";
+        drawText(target, font, note, {x, noteY}, 14, style::textDim);
 
         const UpgradeRowView* current = selectedUpgrade_ < static_cast<int>(view.upgrades.size()) ? &view.upgrades[static_cast<std::size_t>(selectedUpgrade_)] : nullptr;
         drawPageButton(target, font, size, 0, "INSTALL", current && current->offer.status == UpgradeStatus::Available);

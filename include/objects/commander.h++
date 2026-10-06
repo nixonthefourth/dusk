@@ -7,6 +7,7 @@
 #define DUSK_COMMANDER_H
 
 #include "objects/cargo.h++"
+#include "objects/fuel_tank.h++"
 #include <algorithm>
 #include <string>
 
@@ -24,6 +25,16 @@ struct Commander {
     /** What the hold carries, and the cargo bay module fitted to it. */
     CargoHold cargo;
     CargoModule cargoModule = CargoModule::None;
+
+    /** The fitted fuel tank module, and whether the ship has a docking computer (a paid upgrade). */
+    FuelTankModule fuelTank = FuelTankModule::None;
+    bool hasDockingComputer = false;
+
+    /** Tank size in tonnes: 6 standard, 10 with a Mk1 tank, 14 with a Mk2 tank. */
+    float fuelCapacity() const
+    {
+        return fuelCapacityFor(fuelTank);
+    }
 
     /** Hold space in tonnes: 10 standard, 15 with a Mk1 bay, 20 with a Mk2 bay. */
     int cargoCapacity() const
