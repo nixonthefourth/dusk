@@ -1,7 +1,9 @@
 //
 // Created by Mykyta Khomiakov on 26/07/2026.
 //
-// Base prices for goods and per-system price modifiers. Groundwork for trading; not yet used in play.
+// The galaxy's reference prices for goods, and how a system's economy tier moves them. The live
+// markets, with supply, demand and trader agents, are built on these in systems/trading.h++;
+// computeSystemPrices() below is the older "on paper" price list, kept as a quick estimate.
 //
 
 #ifndef DUSK_ECONOMY_H

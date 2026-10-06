@@ -449,6 +449,14 @@ private:
         std::snprintf(fuel, sizeof(fuel), "%.1f", ship.fuel);
         drawText(target, fuel, {x + 40.f + barWidth, top + 68.f}, 14, fuelFraction < 0.2f ? style::fuelLow : style::textDim);
 
+        // Cargo gauge: tonnes in the hold against the hold's size (the bay module sets the size).
+        const float cargoFraction = ship.cargoCapacity > 0.f ? ship.cargoMass / ship.cargoCapacity : 0.f;
+        drawFillBar(target, "HOLD", {x, top + 92.f}, barWidth, cargoFraction, style::cargoBar);
+
+        char cargo[24];
+        std::snprintf(cargo, sizeof(cargo), "%.0f/%.0f", static_cast<double>(ship.cargoMass), static_cast<double>(ship.cargoCapacity));
+        drawText(target, cargo, {x + 40.f + barWidth, top + 84.f}, 14, style::textDim);
+
         // Flight-assist state gets its own colour (blue when on, orange when off); the cruise
         // status that follows it is drawn separately in the accent.
         const std::string assist = ship.flightAssist ? "FA ON" : "FA OFF";
@@ -465,8 +473,8 @@ private:
         else
             cruise = "[J] CRUISE";
 
-        const float assistWidth = drawText(target, assist, {x, top + 92.f}, 17, ship.flightAssist ? style::assistOn : style::assistOff);
-        drawText(target, cruise, {x + assistWidth + 16.f, top + 92.f}, 17, hasCruiseFuel(ship) ? style::accent : style::warning);
+        const float assistWidth = drawText(target, assist, {x, top + 101.f}, 17, ship.flightAssist ? style::assistOn : style::assistOff);
+        drawText(target, cruise, {x + assistWidth + 16.f, top + 101.f}, 17, hasCruiseFuel(ship) ? style::accent : style::warning);
     }
 
     /**

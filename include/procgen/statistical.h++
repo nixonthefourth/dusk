@@ -141,7 +141,7 @@ inline std::vector<std::string> goodsForOccupation(const std::string& occupation
     if (occupation == "Mining")
         return {"Base ores", "Advanced ores", "Chemical fuel"};
 
-    if (occupation == "Engineering and tech")
+    if (occupation == "Engineering and Tech")
         return {"Silicon chips", "Advanced electronics", "Books"};
 
     return {"Food", "Liquor", "Wines", "Furs", "Animals"};
@@ -253,7 +253,20 @@ inline SystemInfo generateSystemInfo(std::uint32_t systemSeed)
     info.economyTier = generateEconomyTier(rng);
     info.npcShipCount = generateNpcShipCount(rng, info.economyTier);
     info.occupation = generateOccupation(rng);
-    info.goods = generateGoods(rng, info.occupation);
+
+    // Tech systems used to roll farm goods (a capital-letter mismatch in goodsForOccupation()
+    // sent them down the default branch), which left the most valuable goods almost unobtainable.
+    // The shared stream still makes that same roll, so nothing drawn after it moves; the goods
+    // tech systems really export come from a stream of their own.
+    const bool engineering = info.occupation == "Engineering and Tech";
+    info.goods = generateGoods(rng, engineering ? std::string("Agricultural") : info.occupation);
+
+    if (engineering)
+    {
+        std::mt19937 techGoodsRng(systemSeed ^ 0x7EC40E5u);
+        info.goods = generateGoods(techGoodsRng, info.occupation);
+    }
+
     info.planetCount = generatePlanetCount(rng);
     info.stationCount = generateStationCount(rng, info.economyTier);
 

@@ -6,6 +6,8 @@
 #ifndef DUSK_COMMANDER_H
 #define DUSK_COMMANDER_H
 
+#include "objects/cargo.h++"
+#include <algorithm>
 #include <string>
 
 /**
@@ -14,10 +16,26 @@
  */
 struct Commander {
     /** A nod to Elite's default commander. */
-    std::string name = "JAMESON";
+    std::string name = "JAMES";
 
-    /** Credit balance. There is no way to earn credits yet; missions will add one. */
+    /** Credit balance. Trading earns it; missions will too. */
     double credits = 1000.0;
+
+    /** What the hold carries, and the cargo bay module fitted to it. */
+    CargoHold cargo;
+    CargoModule cargoModule = CargoModule::None;
+
+    /** Hold space in tonnes: 10 standard, 15 with a Mk1 bay, 20 with a Mk2 bay. */
+    int cargoCapacity() const
+    {
+        return cargoCapacityFor(cargoModule);
+    }
+
+    /** Free hold space in tonnes. */
+    int cargoRoom() const
+    {
+        return std::max(0, cargoCapacity() - cargo.total());
+    }
 };
 
 #endif //DUSK_COMMANDER_H

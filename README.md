@@ -22,7 +22,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - An OBJ-modelled space station procedurally placed in orbit around a random planet, in systems that roll one. It spins Elite-style around its docking axis, with the slot facing along its orbit.
 - A docking computer: press `C` and the ship flies itself to the station, lines up, matches the station's spin, and slides into the docking slot. Once docked, the station screen opens; launching backs the ship out, turns it around, and hands control back.
 - Simple-reflex NPC ships that roam, avoid planets and stars, occasionally head to the station and dock, and periodically "warp out" and back in — no memory, no planning, just current-state reflexes.
-- An "on-paper" economy and system-flavor layer: procedural system names, an economy tier, a dominant occupation, a handful of tradeable goods, and derived prices per system — generated, but not yet wired into any in-game trading UI.
+- A living trade economy: every system has its own market, prices follow supply and demand, you buy and sell at stations, and 300 simple-reflex trader agents move goods between systems on their own. Tech systems now really export tech goods, a bug that had left the best goods almost unobtainable.
 - A camera that chases the ship from behind, plus an orbit "showcase" mode.
 - A wireframe ship rendered from a vector model, with face culling and hidden-underside edges.
 - OBJ loading, so you can swap the built-in ship for any triangulated wireframe model — the project ships with a `banshee.obj` model, used for both the player ship and every NPC ship.
@@ -38,6 +38,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - A recycled, endless-feeling starfield.
 - Frustum clipping for both points and line segments, with a small side guard-band so things don't visibly pop in at the frustum edges.
 - A system's star drawn as a solid filled disc, and its planets drawn as gridded, optionally ringed wireframes — sorted and drawn back-to-front together, with per-edge visibility shading based on facing direction.
+- Trading: a market page at every station, a 10 t hold you can enlarge with Cargo Bay Mk1 (15 t) and Mk2 (20 t), and cargo that counts as real mass, so a loaded ship handles like a freighter.
 - Three save slots: name a new commander, save at any station, and load from the main menu or the station screen.
 - Fuel with mass: a 6-tonne tank limits how far you can jump (40 LY full) and how long you can cruise (about ten minutes flat out), and every tonne aboard makes the ship slower to accelerate and to turn.
 - A station screen while docked: refuelling at local prices with your credits, launch, and pages laid out for market, upgrades, missions and a garage.
@@ -69,7 +70,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [~] Procedural world generation
   - [x] Planets per system
   - [x] Systems (1000 generated per galaxy today)
-  - [~] In-system and inter-system economy — prices compute per system, no trading UI yet
+  - [x] In-system and inter-system economy — per-system markets, trading at stations, and trader agents moving goods between systems
   - [x] Simple-reflex agent (S-RA) NPC ships
   - [ ] Missions
 - [ ] End goal: reach the centre of the galaxy
@@ -78,7 +79,7 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [x] Objects act upon one another — the star and every planet exert real gravity on each other and on the ship
   - [x] Flight assist: velocity-holding thruster control, switchable back to raw Newtonian flight
   - [x] In-system cruise drive with mass locking
-  - [ ] Towed cargo mass affects ship handling (every thruster already divides by `mass`, so this is mostly bookkeeping)
+  - [x] Cargo mass affects ship handling (every thruster divides by the total mass: hull, fuel and cargo)
 - [x] Phase-space warp between system nodes — a countdown, jump and hyperspace-tunnel sequence (see [Travel Animations](#travel-animations))
 - [x] Galactic map
 - [x] System map
@@ -91,9 +92,10 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [x] OBJ-loaded models
   - [x] Stars
   - [x] Planets
-- [ ] Dynamic S-RA economy driven by supply and demand
+- [x] Dynamic S-RA economy driven by supply and demand (see [Trading And Cargo](#trading-and-cargo))
 - [x] System economy tiers (Poor / Developing / Progressive)
 - [x] Tradeable goods (silicon chips, food, liquor, wines, ores, electronics, furs, animals, books, chemical fuel)
+- [x] Buying and selling goods at stations, with cargo bay upgrades (Mk1 +5 t, Mk2 +10 t)
 - [x] World occupations (mining, engineering and tech, agricultural)
 - [ ] Mission variety (live cargo transport, mining, bounty hunting, cargo transport, station defence/offence)
 - [x] NPC interactions — NPC ships roam, dock, and warp on their own; nothing talks to the player yet
@@ -147,7 +149,7 @@ The main menu has three screens:
   - `Enter` loads an occupied slot, or starts a new game in an empty one.
   - `D` or `Delete` asks to delete the selected slot; press it again (or `Enter`) to confirm, anything else cancels.
   - `Escape` goes back to the title. The mouse works throughout: click a card, its DELETE button, or BACK.
-- **Naming** (new games). Type your commander's name: letters, digits, spaces, hyphens, apostrophes and full stops, shown in capitals, up to 16 characters. `Backspace` deletes, `Enter` starts, and `Escape` goes back to the slots. Leave it blank to fly as JAMESON.
+- **Naming** (new games). Type your commander's name: letters, digits, spaces, hyphens, apostrophes and full stops, shown in capitals, up to 16 characters. `Backspace` deletes, `Enter` starts, and `Escape` goes back to the slots. Leave it blank to fly as JAMES.
 
 Playable scenes use a ship-first input pipeline:
 
@@ -194,10 +196,12 @@ While a map is open, flight controls are paused (the ship carries on under fligh
 
 While docked:
 
-- The station screen opens automatically. Services are listed on the left: REFUEL, MARKET, UPGRADES, MISSIONS, GARAGE (the middle three marked SOON for now) and LAUNCH.
-- `Up`/`Down` (or `W`/`S`, `Tab`) choose a service. `Enter`/`Space` does the page's main action: fill the tank on REFUEL, launch on LAUNCH.
+- The station screen opens automatically. Services are listed on the left: REFUEL, MARKET, UPGRADES, MISSIONS, GARAGE (the last two marked SOON for now), SAVE GAME and LAUNCH.
+- `Up`/`Down` (or `W`/`S`, `Tab`) choose a service. `Enter`/`Space` does the page's main action: fill the tank on REFUEL, launch on LAUNCH, or open the list on MARKET and UPGRADES.
 - On REFUEL, `B` buys one tonne.
-- `L` launches from any page, and `Escape` closes the screen (you stay docked). The mouse works throughout.
+- **In the market list:** `Up`/`Down` choose a good, `B` (or `Enter`) buys a tonne and `Shift+B` buys as much as your hold, the stock and your credits allow, `S` sells a tonne and `Shift+S` sells all of that good. `Left`, `Tab` or `Escape` return to the service list. The BUY 1 / BUY MAX / SELL 1 / SELL ALL buttons do the same by mouse.
+- **In the upgrades list:** `Up`/`Down` choose an upgrade and `Enter` installs it.
+- `L` launches from any page, and `Escape` in the service list closes the screen (you stay docked). The mouse works throughout.
 - SAVE GAME shows your slot and what's saved in it. `Enter` saves; LOAD (click) restores the last save; MAIN MENU (click) returns to the title.
 - With the screen closed: `Enter` reopens it, `L` launches.
 
@@ -233,6 +237,7 @@ include/
     planet.h++
     asteroid.h++
     commander.h++
+    cargo.h++
     star.h++
     collision_body.h++
 
@@ -254,6 +259,8 @@ include/
     travel_effects.h++
     refuelling.h++
     save_game.h++
+    trading.h++
+    upgrades.h++
     orbital_physics.h++
     npc_ai.h++
     docking_computer.h++
@@ -319,7 +326,7 @@ Every frame runs the same fixed sequence. Knowing it makes it much easier to see
 1. **Frame time.** `dt` is the time since the last frame, capped at 0.1 s. A stalled frame (dragging the window, a breakpoint) is simply lost, instead of being simulated in one enormous step that would fling ships and planets.
 2. **Events.** Every queued SFML event is handled:
    - closing the window quits;
-   - `Escape` quits unless the scene `capturesEscape()` (it does while a map is open or a hyperspace countdown is running);
+   - `Escape` quits unless the scene `capturesEscape()` (it does while a map or the station screen is open, or a hyperspace countdown is running);
    - every event is then passed to `Scene::handleEvent()`, which is where the maps, target lock, docking computer and station screen react to key presses and mouse clicks.
 3. **Transitions.** If the scene asked for one (PLAY or EXIT on the menu), `applySceneTransition()` swaps scenes and resets the input and camera state that lives in `main.cpp`.
 4. **Ship input.** If `acceptsShipInput()` is true, `updateShipFromKeyboard()` turns held keys into pilot intent on the ship: throttle, yaw and pitch demands, the precision modifier, and the reverse, flight-assist and cruise toggles. It never moves the ship itself. The scene returns false while a map is open, while the docking computer flies, and during a hyperspace jump.
@@ -549,7 +556,8 @@ struct Ship {
     float hyperspaceFuelPerLightYear = 0.15f;  // 40 LY on a full tank
     float cruiseFuelPerSecond = 0.01f;  // at full cruise speed
     bool usesFuel = true;               // false for NPCs
-    float cargoMass = 0.f;              // reserved for trading
+    float cargoMass = 0.f;              // tonnes in the hold (set from the commander each step)
+    float cargoCapacity = 10.f;         // hold size: 10 t, 15 t with a Mk1 bay, 20 t with Mk2
 
     // Linear flight model: acceleration = force / total mass
     float maxThrust = 1260.f;           // main engine: 70 u/s^2 at half a tank
@@ -722,7 +730,7 @@ Masses are set in `planet_generation.h++`. A star's mass is `750 × radius`, whi
 
 Procedural generation lives in `include/procgen/`, split across three files with very different jobs:
 
-- `statistical.h++` generates the cheap, "on-paper" facts about a system — a pronounceable procedural name, an `EconomyTier` (Poor/Developing/Progressive, weighted toward Poor), a dominant occupation, 2–4 goods it best sells, and rolled counts for planets, stations, NPC ships and asteroid belts. NPC counts are then scaled by `npcTrafficMultiplier` (currently 3.0, i.e. triple the base traffic); because counts are small whole numbers, the fractional ship is settled by a dice roll drawn after every other roll, so the galaxy-wide average rises by exactly that factor without changing anything else about any system. All of this is packed into a `SystemInfo` and is cheap enough to generate and hold 1000 of at once, up front.
+- `statistical.h++` generates the cheap, "on-paper" facts about a system — a pronounceable procedural name, an `EconomyTier` (Poor/Developing/Progressive, weighted toward Poor), a dominant occupation, 2–4 goods it best sells, and rolled counts for planets, stations, NPC ships and asteroid belts. NPC counts are then scaled by `npcTrafficMultiplier` (currently 3.0, i.e. triple the base traffic); because counts are small whole numbers, the fractional ship is settled by a dice roll drawn after every other roll, so the galaxy-wide average rises by exactly that factor without changing anything else about any system. All of this is packed into a `SystemInfo` and is cheap enough to generate and hold 1000 of at once, up front. Tech systems' goods come from a stream of their own (see [Trading And Cargo](#goods-and-reference-prices) for why).
 - `galaxy.h++` derives a stable per-system seed from one galaxy seed plus a system index (`deriveSystemSeed()`), and calls `generateSystemInfo()` for every system to build the full `Galaxy` roster.
 - `planet_generation.h++` is where a `SystemInfo` actually becomes a playable `World`: it builds the star, places planets in outward, non-overlapping orbital shells with a real circular-orbit starting velocity, optionally places a station in orbit around a random planet, and works out a spawn pose (`shipSpawnPose()`): a few kilometres out from the station, facing it with its host planet filling the view behind, or facing the innermost planet in systems with no station.
 
@@ -806,11 +814,137 @@ Frequency: after each roam leg an NPC now heads for the station 55% of the time 
 
 `NpcShip::isVisible()` is what `main.cpp`'s render loop checks before drawing an NPC — only `Inactive` (warped out) and `Docked` (inside the station) ships are invisible.
 
-## Economy (On Paper)
+## Trading And Cargo
 
-`include/systems/economy.h++` is a small, pure pricing layer on top of `procgen::SystemInfo`. `computeSystemPrices()` takes a system's rolled goods and economy tier and returns a `GoodPrice` per good — poorer systems pay more for everything, wealthier ones undercut the galaxy-wide base price, and a system's own specialty goods sell at a further local-surplus discount.
+Dusk's economy has four parts, built on one another:
 
-Nothing in the game currently displays these prices or lets the player buy or sell anything — this is infrastructure for the trading/economy loop on the roadmap, deliberately kept as a pure function of already-generated data so it's cheap to call from a future map or station UI without needing its own persistent state yet.
+1. **Goods and reference prices:** what can be traded, and what each good costs on average.
+2. **Markets:** every system's stock of every good, which turns into a price.
+3. **The player's trades:** buying and selling at the station, tonne by tonne.
+4. **Trader agents:** a few hundred simple-reflex traders who move goods between systems on their own, so prices respond to more than just you.
+
+The code is in `include/systems/trading.h++` (markets, prices, quotes, agents), `include/objects/cargo.h++` (goods, the hold, bay modules) and `include/systems/upgrades.h++` (what the outfitters sell). None of it draws anything, so the whole economy can be, and was, tested headless.
+
+### Goods and reference prices
+
+There are 11 goods (`allGoods()`), each with a galaxy base price from `basePriceFor()` in `economy.h++`. Every system exports 2–4 of them, mostly goods that suit its occupation, with a one-in-five chance for each pick to be any good at all:
+
+| Good | Base price (CR/t) | Usually exported by |
+| --- | --- | --- |
+| Food | 40 | Agricultural systems |
+| Books | 55 | Engineering and Tech |
+| Base ores | 60 | Mining |
+| Chemical fuel | 75 | Mining |
+| Liquor | 90 | Agricultural |
+| Animals | 95 | Agricultural |
+| Furs | 120 | Agricultural |
+| Wines | 140 | Agricultural |
+| Silicon chips | 220 | Engineering and Tech |
+| Advanced ores | 260 | Mining |
+| Advanced electronics | 380 | Engineering and Tech |
+
+**A bug fixed on the way.** `goodsForOccupation()` compared against `"Engineering and tech"` while the occupation is spelled `"Engineering and Tech"`, so tech systems silently fell through to the farm goods. Before the fix, Books, Silicon chips and Advanced electronics, the three most interesting goods, were exported by only 6–22 of the 1,000 systems; now about 250 export each. The fix is roll-preserving: the shared random stream still makes the old draw, so every roll after it (planets, stations, traffic, belts) is identical, which was checked for all 1,000 systems. Tech systems' goods come from a stream of their own. Only the goods of tech systems changed.
+
+### How a price is made
+
+A good's price in a system is the reference price times three factors:
+
+```text
+price = reference  x  tier  x  local  x  stock
+```
+
+| Factor | What it is |
+| --- | --- |
+| `tier` | `1 + (tierMultiplier − 1) × 0.4`, so Poor 1.06, Developing 1.00, Progressive 0.94. Fuel uses the full multiplier (13.8 / 12 / 10.2 CR/t); goods use only 40% of it, because with the full effect, buying at a progressive exporter and selling at a poor importer paid over 100% and drowned out every real difference. |
+| `local` | 0.85 for goods the system exports. Otherwise 1.02 + 0.18 × a hash of (system, good), so no two systems price the same goods alike. |
+| `stock` | `clamp((baseline / stock)^0.25, 0.55, 1.8)`. Plentiful stock is cheap, scarce stock dear; stock at its baseline has no effect. |
+
+The dealer takes a 2% spread: you pay the mid price × 1.02, and are paid × 0.98.
+
+Each market's **baseline stock** is 120–200 t for exports and 80–140 t for everything else, fixed per system and good. Stock drifts back toward its baseline with a 600-second time constant, so a market you've pushed around recovers in about ten minutes. Markets update lazily: one is brought up to date only when someone looks at it or trades in it (`marketAt()`), so a thousand systems cost almost nothing to keep.
+
+The market page shows each good's price against the galaxy average, green when cheap and yellow when dear. At JorEl Minor (a progressive mining system, exporting Advanced ores, Base ores and Chemical fuel) those three read −14%, −20% and −16%, and everything else sits within about ±11%.
+
+### Buying and selling
+
+`quoteBuy()` and `quoteSell()` price an order **one tonne at a time**: each tonne is priced at the stock level it finds, then stock moves by a tonne before the next. Large orders therefore pay a little more when buying and receive a little less when selling. A buy stops at whichever limit it hits first: hold room, the station's stock, or your credits. A sale stops at what you carry. Whole tonnes only.
+
+You can't make money by flipping within a system: buying 10 t and selling it straight back loses 3.5–3.8% (the spread plus the slippage), checked across a thousand-system sample. `buy()` and `sell()` apply a quote to the market's stock; `SystemScene::tradeSelectedGood()` moves the goods and credits.
+
+### Trader agents
+
+`TradeNetwork` runs 300 trader agents. They are the economy's other half: their trades move stock, so prices drift for reasons other than you.
+
+Each agent is a **simple-reflex agent** in the textbook sense. It remembers nothing except where it is and what it carries (plus a counter used to vary tie-breaks), and every decision is a condition-action rule on what it can see right now. When an agent's trip ends it applies three rules, in order:
+
+| Rule | Condition (the percept) | Action |
+| --- | --- | --- |
+| 1. Sell | it holds cargo, and the cargo's price here is at least **1.02×** its galaxy reference price | sell everything |
+| 2. Buy | its hold is empty, and some good here costs at most **0.90×** its reference price | load the cheapest, as much as the hold takes (50 t) without taking the market below 25% of its baseline |
+| 3. Move on | always | with cargo, go to the nearest system that doesn't export that good (where it will be dear), choosing among the nearest four by a hash; with an empty hold, go to one of the three nearest systems |
+
+An agent hops only to one of the 8 nearest systems within 40 light years. A hop takes 4.5 game-seconds per light year plus 10–25 seconds in port. The only knowledge beyond the immediate market is which systems export what, which is exactly what the galactic chart tells you too.
+
+Things worth knowing:
+
+- **Agents are bulk freighters (50 t holds) on purpose.** With 12 t holds, price drift from agents averaged 0.4%, which made them decoration. With 50 t it is 1.1% on average, with hot spots of 14–34%, enough to see.
+- **They're measurably sensible.** Over a 4.5-hour headless run, about half of all stops trade and the traders average a 30% margin on the cargo they deliver, with no runaway prices and no negative stock (the lowest stock anywhere was 43 t). The rules stop themselves from over-trading: an importer flooded by a delivery drops its price below the 1.02 threshold, so the next trader carries on elsewhere.
+- **They aren't visible.** Traders live at galaxy level, not in the 3D scene, so the ships you see in a system are still the ambient NPC traffic. Their effects show up as stock and prices, and in a note on the market page: `TRADER LOADED 50 t ADVANCED ORES (3 min ago)`. The note isn't saved, so after loading a game it stays empty until a trader next calls at that system.
+- **The clock.** The galaxy clock advances with your play time, and each hyperspace jump adds 6 game-seconds per light year travelled, so the traders keep moving while you do. A new game runs 30 game-minutes of traders first, so markets begin with some history.
+- **They're deterministic.** Agents start in places chosen from the galaxy seed, and tie-breaks hash the agent and its visit count instead of using random state. Two networks built the same way run an hour apart by exactly 0.0000 t.
+
+### The hold
+
+The standard ship carries **10 t**. A cargo bay module adds to that, and a better module replaces a worse one rather than stacking:
+
+| Module | Adds | Hold |
+| --- | --- | --- |
+| none | | 10 t |
+| Cargo Bay Mk1 | +5 t | 15 t |
+| Cargo Bay Mk2 | +10 t | 20 t |
+
+The hold is a `CargoHold` (whole tonnes per good) on the `Commander`, with the fitted `CargoModule` beside it. `SystemScene::syncShipLoad()` copies its total onto `Ship::cargoMass` and the hold size onto `Ship::cargoCapacity` every step, so the thrusters, the turn rate and the HUD all feel it. It is real mass, exactly like fuel:
+
+| Load | Total mass | 0 → 95% speed | 90° turn | Side thrust |
+| --- | --- | --- | --- | --- |
+| Empty hold, half tank | 18 t | 16.3 s | 1.28 s | 200 u/s² |
+| 10 t, half tank | 28 t | 25.3 s | 1.64 s | 129 u/s² |
+| 15 t (Mk1), half tank | 33 t | 29.9 s | 1.79 s | 109 u/s² |
+| 20 t (Mk2), half tank | 38 t | 34.4 s | 1.94 s | 95 u/s² |
+| 20 t (Mk2), full tank | 41 t | 37.1 s | 2.03 s | 88 u/s² |
+
+A fully loaded freighter is a sluggish one. That only affects flying by hand, since cruise and the docking computer move the ship kinematically. If it feels too heavy, the single place to change it is `shipTotalMass()`.
+
+### Upgrades
+
+`include/systems/upgrades.h++` holds the catalogue, a table of `ShipUpgrade` entries (name, description, price, module):
+
+| Upgrade | List price | Notes |
+| --- | --- | --- |
+| Cargo Bay Mk1 | 1,800 CR | +5 t |
+| Cargo Bay Mk2 | 4,200 CR | +10 t; replaces Mk1 |
+
+`offerFor()` works out what an upgrade would cost you and whether you can have it:
+
+- The module you're replacing is **traded in at half its list price**, so Mk1 → Mk2 costs 4,200 − 900 = 3,300 CR.
+- You can't buy a module you already have (`Installed`) or a lesser one than you have (`HaveBetter`).
+- An upgrade must **leave you at least 200 CR** (`upgradeReserveCredits`), because a commander with an empty purse and an empty hold could never trade again. Even the cheapest tonne anywhere costs 32.6 CR, so the reserve always buys six tonnes. With exactly 3,500 CR the Mk2 over Mk1 is allowed; with 3,499 it isn't (tested).
+
+To add an upgrade, add a row to `upgradeCatalogue()`, give it an effect where the commander or ship is built, and the outfitting page lists it automatically.
+
+### How the numbers were chosen
+
+Prices and upgrade costs came from simulating a greedy trader, who picks the best (good, neighbouring system) pair by profit per unit time using the real quote functions, so slippage is included. My first margins were far too generous: a trader turned 1,000 CR into 4,400 in five trips, and a 1,500 CR bay would have been trivial. The second attempt overcorrected: profit was about 200 CR a trip whatever the hold size, because thin margins vanished into slippage, which would have made cargo upgrades pointless. The final values give:
+
+| Hold | Profit per trip once established (CR) |
+| --- | --- |
+| 10 t | about 500 |
+| 15 t | about 720 |
+| 20 t | about 870 |
+
+From 1,000 CR the greedy trader reaches about 2,600 after five trips. A Mk1 bay (+220 CR/trip) pays for itself in about 8 trips, and a Mk2 (+370 CR/trip over a stock hold) in about 9–11. A real player won't pick the best route every time, so these are upper bounds. All the constants (`exportFactor`, `importFactor*`, `tierInfluence`, `stockPriceExponent`, the stock baselines, `tradeSpread`, the agent thresholds, the upgrade prices) are named at the top of `trading.h++` and `upgrades.h++`.
+
+`economy.h++`'s `computeSystemPrices()`, the older on-paper price list, isn't used by the trading code. It shares `basePriceFor()` and `economyTierMultiplier()` with it, and is kept as a quick estimate for tools.
 
 ## Saving And Loading
 
@@ -829,6 +963,10 @@ A save (`SaveGame` in `include/systems/save_game.h++`) holds:
 | `galaxySeed` | which galaxy you live in (always 1337 for now) |
 | `systemIndex`, `systemName` | where you saved; the name is stored for the slot screen only |
 | `fuel` | tonnes aboard |
+| `cargo`, `cargoModule` | tonnes of each good in the hold, and the fitted bay (0 none, 1 Mk1, 2 Mk2) |
+| `galaxyTime` | the trading economy's clock, in game seconds |
+| `stocks` | every market stock that has moved a few percent from its baseline |
+| `agents` | all 300 trader agents: where each is, where it's going, what it carries |
 | `playTimeSeconds` | time played in this slot |
 | `savedAt` | local time of the save, for display |
 
@@ -855,16 +993,26 @@ Setting the `DUSK_SAVE_DIR` environment variable overrides all of these, which i
 A save is a small, readable text file:
 
 ```text
-dusk-save 1
+dusk-save 2
 name=NICK
-credits=1000
+credits=853.1
 galaxySeed=1337
 system=0
 systemName=JorEl Minor
 fuel=6
-playTime=5.22
+playTime=312.4
+cargoModule=1
+cargo=Base ores,3
+cargo=Food,7
+galaxyTime=2112.4
+stock=0,Base ores,158.2
+stock=0,Food,90.4
+agent=412,415,2120.6,Wines,50,9
+...
 savedAt=2026-10-05 20:44
 ```
+
+Version 2 added the hold, the bay and the trading economy. Version 1 saves still load: they come back with an empty hold, no bay, and a fresh economy. A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
 
 Three choices keep it robust:
 
@@ -874,7 +1022,7 @@ Three choices keep it robust:
 
 ### Adding something to the save
 
-To save something new, for example cargo or a ship upgrade:
+To save something new, for example mission progress or a new ship upgrade (cargo, the bay and the economy are already saved):
 
 1. add a field to `SaveGame`;
 2. write it in `serialiseSave()` and read it in `parseSave()`;
@@ -893,7 +1041,7 @@ Fuel is a resource you have to manage, and it's real mass.
 
 Fuel carries over between systems: `enterSystem()` rebuilds the world but keeps the ship's fuel. NPC ships have `usesFuel = false` and never run dry.
 
-**Mass.** `Ship::mass` is the dry hull (15 t). `shipTotalMass()` adds fuel and `cargoMass` (always 0 until trading exists), and every thruster divides its force by the total:
+**Mass.** `Ship::mass` is the dry hull (15 t). `shipTotalMass()` adds fuel and `cargoMass` (the tonnes in your hold), and every thruster divides its force by the total. The table shows fuel; cargo is covered in [Trading And Cargo](#the-hold):
 
 | Tank | Total mass | 0 → 95% speed | 90° turn | Side thrust |
 | --- | --- | --- | --- | --- |
@@ -903,20 +1051,22 @@ Fuel carries over between systems: `enterSystem()` rebuilds the world but keeps 
 
 The thruster forces are tuned so the ship handles at half a tank exactly as it always did. A full tank is a little sluggish, and a nearly empty one lively.
 
-Rotation scales too, through `shipMassRatio()`: total mass divided by the half-tank reference mass. The turn spin-up and stop times are multiplied by the ratio (more inertia for the RCS to fight), and the top turn rate is divided by its square root. Because everything goes through `shipTotalMass()`, cargo will slow the ship down without further changes once trading lands.
+Rotation scales too, through `shipMassRatio()`: total mass divided by the half-tank reference mass. The turn spin-up and stop times are multiplied by the ratio (more inertia for the RCS to fight), and the top turn rate is divided by its square root. Because everything goes through `shipTotalMass()`, cargo slows the ship down in just the same way: a full Mk2 hold on a full tank is 41 t and takes 37 seconds to reach top speed.
 
-**HUD.** A FUEL bar sits under THR and SPD. It turns red below a fifth of the tank and shows the tonnes left beside it. The total mass is shown at the top right of the speed block.
+**HUD.** A FUEL bar sits under THR and SPD. It turns red below a fifth of the tank and shows the tonnes left beside it. The total mass is shown at the top right of the speed block, and a gold HOLD bar under the fuel bar shows tonnes of cargo against hold size.
 
 ## Station Services
 
 Docking opens the station screen (`include/ui/station_menu.h++`). Its header shows the station name, your commander name, your credits and your fuel. Below that are a list of services and the selected service's page.
 
-**Built to grow.** The services are a table, `stationServices`, holding each service's `StationPage`, label, whether it's available yet, and a description. MARKET, UPGRADES, MISSIONS and GARAGE are listed today as `SOON`, each with a page describing what it will do. SAVE GAME shows your slot and its last save, with SAVE, LOAD and MAIN MENU buttons (see [Saving And Loading](#saving-and-loading)); pages can have any number of buttons, which share the page's width. Building one means:
+**Built to grow.** The services are a table, `stationServices`, holding each service's `StationPage`, label, whether it's available yet, and a description. MISSIONS and GARAGE are listed today as `SOON`, each with a page describing what it will do; REFUEL, MARKET, UPGRADES and SAVE GAME work. SAVE GAME shows your slot and its last save, with SAVE, LOAD and MAIN MENU buttons (see [Saving And Loading](#saving-and-loading)); pages can have any number of buttons, which share the page's width. Building one means:
 
 1. setting `available = true` in the table;
 2. adding its page in `drawPage()`;
-3. giving it buttons in `pageButtonCount()`;
+3. giving it buttons in `pageButtonCount()` (and, if it's a list like the market, rows in `pageRowCount()`);
 4. returning an action from `primaryAction()`, then handling that action in `SystemScene::handleStationMenuEvent()`.
+
+**List pages.** The market and upgrades pages are lists, which is a small mode of their own. `Enter` on the service opens the list (`pageFocused_`), after which `Up`/`Down` move between rows and `S` means *sell* instead of *down*, which is why the list needs the keyboard to itself. `Left`, `Tab` or `Escape` step back out. A click on a row does both at once. The menu remembers the highlighted good and upgrade (`selectedGood()`, `selectedUpgrade()`) and returns an action such as `BuyGoodMax`; the scene reads which row was highlighted and does the trade.
 
 The menu itself owns only its selection. Everything it displays comes from a `StationMenuView` that the scene builds each frame, and it changes nothing itself: it returns a `StationMenuAction` and the scene carries it out. Gameplay rules therefore stay out of the UI.
 
@@ -927,7 +1077,7 @@ The menu itself owns only its selection. Everything it displays comes from a `St
 
 The price comes from the local economy: `fuelPricePerTonne()` multiplies the 12 CR/t base by `economyTierMultiplier()`, so fuel costs 13.8 CR/t in Poor systems, 12 in Developing and 10.2 in Progressive. The page shows the gauge, your current and full-tank jump range, your ship's mass against its hull mass, the price, and two buttons that show what they'll buy: FILL (or TANK FULL / NO CREDITS) and BUY 1 t.
 
-**The commander.** `Commander` (`include/objects/commander.h++`) holds the player's persistent state that isn't ship physics. Today that's the name you chose when starting the game (JAMESON, after Elite's default commander, if you left it blank) and credits, starting at 1,000. `SystemScene` keeps it across jumps, and it is written to your save slot (see [Saving And Loading](#saving-and-loading)). There's no way to earn credits yet; missions and trading will add one.
+**The commander.** `Commander` (`include/objects/commander.h++`) holds the player's persistent state that isn't ship physics. Today that's the name you chose when starting the game (JAMES if you left it blank), your credits (starting at 1,000), the hold (`CargoHold`) and the fitted cargo bay module. `SystemScene` keeps it across jumps, and it is written to your save slot (see [Saving And Loading](#saving-and-loading)). Trading earns credits; missions will too.
 
 ## The Camera
 
@@ -1315,7 +1465,7 @@ The flight HUD lives in `include/rendering/hud_renderer.h++`. It is a single `Hu
 
 **Dashboard** (`dashboardHeight = 122` pixels along the bottom, which scenes keep their own text clear of):
 
-- Left: speed (or cruise speed) with the ship's total mass beside it, a throttle bar (labelled REV in red when reversing), a speed bar on the same scale, a fuel gauge, (with flight assist on, the throttle bar is where you're heading and the speed bar is where you've got to), and the status line. That line shows flight assist in its own colour (`style::assistOn` blue for FA ON, `style::assistOff` orange for FA OFF), followed by cruise state in the accent: `[J] CRUISE`, `CRUISE CHARGING n%`, `MASS LOCKED`, `[J] DROP`, or `NO FUEL` in red.
+- Left: speed (or cruise speed) with the ship's total mass beside it, a throttle bar (labelled REV in red when reversing), a speed bar on the same scale, a fuel gauge and a hold gauge (HOLD, tonnes carried against hold size), (with flight assist on, the throttle bar is where you're heading and the speed bar is where you've got to), and the status line. That line shows flight assist in its own colour (`style::assistOn` blue for FA ON, `style::assistOff` orange for FA OFF), followed by cruise state in the accent: `[J] CRUISE`, `CRUISE CHARGING n%`, `MASS LOCKED`, `[J] DROP`, or `NO FUEL` in red.
 - Centre: an Elite-style 3D scanner. The ellipse is the ship's horizontal plane seen from above and behind, forward up the scope; each contact sits on the plane at its ship-relative position with a stalk up or down to its height. NPC ships show as bars, the station as an accent-orange square (ringed when targeted), and your own ship as a gold dot at the centre. The range is `scannerRange = 25000` units.
 - Right: heading (000–359, with 000 along world `+z`) and pitch in degrees, centre-zero bars for the current yaw and pitch rates, and the target compass. The compass dot shows where the target lies relative to the nose: filled when ahead, hollow red when behind. Underneath are the target's name, distance and closing speed (positive while the gap shrinks).
 
@@ -1355,6 +1505,8 @@ Everything procedural comes from one number, the galaxy seed (`1337` in `main.cp
 | Planet belts | `systemSeed ^ another constant` | which planets get debris belts, and their shapes |
 | Belt cells | `hash(beltSeed, cell x, y, z)` | the rocks in each 5,000-unit cell of a belt |
 | Loose-rock shapes | `systemSeed ^ constant` | the shapes of drifting rocks |
+| Tech-system goods | `systemSeed ^ constant` | the goods Engineering and Tech systems export |
+| Trader placement | `galaxySeed ^ constant` | where the 300 trader agents start; their later choices hash (agent, visit count) instead of using random state |
 | Drifting-rock spawns | `World::driftRng`, seeded `systemSeed ^ constant` on entry | where lone rocks appear; since spawns follow the player, the result depends on how you fly |
 | NPCs | `World::npcRng`, seeded from `std::random_device` | NPC spawns and decisions — deliberately different every run, so traffic never repeats |
 
@@ -1603,9 +1755,11 @@ This is still intentionally small:
 - No depth buffer and no triangle rasterizer — everything visible is either a projected line, a projected point, or an SFML shape primitive.
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
-- There's no way to earn credits yet (missions and trading will add one).
-- Saving is only possible while docked, and a save holds the commander, credits, fuel, system and play time. Nothing about the world itself is saved; it's regenerated from the seed.
-- The economy layer computes prices per system but has no trading UI, no inventory, and no supply/demand — it's generated data with nowhere to spend it yet.
+- Missions don't exist yet, so trading is the only way to earn credits.
+- Saving is only possible while docked, and a save holds the commander, credits, fuel, hold, bay, system and play time, plus the trading economy. Nothing else about the world is saved; it's regenerated from the seed.
+- Trader agents are galaxy-level, not ships in the 3D scene: you see their effect in stock and prices and in the market page's trader note, but you can't fly up to one or trade with one. The ambient NPC ships you do see don't carry cargo.
+- There is no illegal cargo, no piracy, and no cargo loss: goods can't be stolen, jettisoned or damaged.
+- The market doesn't show other systems' prices (like the original Elite, you work out where to sell from what each system exports), and it can't set a destination for you.
 - Only one station gets built per system even when `SystemInfo::stationCount` rolls higher.
 - No true fixed time-step accumulator; physics is split into sub-steps of at most 1/120 s, but their size still follows the frame time.
 - No real asset-management system beyond loading a font and an OBJ file at scene construction.

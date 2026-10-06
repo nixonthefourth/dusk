@@ -48,6 +48,9 @@ add_executable(dusk src/main.cpp
         include/objects/commander.h++
         include/systems/refuelling.h++
         include/systems/save_game.h++
+        include/systems/trading.h++
+        include/systems/upgrades.h++
+        include/objects/cargo.h++
         include/ui/menu_button.h++
         include/ui/format.h++
         include/ui/galaxy_map.h++

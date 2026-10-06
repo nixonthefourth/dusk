@@ -1,13 +1,15 @@
 //
 // The station screen shown while docked: a list of services on the left, the selected service's
-// page on the right. Refuelling works today; market, outfitting, missions and garage are laid out
-// as "coming soon" pages, so adding one later means filling in its page rather than new plumbing.
+// page on the right. Refuelling, the market, upgrades and saving work today; missions and the garage
+// are laid out as "coming soon" pages, so adding one later means filling in its page rather than
+// new plumbing.
 //
 
 #ifndef DUSK_STATION_MENU_H
 #define DUSK_STATION_MENU_H
 
 #include "systems/refuelling.h++"
+#include "systems/upgrades.h++"
 #include "ui/menu_button.h++"
 #include "ui/style.h++"
 #include <SFML/Graphics.hpp>
@@ -36,8 +38,8 @@ struct StationService {
 inline const std::array<StationService, 7> stationServices =
 {{
     {StationPage::Refuel, "REFUEL", true, "Top up the tank. Fuel is priced by the local economy."},
-    {StationPage::Market, "MARKET", false, "Buy and sell trade goods. Each system exports what it makes and pays more for what it lacks."},
-    {StationPage::Outfitting, "UPGRADES", false, "Fit better drives, bigger tanks and stronger thrusters."},
+    {StationPage::Market, "MARKET", true, "Buy and sell trade goods. Each system sells what it makes cheap and pays more for what it lacks."},
+    {StationPage::Outfitting, "UPGRADES", true, "Fit a bigger cargo bay. More upgrades will follow."},
     {StationPage::Missions, "MISSIONS", false, "Take on courier runs, deliveries and contracts for credits."},
     {StationPage::Garage, "GARAGE", false, "Store, swap and buy ships."},
     {StationPage::SaveGame, "SAVE GAME", true, "Save your progress to this commander's slot, load the last save, or return to the main menu."},
@@ -45,7 +47,34 @@ inline const std::array<StationService, 7> stationServices =
 }};
 
 /** What the scene should do after the station screen handled an event. */
-enum class StationMenuAction { None, Close, Launch, RefuelFull, RefuelOneTonne, SaveGame, LoadGame, MainMenu };
+enum class StationMenuAction
+{
+    None, Close, Launch,
+    RefuelFull, RefuelOneTonne,
+    SaveGame, LoadGame, MainMenu,
+    BuyGoodOne, BuyGoodMax, SellGoodOne, SellGoodAll,   // act on StationMenu::selectedGood()
+    InstallUpgrade                                      // acts on StationMenu::selectedUpgrade()
+};
+
+/** One line of the market table: a good, what it costs and pays here, and what you hold of it. */
+struct MarketRowView {
+    std::string name;
+    float buyPrice = 0.f;       // what the next tonne costs you
+    float sellPrice = 0.f;      // what the next tonne pays you
+    int stock = 0;              // tonnes the station has
+    int held = 0;               // tonnes in your hold
+    float versusAverage = 0.f;  // price against the galaxy average: -0.25 is 25% cheaper
+    bool canBuy = false;        // stock, hold room and credits all allow at least a tonne
+    bool canSell = false;       // you hold some
+};
+
+/** One line of the upgrades page: what it is, and whether (and for how much) you can fit it. */
+struct UpgradeRowView {
+    std::string name;
+    std::string description;
+    double listPrice = 0.0;
+    UpgradeOffer offer;         // status, and the net cost after trading in what's fitted
+};
 
 /**
  * Everything the station screen displays, gathered by the scene each frame. The menu only reads
@@ -67,6 +96,16 @@ struct StationMenuView {
     RefuelQuote fillQuote;      // what "FILL TANK" would buy
     RefuelQuote oneTonneQuote;  // what "BUY 1 t" would buy
 
+    /** The hold: tonnes carried, hold size, the fitted bay, and the market and upgrade rows. */
+    int cargoUsed = 0;
+    int cargoCapacity = 0;
+    std::string cargoModuleName;
+    std::vector<MarketRowView> market;
+    std::vector<UpgradeRowView> upgrades;
+
+    /** What a trader agent last did here ("TRADER LOADED 9 t WINES  (40 s ago)"), or empty. */
+    std::string traderNote;
+
     /** The save slot this game belongs to (0-2, or -1 for none), and what's currently saved in it. */
     int saveSlot = -1;
     bool hasSave = false;
@@ -78,8 +117,10 @@ struct StationMenuView {
 /**
  * The station screen. Owns only its selection; everything it shows comes in through a
  * StationMenuView. Keys: Up/Down choose a service, Enter does the page's main action (fill the
- * tank, save, launch), B buys one tonne of fuel, L launches from anywhere, Escape closes (you stay
- * docked). Pages with several buttons take mouse clicks for the others.
+ * tank, save, launch) or, on the market and upgrades pages, opens the page's list. In a list,
+ * Up/Down choose a row, B or Enter buys (Shift for the most you can), S sells (Shift for all),
+ * and Left, Tab or Escape return to the services. L launches from anywhere, and Escape in the
+ * service list closes the screen (you stay docked). Buttons take mouse clicks.
  */
 class StationMenu {
 public:
@@ -88,6 +129,21 @@ public:
     {
         selected_ = 0;
         hoveredButton_ = -1;
+        pageFocused_ = false;
+        selectedGood_ = 0;
+        selectedUpgrade_ = 0;
+    }
+
+    /** The highlighted good (an index into the goods list) and upgrade (an index into the catalogue). */
+    int selectedGood() const
+    {
+        return selectedGood_;
+    }
+
+    /** The highlighted upgrade, an index into upgradeCatalogue(). */
+    int selectedUpgrade() const
+    {
+        return selectedUpgrade_;
     }
 
     /** The page of the currently selected service. */
@@ -104,10 +160,16 @@ public:
 
         if (const auto* key = event.getIf<sf::Event::KeyPressed>())
         {
+            // Launching works from anywhere, including inside a list.
+            if (key->code == sf::Keyboard::Key::L)
+                return StationMenuAction::Launch;
+
+            if (pageFocused_)
+                return handlePageKey(*key);
+
             switch (key->code)
             {
                 case sf::Keyboard::Key::Escape: return StationMenuAction::Close;
-                case sf::Keyboard::Key::L: return StationMenuAction::Launch;
 
                 case sf::Keyboard::Key::Up:
                 case sf::Keyboard::Key::W:
@@ -125,9 +187,19 @@ public:
                         return StationMenuAction::RefuelOneTonne;
                     break;
 
+                case sf::Keyboard::Key::Right:
+                    if (pageRowCount() > 0)
+                        pageFocused_ = true;
+                    break;
+
                 case sf::Keyboard::Key::Enter:
                 case sf::Keyboard::Key::Space:
-                    return primaryAction();
+                    // List pages open for browsing; everything else does its main action.
+                    if (pageRowCount() > 0)
+                        pageFocused_ = true;
+                    else
+                        return primaryAction();
+                    break;
 
                 default:
                     break;
@@ -152,6 +224,18 @@ public:
                 if (serviceBounds(size, index).contains(mouse))
                 {
                     selected_ = index;
+                    pageFocused_ = false;
+                    return StationMenuAction::None;
+                }
+            }
+
+            // A click on a market or upgrade row selects it and gives the list the keyboard.
+            for (int row = 0; row < pageRowCount(); ++row)
+            {
+                if (rowBounds(size, row).contains(mouse))
+                {
+                    (selectedPage() == StationPage::Market ? selectedGood_ : selectedUpgrade_) = row;
+                    pageFocused_ = true;
                     return StationMenuAction::None;
                 }
             }
@@ -186,13 +270,28 @@ public:
         drawServiceList(target, font, size);
         drawPage(target, font, view, size);
 
-        drawText(target, font, "UP/DOWN  service     ENTER  confirm     L  launch     ESC  close",
-                 {frame.position.x + 16.f, frame.position.y + frame.size.y - 26.f}, 15, style::textDim);
+        std::string hints = "UP/DOWN  service     ENTER  confirm     L  launch     ESC  close";
+
+        if (pageFocused_ && selectedPage() == StationPage::Market)
+            hints = "UP/DOWN  good     B  buy 1 (SHIFT: max)     S  sell 1 (SHIFT: all)     LEFT  back     L  launch";
+        else if (pageFocused_)
+            hints = "UP/DOWN  choose     ENTER  install     LEFT  back     L  launch";
+        else if (pageRowCount() > 0)
+            hints = "UP/DOWN  service     ENTER  open list     L  launch     ESC  close";
+
+        drawText(target, font, hints, {frame.position.x + 16.f, frame.position.y + frame.size.y - 26.f}, 15, style::textDim);
     }
 
 private:
     int selected_ = 0;
     int hoveredButton_ = -1;
+
+    /** True while a list page (market, upgrades) has the keyboard instead of the service list. */
+    bool pageFocused_ = false;
+
+    /** The highlighted good on the market page and upgrade on the upgrades page. */
+    int selectedGood_ = 0;
+    int selectedUpgrade_ = 0;
 
     static constexpr float headerHeight = 64.f;
     static constexpr float listWidth = 190.f;
@@ -205,11 +304,73 @@ private:
         return buttonAction(0);
     }
 
+    /** Rows in the selected page's list: the goods on the market page, the catalogue on upgrades, else none. */
+    int pageRowCount() const
+    {
+        switch (selectedPage())
+        {
+            case StationPage::Market: return goodCount;
+            case StationPage::Outfitting: return static_cast<int>(upgradeCatalogue().size());
+            default: return 0;
+        }
+    }
+
+    /** Keys while a list page has the keyboard: move between rows, buy, sell, or step back out. */
+    StationMenuAction handlePageKey(const sf::Event::KeyPressed& key)
+    {
+        const int rows = pageRowCount();
+        int& row = selectedPage() == StationPage::Market ? selectedGood_ : selectedUpgrade_;
+
+        switch (key.code)
+        {
+            case sf::Keyboard::Key::Escape:
+            case sf::Keyboard::Key::Left:
+            case sf::Keyboard::Key::Tab:
+                pageFocused_ = false;
+                break;
+
+            case sf::Keyboard::Key::Up:
+                row = (row + rows - 1) % rows;
+                break;
+
+            case sf::Keyboard::Key::Down:
+                row = (row + 1) % rows;
+                break;
+
+            case sf::Keyboard::Key::B:
+            case sf::Keyboard::Key::Enter:
+            case sf::Keyboard::Key::Space:
+                if (selectedPage() == StationPage::Market)
+                    return key.shift ? StationMenuAction::BuyGoodMax : StationMenuAction::BuyGoodOne;
+
+                return StationMenuAction::InstallUpgrade;
+
+            case sf::Keyboard::Key::S:
+                if (selectedPage() == StationPage::Market)
+                    return key.shift ? StationMenuAction::SellGoodAll : StationMenuAction::SellGoodOne;
+                break;
+
+            default:
+                break;
+        }
+
+        return StationMenuAction::None;
+    }
+
     /** What each of the selected page's buttons does, left to right. */
     StationMenuAction buttonAction(int button) const
     {
         switch (selectedPage())
         {
+            case StationPage::Market:
+                if (button == 0) return StationMenuAction::BuyGoodOne;
+                if (button == 1) return StationMenuAction::BuyGoodMax;
+                if (button == 2) return StationMenuAction::SellGoodOne;
+                return StationMenuAction::SellGoodAll;
+
+            case StationPage::Outfitting:
+                return StationMenuAction::InstallUpgrade;
+
             case StationPage::Refuel:
                 return button == 0 ? StationMenuAction::RefuelFull : StationMenuAction::RefuelOneTonne;
 
@@ -252,6 +413,22 @@ private:
         return {{left, top}, {frame.position.x + frame.size.x - 16.f - left, frame.size.y - headerHeight - 70.f}};
     }
 
+    /** Height of one row in the market table, and where the table starts on the page (under the title and column heads). */
+    static constexpr float marketRowHeight = 21.f;
+    static constexpr float tableTop = 66.f;
+    static constexpr float upgradeRowHeight = 58.f;
+
+    /** Row `index` of the selected page's list: a market line or an upgrade card. */
+    sf::FloatRect rowBounds(sf::Vector2u size, int index) const
+    {
+        const sf::FloatRect page = pageBounds(size);
+
+        if (selectedPage() == StationPage::Market)
+            return {{page.position.x, page.position.y + tableTop + static_cast<float>(index) * marketRowHeight}, {page.size.x, marketRowHeight}};
+
+        return {{page.position.x, page.position.y + 44.f + static_cast<float>(index) * (upgradeRowHeight + 8.f)}, {page.size.x, upgradeRowHeight}};
+    }
+
     /** The page's action buttons, side by side along its bottom, sharing the width: 0 is the main action. */
     sf::FloatRect pageButtonBounds(sf::Vector2u size, int index) const
     {
@@ -267,6 +444,8 @@ private:
         switch (selectedPage())
         {
             case StationPage::Refuel: return 2;
+            case StationPage::Market: return 4;
+            case StationPage::Outfitting: return 1;
             case StationPage::SaveGame: return 3;
             case StationPage::Launch: return 1;
             default: return 0;
@@ -337,8 +516,8 @@ private:
 
         drawText(target, font, formatCredits(view.credits), {right, frame.position.y + 10.f}, 22, style::accent, 1.f);
 
-        char fuel[48];
-        std::snprintf(fuel, sizeof(fuel), "FUEL %.1f / %.1f t", view.fuel, view.fuelCapacity);
+        char fuel[96];
+        std::snprintf(fuel, sizeof(fuel), "FUEL %.1f / %.1f t     CARGO %d / %d t", view.fuel, view.fuelCapacity, view.cargoUsed, view.cargoCapacity);
         drawText(target, font, fuel, {right, frame.position.y + 38.f}, 16, style::textSecondary, 1.f);
     }
 
@@ -443,6 +622,14 @@ private:
                 drawPageButton(target, font, size, 0, "LAUNCH", true);
                 return;
 
+            case StationPage::Market:
+                drawMarketPage(target, font, view, size, page);
+                return;
+
+            case StationPage::Outfitting:
+                drawUpgradesPage(target, font, view, size, page);
+                return;
+
             case StationPage::SaveGame:
                 drawSavePage(target, font, view, size, page, y);
                 return;
@@ -452,6 +639,161 @@ private:
                 drawParagraph(target, font, service.blurb, {x, y + 32.f}, page.size.x, 18, style::textSecondary);
                 return;
         }
+    }
+
+    /**
+     * The market: one line per good with what it costs and pays here, the station's stock, your
+     * hold, and the price against the galaxy average (green when cheap, yellow when dear), then
+     * your hold and mass, the last thing a trader did here, and BUY / SELL buttons.
+     */
+    void drawMarketPage(sf::RenderTarget& target, const sf::Font& font, const StationMenuView& view, sf::Vector2u size, const sf::FloatRect& page) const
+    {
+        const float x = page.position.x;
+        const float headY = page.position.y + tableTop - 22.f;
+
+        drawText(target, font, "MARKET", {x, page.position.y}, 28, style::accent);
+
+        // Column heads, then the right-hand edge of each numeric column.
+        constexpr float buyEdge = 250.f, sellEdge = 312.f, stockEdge = 372.f, holdEdge = 424.f, avgEdge = 490.f;
+        const sf::Color head = style::textDim;
+        drawText(target, font, "GOOD", {x + 8.f, headY}, 14, head);
+        drawText(target, font, "BUY", {x + buyEdge, headY}, 14, head, 1.f);
+        drawText(target, font, "SELL", {x + sellEdge, headY}, 14, head, 1.f);
+        drawText(target, font, "STOCK", {x + stockEdge, headY}, 14, head, 1.f);
+        drawText(target, font, "HOLD", {x + holdEdge, headY}, 14, head, 1.f);
+        drawText(target, font, "VS AVG", {x + avgEdge, headY}, 14, head, 1.f);
+
+        char buffer[32];
+
+        for (int row = 0; row < static_cast<int>(view.market.size()); ++row)
+        {
+            const MarketRowView& line = view.market[static_cast<std::size_t>(row)];
+            const sf::FloatRect bounds = rowBounds(size, row);
+            const bool selected = row == selectedGood_;
+
+            if (selected)
+            {
+                sf::RectangleShape bar(bounds.size);
+                bar.setPosition(bounds.position);
+                bar.setFillColor(pageFocused_ ? style::panelRowHighlight : style::marketRowIdle);
+                target.draw(bar);
+            }
+
+            const float y = bounds.position.y + 2.f;
+            drawText(target, font, line.name, {x + 8.f, y}, 16, selected && pageFocused_ ? style::accent : style::textPrimary);
+
+            if (line.stock >= 1)
+            {
+                std::snprintf(buffer, sizeof(buffer), "%.1f", static_cast<double>(line.buyPrice));
+                drawText(target, font, buffer, {x + buyEdge, y}, 16, style::textPrimary, 1.f);
+            }
+            else
+            {
+                drawText(target, font, "SOLD OUT", {x + buyEdge, y}, 14, style::marketSoldOut, 1.f);
+            }
+
+            std::snprintf(buffer, sizeof(buffer), "%.1f", static_cast<double>(line.sellPrice));
+            drawText(target, font, buffer, {x + sellEdge, y}, 16, style::textSecondary, 1.f);
+
+            drawText(target, font, std::to_string(line.stock), {x + stockEdge, y}, 16, style::textDim, 1.f);
+            drawText(target, font, line.held > 0 ? std::to_string(line.held) : "-", {x + holdEdge, y}, 16, line.held > 0 ? style::accent : style::textDim, 1.f);
+
+            std::snprintf(buffer, sizeof(buffer), "%+.0f%%", static_cast<double>(line.versusAverage) * 100.0);
+            const sf::Color avgColor = line.versusAverage <= -0.05f ? style::marketCheap
+                : (line.versusAverage >= 0.05f ? style::marketDear : style::textSecondary);
+            drawText(target, font, buffer, {x + avgEdge, y}, 16, avgColor, 1.f);
+        }
+
+        // Under the table: the hold and mass, and the latest trader sighting.
+        const float infoY = page.position.y + tableTop + static_cast<float>(view.market.size()) * marketRowHeight + 10.f;
+        std::snprintf(buffer, sizeof(buffer), "HOLD  %d / %d t", view.cargoUsed, view.cargoCapacity);
+        const float held = drawText(target, font, buffer, {x + 8.f, infoY}, 17, style::cargoBar);
+        std::snprintf(buffer, sizeof(buffer), "SHIP MASS  %.1f t", static_cast<double>(view.totalMass));
+        drawText(target, font, buffer, {x + 8.f + held + 28.f, infoY}, 17, style::textSecondary);
+        drawText(target, font, view.traderNote.empty() ? "NO TRADER HAS CALLED HERE YET" : view.traderNote,
+                 {x + 8.f, infoY + 22.f}, 15, view.traderNote.empty() ? style::textDim : style::profit);
+
+        const MarketRowView* current = selectedGood_ < static_cast<int>(view.market.size()) ? &view.market[static_cast<std::size_t>(selectedGood_)] : nullptr;
+        const bool canBuy = current && current->canBuy;
+        const bool canSell = current && current->canSell;
+        drawPageButton(target, font, size, 0, "BUY 1", canBuy);
+        drawPageButton(target, font, size, 1, "BUY MAX", canBuy);
+        drawPageButton(target, font, size, 2, "SELL 1", canSell);
+        drawPageButton(target, font, size, 3, "SELL ALL", canSell);
+    }
+
+    /**
+     * The outfitting page: each upgrade as a card with its description and what it would cost you
+     * (after the trade-in on whatever it replaces), your current hold, and an INSTALL button.
+     */
+    void drawUpgradesPage(sf::RenderTarget& target, const sf::Font& font, const StationMenuView& view, sf::Vector2u size, const sf::FloatRect& page) const
+    {
+        const float x = page.position.x;
+        drawText(target, font, "UPGRADES", {x, page.position.y}, 28, style::accent);
+
+        for (int row = 0; row < static_cast<int>(view.upgrades.size()); ++row)
+        {
+            const UpgradeRowView& upgrade = view.upgrades[static_cast<std::size_t>(row)];
+            const sf::FloatRect bounds = rowBounds(size, row);
+            const bool selected = row == selectedUpgrade_;
+
+            sf::RectangleShape card(bounds.size);
+            card.setPosition(bounds.position);
+            card.setFillColor(selected ? (pageFocused_ ? style::panelRowHighlight : style::marketRowIdle) : style::stationHeader);
+            card.setOutlineColor(selected && pageFocused_ ? style::accent : style::panelOutline);
+            card.setOutlineThickness(selected && pageFocused_ ? 2.f : 1.f);
+            target.draw(card);
+
+            const bool usable = upgrade.offer.status == UpgradeStatus::Available || upgrade.offer.status == UpgradeStatus::CantAfford;
+            drawText(target, font, upgrade.name, {bounds.position.x + 14.f, bounds.position.y + 7.f}, 22, usable ? style::textPrimary : style::textDim);
+            drawText(target, font, upgrade.description, {bounds.position.x + 14.f, bounds.position.y + 34.f}, 15, style::textSecondary);
+
+            // Right-hand side: the price you'd pay, or why you can't.
+            const float right = bounds.position.x + bounds.size.x - 14.f;
+            char buffer[64];
+
+            switch (upgrade.offer.status)
+            {
+                case UpgradeStatus::Installed:
+                    drawText(target, font, "INSTALLED", {right, bounds.position.y + 16.f}, 20, style::profit, 1.f);
+                    break;
+
+                case UpgradeStatus::HaveBetter:
+                    drawText(target, font, "YOU HAVE BETTER", {right, bounds.position.y + 18.f}, 16, style::textDim, 1.f);
+                    break;
+
+                case UpgradeStatus::Available:
+                case UpgradeStatus::CantAfford:
+                {
+                    const bool affordable = upgrade.offer.status == UpgradeStatus::Available;
+                    std::snprintf(buffer, sizeof(buffer), "%.0f CR", upgrade.offer.cost);
+                    drawText(target, font, buffer, {right, bounds.position.y + 8.f}, 22, affordable ? style::accent : style::warning, 1.f);
+
+                    if (upgrade.offer.cost < upgrade.listPrice - 0.5)
+                    {
+                        std::snprintf(buffer, sizeof(buffer), "AFTER TRADE-IN  (LIST %.0f)", upgrade.listPrice);
+                        drawText(target, font, buffer, {right, bounds.position.y + 34.f}, 13, style::textDim, 1.f);
+                    }
+                    else if (!affordable)
+                    {
+                        drawText(target, font, "NOT ENOUGH CREDITS", {right, bounds.position.y + 34.f}, 13, style::warning, 1.f);
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        const float infoY = rowBounds(size, static_cast<int>(view.upgrades.size())).position.y + 6.f;
+        char buffer[96];
+        std::snprintf(buffer, sizeof(buffer), "FITTED  %s   HOLD %d t", view.cargoModuleName.c_str(), view.cargoCapacity);
+        drawText(target, font, buffer, {x, infoY}, 17, style::cargoBar);
+        const std::string note = "AN UPGRADE LEAVES YOU AT LEAST " + std::to_string(static_cast<int>(upgradeReserveCredits))
+            + " CR TO TRADE WITH. THE MODULE IT REPLACES IS TRADED IN AT HALF PRICE.";
+        drawParagraph(target, font, note, {x, infoY + 26.f}, page.size.x, 15, style::textDim);
+
+        const UpgradeRowView* current = selectedUpgrade_ < static_cast<int>(view.upgrades.size()) ? &view.upgrades[static_cast<std::size_t>(selectedUpgrade_)] : nullptr;
+        drawPageButton(target, font, size, 0, "INSTALL", current && current->offer.status == UpgradeStatus::Available);
     }
 
     /** This commander's slot and what's saved in it, with SAVE / LOAD / MAIN MENU. */

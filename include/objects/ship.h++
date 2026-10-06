@@ -141,8 +141,12 @@ struct Ship {
     /** False for ships that never run dry (NPCs): they burn nothing and never refuel. */
     bool usesFuel = true;
 
-    /** Mass of carried cargo in tonnes. Nothing loads cargo yet; it is here so trading can add mass later. */
+    /**
+     * Mass of carried cargo in tonnes, and the hold's size. SystemScene keeps both in step with the
+     * commander's hold; the thrusters and the turn rate feel the mass, the HUD shows both.
+     */
     float cargoMass = 0.f;
+    float cargoCapacity = 10.f;
 
     /** When true, the flight computer converts throttle into a velocity and fires thrusters to hold it. */
     bool flightAssist = true;

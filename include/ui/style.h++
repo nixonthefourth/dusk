@@ -73,6 +73,9 @@ namespace style {
     /** "You" and landmarks: own-ship markers, the galactic core. Gold, so it never blends with the accent. */
     inline constexpr sf::Color highlight{255, 210, 120};
 
+    /** Good news: a cheap price, a profit, a trader loading up. Distinct from the orange accent on purpose. */
+    inline constexpr sf::Color profit{120, 200, 130};
+
     /** Clear colour behind everything, and full-screen map backdrops. */
     inline constexpr sf::Color background = sf::Color{0, 0, 0};
 
@@ -149,6 +152,9 @@ namespace style {
     inline constexpr sf::Color tapeCaret = accent;
     inline constexpr sf::Color tapeValue = accent;
 
+    /** Cargo gauge on the dashboard. */
+    inline constexpr sf::Color cargoBar = highlight;
+
     /** "ASTEROID FIELD" above the scanner. */
     inline constexpr sf::Color fieldWarning = caution;
 
@@ -206,6 +212,14 @@ namespace style {
 
     /** Main menu: save-slot cards and the commander name field. */
     inline constexpr sf::Color slotCardFill{8, 12, 18, 225};
+
+    /** Market page: a price below the galaxy average, one above it, and an empty stock. */
+    inline constexpr sf::Color marketCheap = profit;
+    inline constexpr sf::Color marketDear = caution;
+    inline constexpr sf::Color marketSoldOut = textDim;
+
+    /** The highlighted market row or upgrade card while the service list (not the page) has the keyboard. */
+    inline constexpr sf::Color marketRowIdle = withAlpha(accent, 22);
 
     /** Station screen: title, the frame around it, the header strip, the gauge, "coming soon" text. */
     inline constexpr sf::Color stationMenuTitle = textPrimary;

@@ -597,7 +597,7 @@ private:
         ui::drawButton(target, nameButtonBounds(size, 0), start, true, false);
         ui::drawButton(target, nameButtonBounds(size, 1), back, false, false);
 
-        drawText(target, "Leave it blank to fly as JAMESON.   ENTER  start     ESC  back",
+        drawText(target, "Leave it blank to fly as JAMES.   ENTER  start     ESC  back",
                  {centreX, static_cast<float>(size.y) - 30.f}, 15, style::textDim, 0.5f);
     }
 };

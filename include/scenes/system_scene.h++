@@ -18,6 +18,8 @@
 #include "ui/galaxy_map.h++"
 #include "ui/menu_button.h++"
 #include "systems/save_game.h++"
+#include "systems/trading.h++"
+#include "systems/upgrades.h++"
 #include "ui/station_menu.h++"
 #include "ui/system_map.h++"
 #include "ui/style.h++"
@@ -70,6 +72,9 @@ public:
 
         label_.setFillColor(style::systemLabel);
         label_.setStyle(sf::Text::Bold);
+
+        // The galaxy's markets and trader agents, with a little history already run.
+        trade_.initialise(galaxy_);
         enterSystem(startingSystemIndex);
     }
 
@@ -180,10 +185,14 @@ public:
         }
     }
 
-    /** Escape closes an open map, or aborts a hyperspace countdown, instead of quitting the game. */
+    /**
+     * Escape closes an open map or the station screen, or aborts a hyperspace countdown, instead
+     * of quitting the game. (The station screen was missing from this list, so Escape there quit
+     * the game outright rather than closing the screen.)
+     */
     bool capturesEscape() const override
     {
-        return mapView_ != MapView::None || hyperspace_.phase != HyperspacePhase::None;
+        return mapView_ != MapView::None || hyperspace_.phase != HyperspacePhase::None || stationMenuOpen_;
     }
 
     /** The flight HUD is hidden while a full-screen map or the station screen is up, and for the jump itself. */
@@ -249,6 +258,18 @@ public:
         Scene::updateCamera(camera, dt, rig);
     }
 
+    /** Read-only views of the commander (credits, hold, fitted bay) and the trading economy, for tests and tools. */
+    const Commander& commander() const
+    {
+        return commander_;
+    }
+
+    /** The trading economy: markets, prices and trader agents. */
+    const TradeNetwork& tradeNetwork() const
+    {
+        return trade_;
+    }
+
     /** Read-only view of the docking computer, e.g. for debugging or future HUD elements. */
     const DockingComputer& dockingComputer() const
     {
@@ -281,6 +302,10 @@ public:
 
         if (phaseBefore != DockingPhase::Docked && docking_.phase == DockingPhase::Docked)
             openStationMenu();
+
+        // The galaxy's traders carry on while you play, and the ship feels what's in its hold.
+        trade_.advance(trade_.time() + static_cast<double>(dt));
+        syncShipLoad();
 
         updateCruiseTransitionEffects(dt);
         updateHyperspace(dt);
@@ -382,6 +407,9 @@ private:
     StationMenu stationMenu_;
     Commander commander_;
 
+    /** Every system's market and the trader agents moving goods between them. */
+    TradeNetwork trade_;
+
     /** The save slot this game belongs to (0-2), or -1 if it can't be saved; time played; what's in the slot now. */
     int saveSlot_ = -1;
     double playTime_ = 0.0;
@@ -405,6 +433,7 @@ private:
 
         world_ = World();
         world_.playerShip.fuel = std::min(carriedFuel, world_.playerShip.fuelCapacity);
+        syncShipLoad();
         docking_ = DockingComputer();
         stationMenuOpen_ = false;
         wasCruising_ = false;
@@ -564,6 +593,29 @@ private:
         view.fillQuote = quoteRefuel(ship, commander_, price, ship.fuelCapacity);
         view.oneTonneQuote = quoteRefuel(ship, commander_, price, 1.f);
 
+        // Hold, market and upgrades.
+        view.cargoUsed = commander_.cargo.total();
+        view.cargoCapacity = commander_.cargoCapacity();
+        view.cargoModuleName = cargoModuleName(commander_.cargoModule);
+        view.traderNote = trade_.describeTraderEvent(currentSystemIndex_);
+
+        for (int good = 0; good < goodCount; ++good)
+        {
+            MarketRowView row;
+            row.name = upperCase(goodName(good));
+            row.buyPrice = trade_.buyPrice(currentSystemIndex_, good);
+            row.sellPrice = trade_.sellPrice(currentSystemIndex_, good);
+            row.stock = static_cast<int>(std::floor(trade_.stock(currentSystemIndex_, good)));
+            row.held = commander_.cargo.of(good);
+            row.versusAverage = trade_.versusAverage(currentSystemIndex_, good);
+            row.canBuy = trade_.quoteBuy(currentSystemIndex_, good, 1, commander_.cargoRoom(), commander_.credits).tonnes > 0;
+            row.canSell = row.held > 0;
+            view.market.push_back(row);
+        }
+
+        for (const ShipUpgrade& upgrade : upgradeCatalogue())
+            view.upgrades.push_back({upgrade.name, upgrade.description, upgrade.price, offerFor(upgrade, commander_.cargoModule, commander_.credits)});
+
         view.saveSlot = saveSlot_;
         view.hasSave = slotSummary_.has_value();
 
@@ -584,7 +636,9 @@ private:
         const float price = fuelPricePerTonne(galaxy_.systems[static_cast<std::size_t>(currentSystemIndex_)]);
         Ship& ship = world_.playerShip;
 
-        switch (stationMenu_.handleEvent(event, window))
+        const StationMenuAction action = stationMenu_.handleEvent(event, window);
+
+        switch (action)
         {
             case StationMenuAction::Close:
                 stationMenuOpen_ = false;
@@ -614,6 +668,17 @@ private:
                 break;
             }
 
+            case StationMenuAction::BuyGoodOne:
+            case StationMenuAction::BuyGoodMax:
+            case StationMenuAction::SellGoodOne:
+            case StationMenuAction::SellGoodAll:
+                tradeSelectedGood(action);
+                break;
+
+            case StationMenuAction::InstallUpgrade:
+                installSelectedUpgrade();
+                break;
+
             case StationMenuAction::SaveGame:
                 saveToSlot(true);
                 break;
@@ -640,6 +705,98 @@ private:
         }
     }
 
+    /* ---- Trading ----------------------------------------------------------------------------- */
+
+    /** Capitals, the way goods are shown on the station screen. */
+    static std::string upperCase(std::string text)
+    {
+        for (char& c : text)
+            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+
+        return text;
+    }
+
+    /** Copies the hold onto the ship, so the thrusters, turn rate and HUD all feel what's carried. */
+    void syncShipLoad()
+    {
+        world_.playerShip.cargoMass = static_cast<float>(commander_.cargo.total());
+        world_.playerShip.cargoCapacity = static_cast<float>(commander_.cargoCapacity());
+    }
+
+    /**
+     * Buys or sells the highlighted good at this system's market: one tonne or as many as hold,
+     * stock and credits allow when buying, one tonne or the lot when selling. The market works out
+     * the price tonne by tonne; this moves the goods and the credits and says what happened.
+     */
+    void tradeSelectedGood(StationMenuAction action)
+    {
+        const int system = currentSystemIndex_;
+        const int good = stationMenu_.selectedGood();
+        const std::string name = upperCase(goodName(good));
+        char message[96];
+
+        if (action == StationMenuAction::BuyGoodOne || action == StationMenuAction::BuyGoodMax)
+        {
+            const int wanted = action == StationMenuAction::BuyGoodMax ? std::max(1, commander_.cargoRoom()) : 1;
+            const trading::TradeQuote quote = trade_.buy(system, good, wanted, commander_.cargoRoom(), commander_.credits);
+
+            if (quote.tonnes > 0)
+            {
+                commander_.credits -= quote.value;
+                commander_.cargo.add(good, quote.tonnes);
+                std::snprintf(message, sizeof(message), "BOUGHT %d t %s  -%.0f CR", quote.tonnes, name.c_str(), quote.value);
+            }
+            else
+            {
+                std::snprintf(message, sizeof(message), "%s",
+                              quote.limit == trading::Limit::SoldOut ? "SOLD OUT"
+                              : (quote.limit == trading::Limit::HoldFull ? "HOLD FULL" : "NOT ENOUGH CREDITS"));
+            }
+        }
+        else
+        {
+            const int held = commander_.cargo.of(good);
+            const int wanted = action == StationMenuAction::SellGoodAll ? std::max(1, held) : 1;
+            const trading::TradeQuote quote = trade_.sell(system, good, wanted, held);
+
+            if (quote.tonnes > 0)
+            {
+                commander_.credits += quote.value;
+                commander_.cargo.add(good, -quote.tonnes);
+                std::snprintf(message, sizeof(message), "SOLD %d t %s  +%.0f CR", quote.tonnes, name.c_str(), quote.value);
+            }
+            else
+            {
+                std::snprintf(message, sizeof(message), "NOTHING TO SELL");
+            }
+        }
+
+        syncShipLoad();
+        docking::showMessage(docking_, message, 2.f);
+    }
+
+    /** Buys the highlighted upgrade if allowed, and says what happened. */
+    void installSelectedUpgrade()
+    {
+        const std::size_t index = static_cast<std::size_t>(std::max(0, stationMenu_.selectedUpgrade()));
+        const UpgradeOffer offer = buyUpgrade(commander_, index);
+        char message[96];
+
+        switch (offer.status)
+        {
+            case UpgradeStatus::Available:
+                std::snprintf(message, sizeof(message), "%s INSTALLED  -%.0f CR", upgradeCatalogue()[index].name, offer.cost);
+                break;
+
+            case UpgradeStatus::Installed: std::snprintf(message, sizeof(message), "ALREADY INSTALLED"); break;
+            case UpgradeStatus::HaveBetter: std::snprintf(message, sizeof(message), "YOU ALREADY HAVE A BETTER ONE"); break;
+            case UpgradeStatus::CantAfford: std::snprintf(message, sizeof(message), "NOT ENOUGH CREDITS (KEEP %.0f CR TO TRADE)", upgradeReserveCredits); break;
+        }
+
+        syncShipLoad();
+        docking::showMessage(docking_, message, 2.5f);
+    }
+
     /* ---- Saving and loading ------------------------------------------------------------------ */
 
     /** The current game as a save: commander, credits, fuel, this system and time played. */
@@ -652,6 +809,16 @@ private:
         save.systemIndex = currentSystemIndex_;
         save.systemName = currentSystemName_;
         save.fuel = world_.playerShip.fuel;
+
+        save.cargoModule = static_cast<int>(commander_.cargoModule);
+
+        for (int good = 0; good < goodCount; ++good)
+        {
+            if (commander_.cargo.of(good) > 0)
+                save.cargo.emplace_back(goodName(good), commander_.cargo.of(good));
+        }
+
+        trade_.fillSave(save);
         save.playTimeSeconds = playTime_;
         return save;
     }
@@ -683,6 +850,18 @@ private:
     {
         commander_.name = save.commanderName;
         commander_.credits = save.credits;
+
+        commander_.cargoModule = cargoModuleFromInt(save.cargoModule);
+        commander_.cargo = {};
+
+        for (const auto& [name, tonnes] : save.cargo)
+            commander_.cargo.add(goodIndex(name), tonnes);
+
+        commander_.cargo.trimTo(commander_.cargoCapacity());
+
+        // Saves from before trading have no network; the one built at start-up stands in for it.
+        if (save.hasTrade)
+            trade_.restore(galaxy_, save);
         playTime_ = save.playTimeSeconds;
         hyperspace_ = {};
         mapView_ = MapView::None;
@@ -750,6 +929,9 @@ private:
             // Pay for the jump before the ship is carried into the new system.
             Ship& ship = world_.playerShip;
             ship.fuel = std::max(0.f, ship.fuel - jumpFuelCost(ship, jump.distance));
+
+            // The trip takes galactic time: the traders keep moving while you travel.
+            trade_.advance(trade_.time() + static_cast<double>(jump.distance) * trading::jumpSecondsPerLightYear);
 
             enterSystem(jump.destination);
             hyperspace_ = jump;

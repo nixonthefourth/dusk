@@ -19,15 +19,34 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 /** How many save slots the game offers. */
 constexpr int saveSlotCount = 3;
 
 /** Bumped whenever the save format changes; older files are still read (unknown keys are ignored, missing ones default). */
-constexpr int saveFormatVersion = 1;
+constexpr int saveFormatVersion = 2;
 
 /** Longest commander name allowed, in characters. */
 constexpr std::size_t maxCommanderNameLength = 16;
+
+/** One market stock level that differs from its system's baseline: only changed entries are saved. */
+struct SavedStock {
+    int system = 0;
+    std::string good;
+    float stock = 0.f;
+};
+
+/** One trader agent (see systems/trading.h++): where it is, where it's going, and what it carries. */
+struct SavedAgent {
+    int system = 0;
+    int destination = 0;
+    double arriveTime = 0.0;
+    std::string good;       // empty when the hold is empty
+    int tonnes = 0;
+    int visits = 0;
+};
 
 /**
  * Everything a save remembers. Saving only happens while docked, so a save doesn't need a ship
@@ -51,6 +70,20 @@ struct SaveGame {
 
     /** Total time played in this slot, in seconds. */
     double playTimeSeconds = 0.0;
+
+    /** The hold: tonnes of each good by name, and the fitted cargo bay module (0 none, 1 Mk1, 2 Mk2). */
+    std::vector<std::pair<std::string, int>> cargo;
+    int cargoModule = 0;
+
+    /**
+     * The trading network's state: the galaxy clock, every market stock that has moved away from
+     * its baseline, and every trader agent. `hasTrade` is false for saves from before trading
+     * existed, which start the network fresh.
+     */
+    bool hasTrade = false;
+    double galaxyTime = 0.0;
+    std::vector<SavedStock> stocks;
+    std::vector<SavedAgent> agents;
 
     /** When the save was written, as readable local time ("2026-10-05 14:32"). Display only. */
     std::string savedAt;
@@ -196,8 +229,51 @@ inline std::string serialiseSave(const SaveGame& save)
     out << "systemName=" << save.systemName << '\n';
     out << "fuel=" << save.fuel << '\n';
     out << "playTime=" << save.playTimeSeconds << '\n';
+    out << "cargoModule=" << save.cargoModule << '\n';
+
+    for (const auto& [good, tonnes] : save.cargo)
+        out << "cargo=" << good << ',' << tonnes << '\n';
+
+    if (save.hasTrade)
+    {
+        out << "galaxyTime=" << save.galaxyTime << '\n';
+
+        // Tenths of a tonne and of a second are plenty, and keep these (many) lines short.
+        char line[160];
+
+        for (const SavedStock& stock : save.stocks)
+        {
+            std::snprintf(line, sizeof(line), "stock=%d,%s,%.1f\n", stock.system, stock.good.c_str(), static_cast<double>(stock.stock));
+            out << line;
+        }
+
+        for (const SavedAgent& agent : save.agents)
+        {
+            std::snprintf(line, sizeof(line), "agent=%d,%d,%.1f,%s,%d,%d\n", agent.system, agent.destination, agent.arriveTime,
+                          agent.good.c_str(), agent.tonnes, agent.visits);
+            out << line;
+        }
+    }
+
     out << "savedAt=" << save.savedAt << '\n';
     return out.str();
+}
+
+/** Splits "a,b,c" on commas (goods names contain spaces but never commas). */
+inline std::vector<std::string> splitFields(const std::string& text)
+{
+    std::vector<std::string> fields;
+    std::string field;
+    std::istringstream in(text);
+
+    while (std::getline(in, field, ','))
+        fields.push_back(field);
+
+    // getline drops a trailing empty field ("a,b,"); keep it so empty goods names round-trip.
+    if (!text.empty() && text.back() == ',')
+        fields.emplace_back();
+
+    return fields;
 }
 
 /**
@@ -243,6 +319,43 @@ inline std::optional<SaveGame> parseSave(const std::string& text)
             save.fuel = std::max(0.f, static_cast<float>(std::atof(value.c_str())));
         else if (key == "playTime")
             save.playTimeSeconds = std::max(0.0, std::atof(value.c_str()));
+        else if (key == "cargoModule")
+            save.cargoModule = std::clamp(std::atoi(value.c_str()), 0, 2);
+        else if (key == "cargo")
+        {
+            const auto fields = splitFields(value);
+
+            if (fields.size() == 2)
+                save.cargo.emplace_back(fields[0], std::max(0, std::atoi(fields[1].c_str())));
+        }
+        else if (key == "galaxyTime")
+        {
+            save.hasTrade = true;
+            save.galaxyTime = std::max(0.0, std::atof(value.c_str()));
+        }
+        else if (key == "stock")
+        {
+            const auto fields = splitFields(value);
+
+            if (fields.size() == 3)
+                save.stocks.push_back({std::max(0, std::atoi(fields[0].c_str())), fields[1], std::max(0.f, static_cast<float>(std::atof(fields[2].c_str())))});
+        }
+        else if (key == "agent")
+        {
+            const auto fields = splitFields(value);
+
+            if (fields.size() == 6)
+            {
+                save.agents.push_back({
+                    std::max(0, std::atoi(fields[0].c_str())),
+                    std::max(0, std::atoi(fields[1].c_str())),
+                    std::max(0.0, std::atof(fields[2].c_str())),
+                    fields[3],
+                    std::max(0, std::atoi(fields[4].c_str())),
+                    std::max(0, std::atoi(fields[5].c_str()))
+                });
+            }
+        }
         else if (key == "savedAt")
             save.savedAt = value;
     }
