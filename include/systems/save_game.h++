@@ -26,7 +26,7 @@
 constexpr int saveSlotCount = 3;
 
 /** Bumped whenever the save format changes; older files are still read (unknown keys are ignored, missing ones default). */
-constexpr int saveFormatVersion = 3;
+constexpr int saveFormatVersion = 4;
 
 /** Longest commander name allowed, in characters. */
 constexpr std::size_t maxCommanderNameLength = 16;
@@ -78,6 +78,10 @@ struct SaveGame {
     /** The fitted fuel tank module (0 none, 1 Mk1, 2 Mk2), and whether the docking computer has been bought. */
     int fuelTank = 0;
     bool autoDock = false;
+
+    /** Whether the economics and political scanners have been bought. */
+    bool economicsScanner = false;
+    bool politicalScanner = false;
 
     /**
      * The trading network's state: the galaxy clock, every market stock that has moved away from
@@ -236,6 +240,8 @@ inline std::string serialiseSave(const SaveGame& save)
     out << "cargoModule=" << save.cargoModule << '\n';
     out << "fuelTank=" << save.fuelTank << '\n';
     out << "autoDock=" << (save.autoDock ? 1 : 0) << '\n';
+    out << "economicsScanner=" << (save.economicsScanner ? 1 : 0) << '\n';
+    out << "politicalScanner=" << (save.politicalScanner ? 1 : 0) << '\n';
 
     for (const auto& [good, tonnes] : save.cargo)
         out << "cargo=" << good << ',' << tonnes << '\n';
@@ -331,6 +337,10 @@ inline std::optional<SaveGame> parseSave(const std::string& text)
             save.fuelTank = std::clamp(std::atoi(value.c_str()), 0, 2);
         else if (key == "autoDock")
             save.autoDock = std::atoi(value.c_str()) != 0;
+        else if (key == "economicsScanner")
+            save.economicsScanner = std::atoi(value.c_str()) != 0;
+        else if (key == "politicalScanner")
+            save.politicalScanner = std::atoi(value.c_str()) != 0;
         else if (key == "cargo")
         {
             const auto fields = splitFields(value);

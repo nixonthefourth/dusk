@@ -16,7 +16,7 @@ constexpr double dockingFee = 15.0;
 
 /**
  * The charge for a ship without a docking computer, which the Union flies in on a tug. Chosen so
- * that a new commander needs about seven good trades to afford the computer (and the computer
+ * that a new commander needs about six good trades to afford the computer (and the computer
  * then saves them this minus dockingFee on every docking).
  */
 constexpr double unionTugFee = 200.0;

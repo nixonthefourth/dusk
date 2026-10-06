@@ -30,6 +30,13 @@ struct Commander {
     FuelTankModule fuelTank = FuelTankModule::None;
     bool hasDockingComputer = false;
 
+    /**
+     * The scanners, both paid upgrades. Without them the galactic chart shows only each system's
+     * occupation: the economics scanner reveals its exports, the political scanner its development.
+     */
+    bool hasEconomicsScanner = false;
+    bool hasPoliticalScanner = false;
+
     /** Tank size in tonnes: 6 standard, 10 with a Mk1 tank, 14 with a Mk2 tank. */
     float fuelCapacity() const
     {

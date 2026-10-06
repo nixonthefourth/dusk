@@ -132,6 +132,7 @@ public:
         pageFocused_ = false;
         selectedGood_ = 0;
         selectedUpgrade_ = 0;
+        upgradeScroll_ = 0;
     }
 
     /** The highlighted good (an index into the goods list) and upgrade (an index into the catalogue). */
@@ -293,6 +294,9 @@ private:
     int selectedGood_ = 0;
     int selectedUpgrade_ = 0;
 
+    /** Index of the first upgrade card shown, for a catalogue longer than the page can hold. */
+    int upgradeScroll_ = 0;
+
     static constexpr float headerHeight = 64.f;
     static constexpr float listWidth = 190.f;
     static constexpr float serviceHeight = 40.f;
@@ -331,10 +335,12 @@ private:
 
             case sf::Keyboard::Key::Up:
                 row = (row + rows - 1) % rows;
+                keepSelectedUpgradeVisible();
                 break;
 
             case sf::Keyboard::Key::Down:
                 row = (row + 1) % rows;
+                keepSelectedUpgradeVisible();
                 break;
 
             case sf::Keyboard::Key::B:
@@ -355,6 +361,15 @@ private:
         }
 
         return StationMenuAction::None;
+    }
+
+    /** Scrolls the upgrade list just far enough that the highlighted card is on screen. */
+    void keepSelectedUpgradeVisible()
+    {
+        if (selectedUpgrade_ < upgradeScroll_)
+            upgradeScroll_ = selectedUpgrade_;
+        else if (selectedUpgrade_ >= upgradeScroll_ + visibleUpgradeRows)
+            upgradeScroll_ = selectedUpgrade_ - visibleUpgradeRows + 1;
     }
 
     /** What each of the selected page's buttons does, left to right. */
@@ -416,8 +431,11 @@ private:
     /** Height of one row in the market table, and where the table starts on the page (under the title and column heads). */
     static constexpr float marketRowHeight = 21.f;
     static constexpr float tableTop = 66.f;
-    static constexpr float upgradeRowHeight = 46.f;
-    static constexpr float upgradeRowGap = 6.f;
+    static constexpr float upgradeRowHeight = 38.f;
+    static constexpr float upgradeRowGap = 4.f;
+
+    /** How many upgrade cards fit on the page at once; a longer catalogue scrolls to follow the selection. */
+    static constexpr int visibleUpgradeRows = 7;
 
     /** Row `index` of the selected page's list: a market line or an upgrade card. */
     sf::FloatRect rowBounds(sf::Vector2u size, int index) const
@@ -427,7 +445,13 @@ private:
         if (selectedPage() == StationPage::Market)
             return {{page.position.x, page.position.y + tableTop + static_cast<float>(index) * marketRowHeight}, {page.size.x, marketRowHeight}};
 
-        return {{page.position.x, page.position.y + 44.f + static_cast<float>(index) * (upgradeRowHeight + upgradeRowGap)}, {page.size.x, upgradeRowHeight}};
+        // Cards scrolled out of view have no bounds, so they can't be clicked.
+        const int slot = index - upgradeScroll_;
+
+        if (slot < 0 || slot >= visibleUpgradeRows)
+            return {{-1000.f, -1000.f}, {0.f, 0.f}};
+
+        return {{page.position.x, page.position.y + 44.f + static_cast<float>(slot) * (upgradeRowHeight + upgradeRowGap)}, {page.size.x, upgradeRowHeight}};
     }
 
     /** The page's action buttons, side by side along its bottom, sharing the width: 0 is the main action. */
@@ -733,7 +757,11 @@ private:
         const float x = page.position.x;
         drawText(target, font, "UPGRADES", {x, page.position.y}, 28, style::accent);
 
-        for (int row = 0; row < static_cast<int>(view.upgrades.size()); ++row)
+        const int total = static_cast<int>(view.upgrades.size());
+        const int firstRow = upgradeScroll_;
+        const int lastRow = std::min(total, upgradeScroll_ + visibleUpgradeRows);
+
+        for (int row = firstRow; row < lastRow; ++row)
         {
             const UpgradeRowView& upgrade = view.upgrades[static_cast<std::size_t>(row)];
             const sf::FloatRect bounds = rowBounds(size, row);
@@ -747,21 +775,21 @@ private:
             target.draw(card);
 
             const bool usable = upgrade.offer.status == UpgradeStatus::Available || upgrade.offer.status == UpgradeStatus::CantAfford;
-            drawText(target, font, upgrade.name, {bounds.position.x + 12.f, bounds.position.y + 4.f}, 19, usable ? style::textPrimary : style::textDim);
-            drawText(target, font, upgrade.description, {bounds.position.x + 12.f, bounds.position.y + 26.f}, 14, style::textSecondary);
+            drawText(target, font, upgrade.name, {bounds.position.x + 10.f, bounds.position.y + 2.f}, 17, usable ? style::textPrimary : style::textDim);
+            drawText(target, font, upgrade.description, {bounds.position.x + 10.f, bounds.position.y + 21.f}, 13, style::textSecondary);
 
             // Right-hand side: the price you'd pay, or why you can't.
-            const float right = bounds.position.x + bounds.size.x - 12.f;
+            const float right = bounds.position.x + bounds.size.x - 10.f;
             char buffer[64];
 
             switch (upgrade.offer.status)
             {
                 case UpgradeStatus::Installed:
-                    drawText(target, font, "INSTALLED", {right, bounds.position.y + 12.f}, 18, style::profit, 1.f);
+                    drawText(target, font, "INSTALLED", {right, bounds.position.y + 9.f}, 16, style::profit, 1.f);
                     break;
 
                 case UpgradeStatus::HaveBetter:
-                    drawText(target, font, "YOU HAVE BETTER", {right, bounds.position.y + 14.f}, 14, style::textDim, 1.f);
+                    drawText(target, font, "YOU HAVE BETTER", {right, bounds.position.y + 11.f}, 13, style::textDim, 1.f);
                     break;
 
                 case UpgradeStatus::Available:
@@ -769,21 +797,26 @@ private:
                 {
                     const bool affordable = upgrade.offer.status == UpgradeStatus::Available;
                     std::snprintf(buffer, sizeof(buffer), "%.0f CR", upgrade.offer.cost);
-                    drawText(target, font, buffer, {right, bounds.position.y + 3.f}, 20, affordable ? style::accent : style::warning, 1.f);
+                    drawText(target, font, buffer, {right, bounds.position.y + 1.f}, 18, affordable ? style::accent : style::warning, 1.f);
 
                     if (upgrade.offer.cost < upgrade.listPrice - 0.5)
-                        drawText(target, font, "AFTER TRADE-IN", {right, bounds.position.y + 27.f}, 12, style::textDim, 1.f);
+                        drawText(target, font, "AFTER TRADE-IN", {right, bounds.position.y + 22.f}, 11, style::textDim, 1.f);
                     else if (!affordable)
-                        drawText(target, font, "NOT ENOUGH CREDITS", {right, bounds.position.y + 27.f}, 12, style::warning, 1.f);
+                        drawText(target, font, "NOT ENOUGH CREDITS", {right, bounds.position.y + 22.f}, 11, style::warning, 1.f);
 
                     break;
                 }
             }
         }
 
-        const float noteY = rowBounds(size, static_cast<int>(view.upgrades.size())).position.y + 2.f;
-        const std::string note = "KEEPS " + std::to_string(static_cast<int>(upgradeReserveCredits)) + " CR IN RESERVE   REPLACED MODULES TRADE IN AT HALF PRICE";
-        drawText(target, font, note, {x, noteY}, 14, style::textDim);
+        // Under the cards: the rules in one line, or where you are in a longer list.
+        const float noteY = page.position.y + 44.f + static_cast<float>(visibleUpgradeRows) * (upgradeRowHeight + upgradeRowGap) + 2.f;
+        std::string note = "KEEPS " + std::to_string(static_cast<int>(upgradeReserveCredits)) + " CR IN RESERVE   REPLACED MODULES TRADE IN AT HALF PRICE";
+
+        if (total > visibleUpgradeRows)
+            note = "SHOWING " + std::to_string(firstRow + 1) + "-" + std::to_string(lastRow) + " OF " + std::to_string(total) + "   UP/DOWN FOR MORE";
+
+        drawText(target, font, note, {x, noteY}, 13, style::textDim);
 
         const UpgradeRowView* current = selectedUpgrade_ < static_cast<int>(view.upgrades.size()) ? &view.upgrades[static_cast<std::size_t>(selectedUpgrade_)] : nullptr;
         drawPageButton(target, font, size, 0, "INSTALL", current && current->offer.status == UpgradeStatus::Available);

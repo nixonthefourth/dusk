@@ -15,6 +15,16 @@
 #include <cstdio>
 #include <string>
 
+/**
+ * What the chart is allowed to show about systems beyond the basics (name, position, occupation,
+ * planets, stations, belts and traffic). The scanners are paid upgrades; without them the chart
+ * shows neither a system's development nor its exports.
+ */
+struct ChartIntel {
+    bool development = false;   // political scanner: Poor / Developing / Progressive
+    bool exports = false;       // economics scanner: the goods a system exports
+};
+
 /** What the scene should do after the chart has handled an event. */
 enum class GalaxyMapAction { None, Close, Jump };
 
@@ -178,11 +188,13 @@ public:
         bool jumpAvailable,
         const std::string& jumpBlockedReason,
         float jumpRangeLY,
-        float fuelPerLightYear
+        float fuelPerLightYear,
+        ChartIntel intel
     )
     {
         jumpRangeLY_ = jumpRangeLY;
         fuelPerLightYear_ = fuelPerLightYear;
+        intel_ = intel;
         const sf::Vector2u size = target.getSize();
         const float width = static_cast<float>(size.x);
         const float height = static_cast<float>(size.y);
@@ -204,6 +216,9 @@ private:
     /** Hyperspace reach on the fuel aboard, and fuel burned per light year, as last handed in by the scene. */
     float jumpRangeLY_ = 1e9f;
     float fuelPerLightYear_ = 0.f;
+
+    /** What the commander's scanners let the chart show, as last handed in by the scene. */
+    ChartIntel intel_;
     float zoom_ = 2.f;
     Vec2 viewCenter_;
 
@@ -371,9 +386,12 @@ private:
         return {{x, static_cast<float>(size.y) - 112.f}, {panelWidth - 40.f, 44.f}};
     }
 
-    /** Dot colour for a system, by economy tier (set in the stylesheet). */
-    static sf::Color systemColor(const SystemInfo& info)
+    /** Dot colour for a system, by development (set in the stylesheet); one neutral colour without the political scanner. */
+    sf::Color systemColor(const SystemInfo& info) const
     {
+        if (!intel_.development)
+            return style::chartUnscanned;
+
         switch (info.economyTier)
         {
             case EconomyTier::Poor: return style::economyPoor;
@@ -558,7 +576,14 @@ private:
 
         const auto row = [&](const std::string& label, const std::string& value, sf::Color color = style::textPrimary)
         {
-            drawLabel(target, font, label, {x, y}, 17, style::textDim);
+            // Long labels ("DEVELOPMENT") shrink to fit the label column instead of running into the value.
+            unsigned labelSize = 17;
+            const float labelWidth = sf::Text(font, label, labelSize).getLocalBounds().size.x;
+
+            if (labelWidth > 78.f)
+                labelSize = static_cast<unsigned>(std::max(11.f, 17.f * 78.f / labelWidth));
+
+            drawLabel(target, font, label, {x, y + (17.f - static_cast<float>(labelSize)) * 0.3f}, labelSize, style::textDim);
             drawLabel(target, font, value, {x + 84.f, y}, 17, color);
             y += 23.f;
         };
@@ -572,7 +597,8 @@ private:
             std::snprintf(fuel, sizeof(fuel), "%.1f t", galacticDistance(current, info) * fuelPerLightYear_);
             row("FUEL NEEDED", fuel, inRange(galaxy, currentIndex, selected_) ? style::textPrimary : style::warning);
         }
-        row("ECONOMY", economyTierName(info.economyTier), systemColor(info));
+        row("DEVELOPMENT", intel_.development ? economyTierName(info.economyTier) : "UNKNOWN",
+            intel_.development ? systemColor(info) : style::textDim);
         row("TRADE", info.occupation);
         row("PLANETS", std::to_string(info.planetCount));
         row("STATION", info.stationCount > 0 && info.planetCount > 0 ? "YES" : "NONE");
@@ -583,13 +609,41 @@ private:
         drawLabel(target, font, "EXPORTS", {x, y}, 17, style::textDim);
         y += 23.f;
 
-        for (const std::string& good : info.goods)
+        if (intel_.exports)
         {
-            if (y > height - 150.f)
-                break;
+            for (const std::string& good : info.goods)
+            {
+                if (y > height - 150.f)
+                    break;
 
-            drawLabel(target, font, good, {x + 10.f, y}, 17, style::textPrimary);
-            y += 21.f;
+                drawLabel(target, font, good, {x + 10.f, y}, 17, style::textPrimary);
+                y += 21.f;
+            }
+        }
+        else
+        {
+            drawLabel(target, font, "UNKNOWN", {x + 10.f, y}, 17, style::textDim);
+            y += 24.f;
+        }
+
+        // Say what would reveal what's hidden, so the player knows there is something to buy.
+        if (!intel_.exports || !intel_.development)
+        {
+            y += 6.f;
+
+            if (!intel_.exports)
+            {
+                drawLabel(target, font, "ECONOMICS SCANNER: EXPORTS", {x, y}, 13, style::textDim);
+                y += 17.f;
+            }
+
+            if (!intel_.development)
+            {
+                drawLabel(target, font, "POLITICAL SCANNER: DEVELOPMENT", {x, y}, 13, style::textDim);
+                y += 17.f;
+            }
+
+            drawLabel(target, font, "SOLD AT STATIONS (UPGRADES)", {x, y}, 13, style::textDim);
         }
 
         const sf::FloatRect button = jumpButtonBounds(size);

@@ -339,7 +339,8 @@ public:
                 jumpAvailable(),
                 jumpBlockedReason(),
                 jumpRangeLightYears(world_.playerShip),
-                world_.playerShip.hyperspaceFuelPerLightYear
+                world_.playerShip.hyperspaceFuelPerLightYear,
+                ChartIntel{commander_.hasPoliticalScanner, commander_.hasEconomicsScanner}
             );
             return;
         }
@@ -663,10 +664,11 @@ private:
             case StationMenuAction::RefuelFull:
             case StationMenuAction::RefuelOneTonne:
             {
-                const bool full = stationMenu_.selectedPage() == StationPage::Refuel &&
-                                  !(event.getIf<sf::Event::KeyPressed>() &&
-                                    event.getIf<sf::Event::KeyPressed>()->code == sf::Keyboard::Key::B);
-                const RefuelQuote bought = buyFuel(ship, commander_, price, full ? ship.fuelCapacity : 1.f);
+                // The menu says which button was used: FILL TANK buys the whole tank, BUY 1 t one
+                // tonne, whether it was clicked or reached by keyboard. (This used to guess from
+                // the input device, so clicking BUY 1 t, which isn't a key press, bought the tank.)
+                const float wanted = action == StationMenuAction::RefuelFull ? ship.fuelCapacity : 1.f;
+                const RefuelQuote bought = buyFuel(ship, commander_, price, wanted);
 
                 char message[64];
 
@@ -843,6 +845,8 @@ private:
         save.cargoModule = static_cast<int>(commander_.cargoModule);
         save.fuelTank = static_cast<int>(commander_.fuelTank);
         save.autoDock = commander_.hasDockingComputer;
+        save.economicsScanner = commander_.hasEconomicsScanner;
+        save.politicalScanner = commander_.hasPoliticalScanner;
 
         for (int good = 0; good < goodCount; ++good)
         {
@@ -886,6 +890,8 @@ private:
         commander_.cargoModule = cargoModuleFromInt(save.cargoModule);
         commander_.fuelTank = fuelTankFromInt(save.fuelTank);
         commander_.hasDockingComputer = save.autoDock;
+        commander_.hasEconomicsScanner = save.economicsScanner;
+        commander_.hasPoliticalScanner = save.politicalScanner;
         commander_.cargo = {};
 
         for (const auto& [name, tonnes] : save.cargo)

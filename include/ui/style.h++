@@ -181,6 +181,9 @@ namespace style {
     inline constexpr sf::Color economyDeveloping{225, 225, 225};
     inline constexpr sf::Color economyProgressive = accent;
 
+    /** System dots when development isn't known: one neutral colour, so the dots give nothing away. */
+    inline constexpr sf::Color chartUnscanned{165, 165, 165};
+
     /** System map: orbits (and the highlighted one), bodies, the station, traffic, you. */
     inline constexpr sf::Color mapOrbit{55, 62, 70};
     inline constexpr sf::Color mapOrbitHighlight = withAlpha(accent, 120);

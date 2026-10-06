@@ -38,7 +38,8 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - A recycled, endless-feeling starfield.
 - Frustum clipping for both points and line segments, with a small side guard-band so things don't visibly pop in at the frustum edges.
 - A system's star drawn as a solid filled disc, and its planets drawn as gridded, optionally ringed wireframes — sorted and drawn back-to-front together, with per-edge visibility shading based on facing direction.
-- Ship upgrades at stations: Cargo Bay Mk1/Mk2, Fuel Tank Mk1/Mk2 (10 t and 14 t tanks, up to 93 LY of jumps) and the docking computer. Every docking costs a Space Union fee.
+- Ship upgrades at stations: Cargo Bay Mk1/Mk2, Fuel Tank Mk1/Mk2 (10 t and 14 t tanks, up to 93 LY of jumps), the docking computer, and two chart scanners.
+- Chart scanners: a new commander knows only what each system *is* (agricultural, mining or tech). An economics scanner (1,500 CR) reveals each system's exports and a political scanner (1,000 CR) its development status. Every docking costs a Space Union fee.
 - Trading: a market page at every station, a 10 t hold you can enlarge with Cargo Bay Mk1 (15 t) and Mk2 (20 t), and cargo that counts as real mass, so a loaded ship handles like a freighter.
 - Three save slots: name a new commander, save at any station, and load from the main menu or the station screen.
 - Fuel with mass: a 6-tonne tank limits how far you can jump (40 LY full) and how long you can cruise (about ten minutes flat out), and every tonne aboard makes the ship slower to accelerate and to turn.
@@ -107,7 +108,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [~] Physics
   - [x] Object-level collision hitboxes
   - [x] Fuel expenditure (mass matters)
-- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear) — cargo bays, fuel tanks and the docking computer are for sale; the rest are still to come
+- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear) — cargo bays, fuel tanks, the docking computer and the two chart scanners are for sale; the rest are still to come
 - [x] Save/load: three commander slots, named commanders, saving at stations
 - [~] Docking — automatic docking and launch work, NPCs dock and launch visibly, and the station screen offers refuelling; every docking pays a Space Union fee, and the docking computer is a paid upgrade (a Union tug does the job until you can afford it); manual docking is next
 - [~] Space stations: small, medium, large — one procedurally placed small station (`station_s.obj`) per eligible system today
@@ -179,7 +180,7 @@ Once you're in a system:
 - `G`: open the galactic chart.
 - `M`: open the system map.
 - `T`: lock or clear the target (the station is the only target for now).
-- `C`: dock. With a docking computer the ship flies itself to the station for the Space Union's 15 CR fee; without one, a Union tug does it for 250 CR (see [Docking Fees](#docking-fees)). The fee is taken when the docking completes, and the prompt shows what it will be. Press again during the approach or line-up to cancel (free); once the ship starts entering the slot the sequence is committed. Engaging it also locks the station as your target.
+- `C`: dock. With a docking computer the ship flies itself to the station for the Space Union's 15 CR fee; without one, a Union tug does it for 200 CR (see [Docking Fees](#docking-fees)). The fee is taken when the docking completes, and the prompt shows what it will be. Press again during the approach or line-up to cancel (free); once the ship starts entering the slot the sequence is committed. Engaging it also locks the station as your target.
 
 On the galactic chart:
 
@@ -766,6 +767,8 @@ Idle -> Approach -> Align -> Enter -> Docked -> LaunchReverse -> LaunchTurn -> I
           +-----------+--> Disengage -> Idle   (cancelled with C)
 ```
 
+With the approach speed capped at 1,400 u/s (`maxApproachSpeed`), docking from the far end of a large system is slow: in the 120-case test every docking completed, but the slowest took 966 seconds of game time, about 16 minutes. From the usual spawn point it takes about a minute. Cruising closer first, or raising the cap for the far leg, avoids that.
+
 While it's active, `SystemScene::acceptsShipInput()` returns `false` and `updatePhysics()` calls `updateWorldPhysics(world, dt, false)` so the player ship skips normal integration; `docking::update()` then positions the ship itself. The flight is kinematic — the docking computer places the ship rather than thrusting it — which keeps it smooth and reliable while the target is orbiting a moving planet.
 
 - **Approach** flies to a point 1600 units in front of the slot. Far out, it heads straight there; within a few thousand units it blends in the approach point's own velocity, so it can keep pace with the orbiting station. The velocity *relative* to that point is kept as persistent state and smoothed — recomputing it from the ship's velocity each frame would let the station's centripetal acceleration show up as a constant lag. The path avoids the star, planets and the station hull (a detour waypoint for whatever is in the way, plus local steering away from nearby surfaces), and the speed drops near surfaces so the ship has room to turn.
@@ -858,7 +861,7 @@ price = reference  x  tier  x  local  x  stock
 
 | Factor | What it is |
 | --- | --- |
-| `tier` | `1 + (tierMultiplier − 1) × 0.4`, so Poor 1.06, Developing 1.00, Progressive 0.94. Fuel uses the full multiplier (13.8 / 12 / 10.2 CR/t); goods use only 40% of it, because with the full effect, buying at a progressive exporter and selling at a poor importer paid over 100% and drowned out every real difference. |
+| `tier` | `1 + (tierMultiplier − 1) × 0.4`, so Poor 1.06, Developing 1.00, Progressive 0.94. Fuel uses the full multiplier (17.25 / 15 / 12.75 CR/t); goods use only 40% of it, because with the full effect, buying at a progressive exporter and selling at a poor importer paid over 100% and drowned out every real difference. |
 | `local` | 0.85 for goods the system exports. Otherwise 1.02 + 0.18 × a hash of (system, good), so no two systems price the same goods alike. |
 | `stock` | `clamp((baseline / stock)^0.25, 0.55, 1.8)`. Plentiful stock is cheap, scarce stock dear; stock at its baseline has no effect. |
 
@@ -929,11 +932,13 @@ A fully loaded freighter is a sluggish one. That only affects flying by hand, si
 | Fuel Tank Mk1 | 2,000 CR | +4 t of tank, 10 t in all (66.7 LY of jumps) |
 | Fuel Tank Mk2 | 3,500 CR | +8 t of tank, 14 t in all (93.3 LY); replaces Mk1 |
 | Docking Computer | 2,500 CR | auto-docking on `C` for the 15 CR fee (see [Docking Fees](#docking-fees)) |
+| Economics Scanner | 1,500 CR | the galactic chart shows every system's exports (see [Scanners](#scanners-and-what-the-chart-knows)) |
+| Political Scanner | 1,000 CR | the chart shows every system's development, and colours its dots |
 
 `offerFor()` works out what an upgrade would cost the commander and whether they can have it:
 
 - Tiers of one kind **replace one another**, and a kind never affects another (owning a Mk2 cargo bay doesn't make a Mk1 fuel tank "worse").
-- The tier you're replacing is **traded in at half its list price**, so Cargo Bay Mk1 → Mk2 costs 4,200 − 900 = 3,300 CR and Fuel Tank Mk1 → Mk2 costs 3,500 − 1,000 = 2,500 CR. Buying Mk2 directly costs the full list price. The docking computer has no trade-in.
+- The tier you're replacing is **traded in at half its list price**, so Cargo Bay Mk1 → Mk2 costs 4,200 − 900 = 3,300 CR and Fuel Tank Mk1 → Mk2 costs 3,500 − 1,000 = 2,500 CR. Buying Mk2 directly costs the full list price. The docking computer and the scanners have no trade-in.
 - You can't buy something you already have (`Installed`) or a lesser tier than you have (`HaveBetter`).
 - An upgrade must **leave you at least 200 CR** (`upgradeReserveCredits`), because a commander with an empty purse and an empty hold could never trade again. Even the cheapest tonne anywhere costs 32.6 CR, so the reserve always buys six tonnes. The boundaries are exact and tested: Fuel Mk1 is refused at 2,199 CR and allowed at 2,200; the docking computer at 2,699 and 2,700; Fuel Mk2 over Mk1 at 2,699 and 2,700.
 
@@ -974,6 +979,7 @@ A save (`SaveGame` in `include/systems/save_game.h++`) holds:
 | `fuel` | tonnes aboard |
 | `cargo`, `cargoModule` | tonnes of each good in the hold, and the fitted bay (0 none, 1 Mk1, 2 Mk2) |
 | `fuelTank`, `autoDock` | the fitted fuel tank module (0, 1, 2) and whether the docking computer has been bought |
+| `economicsScanner`, `politicalScanner` | whether each chart scanner has been bought |
 | `galaxyTime` | the trading economy's clock, in game seconds |
 | `stocks` | every market stock that has moved a few percent from its baseline |
 | `agents` | all 300 trader agents: where each is, where it's going, what it carries |
@@ -1003,7 +1009,7 @@ Setting the `DUSK_SAVE_DIR` environment variable overrides all of these, which i
 A save is a small, readable text file:
 
 ```text
-dusk-save 3
+dusk-save 4
 name=NICK
 credits=853.1
 galaxySeed=1337
@@ -1014,6 +1020,8 @@ playTime=312.4
 cargoModule=1
 fuelTank=2
 autoDock=1
+economicsScanner=1
+politicalScanner=0
 cargo=Base ores,3
 cargo=Food,7
 galaxyTime=2112.4
@@ -1024,7 +1032,7 @@ agent=412,415,2120.6,Wines,50,9
 savedAt=2026-10-05 20:44
 ```
 
-Version 2 added the hold, the bay and the trading economy; version 3 added the fuel tank and the docking computer. Older saves still load: a version 1 save comes back with an empty hold, no bay and a fresh economy, and a version 2 save comes back with the standard tank and no docking computer (you'd pay the Union tug until you buy one). A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
+Version 2 added the hold, the bay and the trading economy; version 3 added the fuel tank and the docking computer; version 4 added the two scanners. Older saves still load: a version 1 save comes back with an empty hold, no bay and a fresh economy, and a version 2 or 3 save comes back with whatever it had and no scanners (the chart shows `UNKNOWN` until you buy them). A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
 
 Three choices keep it robust:
 
@@ -1071,6 +1079,36 @@ The handling reference mass is fixed on purpose. When it followed the fitted tan
 
 **HUD.** A FUEL bar sits under THR and SPD. It turns red below a fifth of the tank and shows the tonnes left beside it. The total mass is shown at the top right of the speed block, and a gold HOLD bar under the fuel bar shows tonnes of cargo against hold size.
 
+## Scanners And What The Chart Knows
+
+A new commander knows very little about the galaxy beyond what a system *is*. Two paid upgrades, the **economics scanner** and the **political scanner**, fill in the rest on the galactic chart. (They're unrelated to the 3D scanner on the dashboard, which shows nearby ships and rocks.)
+
+| Chart information | Needs | Without it |
+| --- | --- | --- |
+| name, position, distance, fuel needed | nothing | always shown |
+| **TRADE** (agricultural, mining, or engineering and tech) | nothing | always shown |
+| planets, station, belts, traffic | nothing | always shown |
+| **DEVELOPMENT** (Poor, Developing or Progressive), and the colour of the system dots | the **political scanner** | `UNKNOWN`, and every dot is the same neutral grey |
+| **EXPORTS** (the goods a system sells cheap) | the **economics scanner** | `UNKNOWN` |
+
+Without a scanner, the chart says what would reveal the missing information (`ECONOMICS SCANNER: EXPORTS`, `POLITICAL SCANNER: DEVELOPMENT`, `SOLD AT STATIONS (UPGRADES)`), so a new player knows there is something to buy.
+
+**Prices.** The economics scanner costs **1,500 CR**. You didn't give a price for the political scanner, so I chose **1,000 CR**, a little cheaper because knowing exports matters more for planning a route than knowing development does (development only tilts goods prices about 6% and sets the fuel price). Both are a `ShipUpgrade` row in `upgradeCatalogue()`. They are one-offs with no trade-in, and, like every upgrade, must leave you with the 200 CR reserve, so you need 1,700 CR for the economics scanner and 1,200 CR for the political one (tested at both boundaries).
+
+**What you can still work out without them.** The occupation tells you what a system probably exports, since about four in five of a system's goods come from its occupation's list:
+
+| Occupation | Usually exports |
+| --- | --- |
+| Agricultural | Animals, Food, Furs, Liquor, Wines |
+| Mining | Base ores, Advanced ores, Chemical fuel |
+| Engineering and Tech | Silicon chips, Advanced electronics, Books |
+
+The scanner turns "probably" into the exact two to four goods. And a station's own market is not hidden: the prices there, and the green or yellow comparison with the galaxy average, show what's cheap *there*, and the fuel price hints at its development. Those are observations of a market you're docked in, not scanning, so they stay free. The scanners are about planning, because they work on systems you haven't been to.
+
+**Not remembered.** A system's exports and development stay hidden until you own the scanner even after you've visited it. That keeps the rule simple, but it's a choice: a "discovered systems" memory would be an easy addition if you'd rather visiting revealed things.
+
+**How it's built.** The scene hands the chart a small `ChartIntel` struct (`development`, `exports`), set from the commander's two scanner flags, every time it draws. The chart never draws the hidden information and then covers it up: for an unknown system it draws `UNKNOWN`, and `systemColor()` returns one neutral colour for every dot (`style::chartUnscanned`). The scanners are saved as `economicsScanner` and `politicalScanner`.
+
 ## Docking Fees
 
 Every docking pays the Space Union. The rules are in `include/systems/docking_fees.h++`:
@@ -1078,9 +1116,9 @@ Every docking pays the Space Union. The rules are in `include/systems/docking_fe
 | Ship | Charge |
 | --- | --- |
 | with a docking computer | **15 CR** (`dockingFee`) |
-| without one | **250 CR** (`unionTugFee`): a Union tug flies the ship in |
+| without one | **200 CR** (`unionTugFee`): a Union tug flies the ship in |
 
-**Why a tug.** The docking computer is a paid upgrade (2,500 CR), but a new commander has 1,000 CR and there is no manual docking yet. If docking simply required the computer, anyone who launched before affording it could never dock again: no selling, no refuelling, no saving, and no way to earn the money. So without the computer, `C` still docks you, by the same autopilot, for the tug's higher charge. The computer then pays for itself by saving 235 CR on every docking, roughly 11 trips.
+**Why a tug.** The docking computer is a paid upgrade (2,500 CR), but a new commander has 1,000 CR and there is no manual docking yet. If docking simply required the computer, anyone who launched before affording it could never dock again: no selling, no refuelling, no saving, and no way to earn the money. So without the computer, `C` still docks you, by the same autopilot, for the tug's higher charge. The computer then pays for itself by saving 185 CR on every docking, roughly 14 trips.
 
 **How the price was chosen.** I simulated a greedy trader paying a charge at every docking and counted the trades needed to earn 2,700 CR (the 2,500 CR computer plus the 200 CR reserve) from 1,000 CR:
 
@@ -1088,12 +1126,13 @@ Every docking pays the Space Union. The rules are in `include/systems/docking_fe
 | --- | --- |
 | 15 CR | 4.4 |
 | 150 CR | 5.7 |
+| 200 CR (the shipped value) | 5.8 |
 | 250 CR | 6.6 |
 | 450 CR | 8.7 |
 
-At 250 CR the computer is a real early goal (about seven good trades, around 16 minutes from an optimal trader) without being a grind. A human trader will be slower than this simulation.
+I suggested 250 CR; the shipped 200 CR makes the computer a real early goal (about six good trades, around 15 minutes from an optimal trader) without being a grind. A human trader will be slower than this simulation.
 
-**When it's charged.** `SystemScene::chargeDockingFee()` takes the fee when a docking *completes*. It is not taken when you cancel (an early cancel is free, tested), and not when a saved game loads you straight into a station, since you didn't dock. A message names the fee, `SPACE UNION DOCKING FEE -15 CR` or `UNION TUG FEE -250 CR`, and the `[C]` prompt shows it beforehand (`[C] DOCKING COMPUTER  15 CR`, `[C] UNION TUG  250 CR`).
+**When it's charged.** `SystemScene::chargeDockingFee()` takes the fee when a docking *completes*. It is not taken when you cancel (an early cancel is free, tested), and not when a saved game loads you straight into a station, since you didn't dock. A message names the fee, `SPACE UNION DOCKING FEE -15 CR` or `UNION TUG FEE -200 CR`, and the `[C]` prompt shows it beforehand (`[C] DOCKING COMPUTER  15 CR`, `[C] UNION TUG  200 CR`).
 
 **The Union takes at most what you have.** A commander with nothing in their purse and a hold of goods to sell must still be able to dock, or they could never earn their way out. So `chargeForDocking()` takes `min(fee, credits)`: with 100 CR a tug docking costs 100 CR, and with 0 CR it's free. The message adds `(ALL YOU HAD)` when the fee wasn't covered.
 
@@ -1117,7 +1156,7 @@ The menu itself owns only its selection. Everything it displays comes from a `St
 - `quoteRefuel()` works out what a purchase would deliver: never more than the tank has room for, never more than you can pay for, in 0.1 t steps. A purchase that fills the tank tops it off exactly.
 - `buyFuel()` applies the quote.
 
-The price comes from the local economy: `fuelPricePerTonne()` multiplies the 12 CR/t base by `economyTierMultiplier()`, so fuel costs 13.8 CR/t in Poor systems, 12 in Developing and 10.2 in Progressive. The page shows the gauge, your current and full-tank jump range, your ship's mass against its hull mass, the price, and two buttons that show what they'll buy: FILL (or TANK FULL / NO CREDITS) and BUY 1 t.
+The price comes from the local economy: `fuelPricePerTonne()` multiplies the 15 CR/t base by `economyTierMultiplier()`, so fuel costs 17.25 CR/t in Poor systems, 15 in Developing and 12.75 in Progressive. The page shows the gauge, your current and full-tank jump range, your ship's mass against its hull mass, the price, and two buttons that show what they'll buy: FILL (or TANK FULL / NO CREDITS) and BUY 1 t. The two buttons are different actions (`RefuelFull`, `RefuelOneTonne`), and the scene acts on the action it is given, never on how it was triggered. (It once guessed from the input device, so clicking BUY 1 t, which isn't a key press, bought the whole tank. The bug was reproduced with injected key presses and mouse clicks before the fix, and the same events were re-run afterwards for every path. Those throwaway test programs are not part of the repository, which has no test suite yet.)
 
 **The commander.** `Commander` (`include/objects/commander.h++`) holds the player's persistent state that isn't ship physics. Today that's the name you chose when starting the game (JAMES if you left it blank), your credits (starting at 1,000), the hold (`CargoHold`) and the fitted cargo bay module. `SystemScene` keeps it across jumps, and it is written to your save slot (see [Saving And Loading](#saving-and-loading)). Trading earns credits; missions will too.
 
@@ -1525,7 +1564,7 @@ Targeting itself is world state: `World::target` holds a `TargetLock`, and `targ
 
 Chart positions come from `generateGalaxyLayout()` in `procgen/galaxy.h++`, which stores a `mapPosition` (light years from the core) on every `SystemInfo`. Systems lie on a two-armed logarithmic spiral with a central bulge, kept at least 6 LY apart so each stays clickable. The layout uses its own RNG stream, so it never disturbs the per-system seeds that rebuild each system. System 0, where you start, sits near the outer end of an arm, about 440 LY from the galactic core — the game's end goal, marked on the chart.
 
-Arrow keys pick the system that best continues in that direction (`distance / alignment²`, ignoring anything more than 60° off), and the view recentres when the selection nears the edge. The panel shows the selected system's distance, distance to the core, economy, trade, planets, station, asteroid belts, traffic and exports, plus the jump button. Dots are coloured by economy tier: grey for Poor, white for Developing, accent orange for Progressive (`style::economy*`).
+Arrow keys pick the system that best continues in that direction (`distance / alignment²`, ignoring anything more than 60° off), and the view recentres when the selection nears the edge. The panel shows the selected system's distance, distance to the core, fuel needed, development, trade, planets, station, asteroid belts and traffic, plus its exports and the jump button. Development and exports are hidden (`UNKNOWN`) until you buy the political and economics scanners; see [Scanners](#scanners-and-what-the-chart-knows). With the political scanner, dots are coloured by development: grey for Poor, white for Developing, accent orange for Progressive (`style::economy*`); without it, every dot is one neutral grey (`style::chartUnscanned`).
 
 Jumping starts the hyperspace sequence described under [Travel Animations](#travel-animations); partway through the tunnel, `SystemScene::enterSystem()` regenerates the destination from its seed. Jumps are refused while docked, under the docking computer, or while another jump is in progress. Jump range is limited by fuel (see [Fuel And Mass](#fuel-and-mass)).
 
@@ -1799,6 +1838,7 @@ This is still intentionally small:
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
 - Missions don't exist yet, so trading is the only way to earn credits.
 - There is no manual docking, which is why a Union tug exists (see [Docking Fees](#docking-fees)). Once manual docking exists, the tug could become a rarely-needed service and the computer a pure convenience.
+- The chart scanners are all-or-nothing and aren't remembered per system: visiting a system doesn't reveal its exports or development without the scanner.
 - Fuel is only ever bought at stations; there's no fuel scooping from stars, and no way to refuel in open space.
 - Saving is only possible while docked, and a save holds the commander, credits, fuel, hold, bay, system and play time, plus the trading economy. Nothing else about the world is saved; it's regenerated from the seed.
 - Trader agents are galaxy-level, not ships in the 3D scene: you see their effect in stock and prices and in the market page's trader note, but you can't fly up to one or trade with one. The ambient NPC ships you do see don't carry cargo.

@@ -1,7 +1,8 @@
 //
 // Ship upgrades sold at stations: the catalogue, what each costs given what's already fitted, and
-// buying one. Three kinds exist today: cargo bays and fuel tanks (tiered; a better one replaces a
-// worse one) and the docking computer (one-off). The catalogue is a table so more can follow.
+// buying one. Five kinds exist today: cargo bays and fuel tanks (tiered; a better one replaces a
+// worse one), and the docking computer and the two scanners (one-offs). The catalogue is a table
+// so more can follow.
 //
 
 #ifndef DUSK_UPGRADES_H
@@ -15,7 +16,7 @@
 #include <string>
 
 /** What an upgrade is: each kind has its own slot on the ship, and tiers within it replace one another. */
-enum class UpgradeKind { CargoBay, FuelTank, DockingComputer };
+enum class UpgradeKind { CargoBay, FuelTank, DockingComputer, EconomicsScanner, PoliticalScanner };
 
 /** One thing the outfitting page can sell. */
 struct ShipUpgrade {
@@ -32,15 +33,17 @@ struct ShipUpgrade {
 };
 
 /** The catalogue, in the order the outfitting page lists it. */
-inline const std::array<ShipUpgrade, 5>& upgradeCatalogue()
+inline const std::array<ShipUpgrade, 7>& upgradeCatalogue()
 {
-    static const std::array<ShipUpgrade, 5> catalogue =
+    static const std::array<ShipUpgrade, 7> catalogue =
     {{
         {"CARGO BAY MK1", "Extra hold space: +5 t, 15 t in all.", 1800.0, UpgradeKind::CargoBay, 1},
         {"CARGO BAY MK2", "A bigger bay: +10 t, 20 t in all. Replaces Mk1.", 4200.0, UpgradeKind::CargoBay, 2},
         {"FUEL TANK MK1", "A larger tank: +4 t, 10 t in all (66 LY of jumps).", 2000.0, UpgradeKind::FuelTank, 1},
         {"FUEL TANK MK2", "A bigger tank: +8 t, 14 t in all (93 LY). Replaces Mk1.", 3500.0, UpgradeKind::FuelTank, 2},
         {"DOCKING COMPUTER", "Auto-docking on [C] for the Space Union's 15 CR fee.", 2500.0, UpgradeKind::DockingComputer, 1},
+        {"ECONOMICS SCANNER", "Shows every system's exports on the galactic chart.", 1500.0, UpgradeKind::EconomicsScanner, 1},
+        {"POLITICAL SCANNER", "Shows every system's development, Poor to Progressive.", 1000.0, UpgradeKind::PoliticalScanner, 1},
     }};
 
     return catalogue;
@@ -54,6 +57,8 @@ inline int installedTier(const Commander& commander, UpgradeKind kind)
         case UpgradeKind::CargoBay: return static_cast<int>(commander.cargoModule);
         case UpgradeKind::FuelTank: return static_cast<int>(commander.fuelTank);
         case UpgradeKind::DockingComputer: return commander.hasDockingComputer ? 1 : 0;
+        case UpgradeKind::EconomicsScanner: return commander.hasEconomicsScanner ? 1 : 0;
+        case UpgradeKind::PoliticalScanner: return commander.hasPoliticalScanner ? 1 : 0;
     }
 
     return 0;
@@ -122,6 +127,8 @@ inline void installUpgrade(Commander& commander, const ShipUpgrade& upgrade)
         case UpgradeKind::CargoBay: commander.cargoModule = cargoModuleFromInt(upgrade.tier); break;
         case UpgradeKind::FuelTank: commander.fuelTank = fuelTankFromInt(upgrade.tier); break;
         case UpgradeKind::DockingComputer: commander.hasDockingComputer = true; break;
+        case UpgradeKind::EconomicsScanner: commander.hasEconomicsScanner = true; break;
+        case UpgradeKind::PoliticalScanner: commander.hasPoliticalScanner = true; break;
     }
 }
 
