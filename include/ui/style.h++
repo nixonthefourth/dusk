@@ -216,6 +216,14 @@ namespace style {
     /** Main menu: save-slot cards and the commander name field. */
     inline constexpr sf::Color slotCardFill{8, 12, 18, 225};
 
+    /** Docking guidance: readings that are fine, borderline and wrong; the slot aperture, the ship's footprint, and the 3D corridor. */
+    inline constexpr sf::Color dockingGood = profit;
+    inline constexpr sf::Color dockingCaution = caution;
+    inline constexpr sf::Color dockingBad = warning;
+    inline constexpr sf::Color dockingAperture = textPrimary;
+    inline constexpr sf::Color dockingFootprint = accent;
+    inline constexpr sf::Color dockingCorridor{110, 200, 130};
+
     /** Market page: a price below the galaxy average, one above it, and an empty stock. */
     inline constexpr sf::Color marketCheap = profit;
     inline constexpr sf::Color marketDear = caution;

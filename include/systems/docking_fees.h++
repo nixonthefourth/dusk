@@ -1,9 +1,7 @@
 //
-// What docking costs, and the spending reserve that makes sure it can always be paid. Every
-// docking pays the Space Union a fee. A ship with a docking computer
-// pays the standard fee; a ship without one has to be flown in by a Union tug, which costs far more.
-// (There is no manual docking yet, so without the tug a ship that left a station could never
-// dock again, and a new commander can't afford the computer yet.)
+// What docking costs, and the spending reserve that makes sure it can always be paid. Every docking
+// pays the Space Union a fee, however it was done (by hand or with the docking computer), and a hull
+// contact with the station is fined.
 //
 
 #ifndef DUSK_DOCKING_FEES_H
@@ -12,28 +10,22 @@
 #include "objects/commander.h++"
 #include <algorithm>
 
-/** The Space Union's docking fee for a ship with a docking computer, in credits. */
+/** The Space Union's docking fee, in credits, paid when a docking completes. */
 constexpr double dockingFee = 15.0;
 
-/**
- * The charge for a ship without a docking computer, which the Union flies in on a tug. Chosen so
- * that a new commander needs about six good trades to afford the computer (and the computer
- * then saves them this minus dockingFee on every docking).
- */
-constexpr double unionTugFee = 200.0;
+/** The fine for scraping the station, in credits, taken only from credits above the spending reserve. */
+constexpr double collisionFine = 25.0;
 
-/** What `commander` owes for the next docking. */
-inline double dockingChargeFor(const Commander& commander)
+/** What `commander` owes for the next docking. (It's the same for everyone now that docking can be done by hand.) */
+inline double dockingChargeFor(const Commander&)
 {
-    return commander.hasDockingComputer ? dockingFee : unionTugFee;
+    return dockingFee;
 }
 
 /**
- * The credits every purchase must leave you with: what your next docking will cost (200 CR on the
- * Union tug, 15 CR with a docking computer). Nothing can be bought, whether goods, fuel or an
- * upgrade, if it would leave you with less, so you always arrive able to pay the fee. Tying it to
- * the actual charge means it tracks the fees, and a commander who owns the computer isn't made to
- * hold back 200 CR to cover a 15 CR fee.
+ * The credits every purchase must leave you with: what your next docking will cost. Nothing can be
+ * bought, whether goods, fuel or an upgrade, if it would leave you with less, so you always arrive
+ * able to pay the fee, and can't dodge it by spending everything first.
  */
 inline double spendingReserve(const Commander& commander)
 {
@@ -62,9 +54,8 @@ struct DockingCharge {
  * Takes the docking fee from the commander. The Union takes at most what you have, as a last
  * safety net: a commander with an empty purse and a hold of goods to sell must still be able to
  * dock, or they could never earn their way out. Because purchases keep the spending reserve, that
- * only happens to a commander who has fallen below it through fees or losses, never one who spent
- * their credits (which would otherwise be a way to dock for free). `paid` is less than `due` when
- * the commander couldn't cover it.
+ * only happens to a commander who has fallen below it through fines or trading losses, never one who
+ * spent their credits. `paid` is less than `due` when the commander couldn't cover it.
  */
 inline DockingCharge chargeForDocking(Commander& commander)
 {
@@ -73,6 +64,18 @@ inline DockingCharge chargeForDocking(Commander& commander)
     charge.paid = std::min(charge.due, std::max(0.0, commander.credits));
     commander.credits -= charge.paid;
     return charge;
+}
+
+/**
+ * Fines the commander for a hull contact. The fine comes only out of spendable credits (those above
+ * the reserve), so it can never leave the commander unable to pay the docking fee. Returns what was
+ * actually taken, which is less than collisionFine, or nothing, for a commander with little to spare.
+ */
+inline double fineForContact(Commander& commander)
+{
+    const double fine = std::min(collisionFine, spendableCredits(commander));
+    commander.credits -= fine;
+    return fine;
 }
 
 #endif //DUSK_DOCKING_FEES_H

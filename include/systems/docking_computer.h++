@@ -44,6 +44,10 @@ struct DockingComputer {
     /** Distance of the ship's centre from the slot mouth along the slot normal (negative = inside). */
     float slotProgress = 0.f;
 
+    /** Offset of the ship from the slot axis (along the slot, and across it) after a manual docking; eased to zero. */
+    float settleU = 0.f;
+    float settleV = 0.f;
+
     /** Seconds spent in the current phase. */
     float phaseTimer = 0.f;
 
@@ -74,7 +78,7 @@ constexpr float approachDistance = 1600.f;
  * now hundreds of thousands of units across, so the far leg runs at cruise-like speed; distance,
  * surface clearance and the station's own motion still throttle it right down near the end.
  */
-constexpr float maxApproachSpeed = 1300.f;
+constexpr float maxApproachSpeed = 700.f;
 
 /** Approach speed per unit of remaining distance; gives a smooth slowdown on arrival. */
 constexpr float approachSpeedGain = 0.9f;
@@ -93,15 +97,36 @@ constexpr float rollRate = 1.4f;
 /** Heading and roll error allowed before starting the slot entry. */
 constexpr float alignTolerance = 0.02f;
 
-/** Speed along the slot axis while entering and reversing out. */
-constexpr float maxEntrySpeed = 450.f;
-constexpr float minEntrySpeed = 90.f;
+/**
+ * Speed along the slot axis while entering: a fifth of the distance still to go, kept between a
+ * crawl and a ceiling. (It used to be half the distance, between 90 and 450 u/s, which flew the
+ * whole 1,600 unit corridor in about five seconds.)
+ */
+constexpr float entrySpeedGain = 0.2f;
+constexpr float maxEntrySpeed = 45.f;
+constexpr float minEntrySpeed = 15.f;
+
+/** Speed while backing out of the slot on a launch: brisker than entering, since nothing has to line up. */
+constexpr float launchSpeedGain = 0.4f;
+constexpr float launchMaxSpeed = 160.f;
+constexpr float launchMinSpeed = 45.f;
+
+/**
+ * Near the station the approach speed is also capped at this fraction of the distance to the slot
+ * (never below the floor), so the computer doesn't swoop at the station at hundreds of units a second.
+ */
+constexpr float nearStationSpeedGain = 0.12f;
+constexpr float nearStationSpeedFloor = 60.f;
+
+/** After a manual docking, how fast the ship eases onto the parking depth, and how quickly it settles onto the slot axis. */
+constexpr float settleSpeed = 40.f;
+constexpr float settleRate = 3.f;
 
 /** Where the ship stops after reversing out, as distance from the mouth. */
 constexpr float launchClearance = 900.f;
 
 /** Speed away from the station when control is handed back after launch. */
-constexpr float launchReleaseSpeed = 300.f;
+constexpr float launchReleaseSpeed = 90.f;
 
 /** Gap left between the ship's nose and the back wall of the slot. */
 constexpr float noseClearance = 10.f;
@@ -419,6 +444,36 @@ inline bool engage(DockingComputer& computer, const World& world)
     return true;
 }
 
+/**
+ * Finishes a manual docking: the pilot has flown into the slot, slowly enough and deep enough. The
+ * computer takes over in the Docked phase, from wherever the ship is, and eases it onto the slot
+ * axis and its parking depth rather than snapping it there. Control of the ship passes to the
+ * computer, exactly as after an automatic docking.
+ */
+inline void completeManualDocking(DockingComputer& computer, World& world)
+{
+    Ship& ship = world.playerShip;
+    const Station& station = world.station;
+    const Vec3 mouth = stationDockMouth(station);
+    const Vec3 offset = ship.position - mouth;
+
+    computer.slotProgress = dot(offset, stationDockNormal(station));
+    computer.settleU = dot(offset, stationDockSlotAxis(station));
+    computer.settleV = dot(offset, stationDockVertical(station));
+    computer.previousMouth = mouth;
+    computer.previousApproachPoint = mouth + stationDockNormal(station) * approachDistance;
+    computer.hasPreviousFrame = true;
+
+    ship.throttle = 0.f;
+    ship.reverseThrust = false;
+    ship.previousPosition = ship.position;
+    disengageCruise(ship);
+    cancelCruiseCharge(ship);
+    resetShipRotationState(ship);
+    setPhase(computer, DockingPhase::Docked);
+    showMessage(computer, "DOCKED", 1.5f);
+}
+
 /** Aborts an approach; the ship levels its wings and then control returns to the player. */
 inline bool cancel(DockingComputer& computer)
 {
@@ -441,6 +496,8 @@ inline bool launch(DockingComputer& computer)
     if (computer.phase != DockingPhase::Docked)
         return false;
 
+    computer.settleU = 0.f;
+    computer.settleV = 0.f;
     setPhase(computer, DockingPhase::LaunchReverse);
     showMessage(computer, "LAUNCHING");
     return true;
@@ -478,6 +535,8 @@ inline bool dockImmediately(DockingComputer& computer, World& world)
     resetShipRotationState(ship);
 
     computer.slotProgress = dockedProgress;
+    computer.settleU = 0.f;
+    computer.settleV = 0.f;
     computer.previousMouth = mouth;
     computer.previousApproachPoint = mouth + normal * approachDistance;
     computer.hasPreviousFrame = true;
@@ -605,7 +664,8 @@ inline void update(DockingComputer& computer, World& world, float dt)
 
             const float clearanceLimit =
                 clearanceSpeedBase + std::max(0.f, surfaceClearance(carried, world)) * clearanceSpeedGain;
-            const float speed = std::min({maxApproachSpeed, distance * approachSpeedGain, clearanceLimit});
+            const float nearStationCap = std::max(nearStationSpeedFloor, length(ship.position - mouth) * nearStationSpeedGain);
+            const float speed = std::min({maxApproachSpeed, distance * approachSpeedGain, clearanceLimit, nearStationCap});
 
             if (hasHistory)
             {
@@ -666,7 +726,7 @@ inline void update(DockingComputer& computer, World& world, float dt)
         case DockingPhase::Enter:
         {
             const float remaining = computer.slotProgress - dockedProgress;
-            const float speed = std::clamp(remaining * 0.5f, minEntrySpeed, maxEntrySpeed);
+            const float speed = std::clamp(remaining * entrySpeedGain, minEntrySpeed, maxEntrySpeed);
             computer.slotProgress = std::max(dockedProgress, computer.slotProgress - speed * dt);
 
             holdOnSlotAxis(ship, mouth, normal, computer.slotProgress, ship.previousPosition, dt);
@@ -682,8 +742,19 @@ inline void update(DockingComputer& computer, World& world, float dt)
 
         case DockingPhase::Docked:
         {
-            computer.slotProgress = dockedProgress;
-            holdOnSlotAxis(ship, mouth, normal, computer.slotProgress, ship.previousPosition, dt);
+            // After a manual docking the ship may sit a little off the slot axis or short of its
+            // parking depth: it eases onto both. After the computer's own docking both are already
+            // exactly right, and this holds the ship there.
+            const Vec3 vertical = stationDockVertical(station);
+            const float step = settleSpeed * dt;
+            computer.slotProgress += std::clamp(dockedProgress - computer.slotProgress, -step, step);
+
+            const float decay = std::exp(-settleRate * dt);
+            computer.settleU *= decay;
+            computer.settleV *= decay;
+
+            ship.position = mouth + normal * computer.slotProgress + slotAxis * computer.settleU + vertical * computer.settleV;
+            ship.velocity = dt > 0.f ? (ship.position - ship.previousPosition) / dt : Vec3{};
             steerShip(ship, inward, rollToMatchSlot(ship, inward, slotAxis), dt);
             break;
         }
@@ -691,7 +762,7 @@ inline void update(DockingComputer& computer, World& world, float dt)
         case DockingPhase::LaunchReverse:
         {
             const float remaining = launchClearance - computer.slotProgress;
-            const float speed = std::clamp(remaining * 0.5f, minEntrySpeed, maxEntrySpeed);
+            const float speed = std::clamp(remaining * launchSpeedGain, launchMinSpeed, launchMaxSpeed);
             computer.slotProgress = std::min(launchClearance, computer.slotProgress + speed * dt);
 
             holdOnSlotAxis(ship, mouth, normal, computer.slotProgress, ship.previousPosition, dt);

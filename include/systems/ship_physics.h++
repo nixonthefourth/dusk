@@ -93,10 +93,14 @@ inline float shipTargetSpeed(const Ship& ship)
 {
     const float throttle = std::clamp(ship.throttle, 0.f, 1.f);
 
-    if (ship.reverseThrust)
-        return -throttle * ship.maxSpeed * ship.reverseSpeedFraction;
+    // Under a speed limit (docking mode) full throttle is the limit, so every bit of the throttle
+    // is useful at the low speeds docking needs.
+    const float top = ship.speedLimit > 0.f ? ship.speedLimit : ship.maxSpeed;
 
-    return throttle * ship.maxSpeed;
+    if (ship.reverseThrust)
+        return -throttle * top * ship.reverseSpeedFraction;
+
+    return throttle * top;
 }
 
 /** Thrust force from flight assist: whatever the thrusters can give toward holding the demanded velocity. */
@@ -111,7 +115,11 @@ inline Vec3 flightAssistThrustForce(const Ship& ship, float dt, const Vec3& exte
     const Vec3 right = shipRight(ship);
     const Vec3 up = shipUp(ship);
 
-    const Vec3 desiredVelocity = forward * shipTargetSpeed(ship);
+    // Speed is measured against the assist frame (the station, in docking mode), and the strafe
+    // thrusters ask for a sideways or vertical slide on top of it.
+    const float strafeRight = std::clamp(ship.strafeRightInput, -1.f, 1.f) * ship.strafeSpeed;
+    const float strafeUp = std::clamp(ship.strafeUpInput, -1.f, 1.f) * ship.strafeSpeed;
+    const Vec3 desiredVelocity = ship.assistFrameVelocity + forward * shipTargetSpeed(ship) + right * strafeRight + up * strafeUp;
 
     // Close the error over one response time, but never by more than one step's worth, so a long
     // frame can't overshoot. External acceleration (gravity) is fed forward and cancelled.
@@ -193,8 +201,14 @@ inline void integrateShipRotation(Ship& ship, float dt)
     ship.yawRate = approachTurnRate(ship, ship.yawRate, yawInput * ship.yawSpeed * scale, dt);
     ship.pitchRate = approachTurnRate(ship, ship.pitchRate, pitchInput * ship.pitchSpeed * scale, dt);
 
+    // Roll works the same way, with the slot-spin feed-forward added on top of the pilot's demand.
+    const float rollInput = std::clamp(ship.rollInput, -1.f, 1.f);
+    const float rollCommand = rollInput * ship.rollSpeed * scale + ship.rollFeedForward;
+    ship.rollRate = approachTurnRate(ship, ship.rollRate, rollCommand, dt);
+
     ship.yaw += ship.yawRate * dt;
     ship.pitch += ship.pitchRate * dt;
+    ship.roll = wrapAngle(ship.roll + ship.rollRate * dt);
 
     const float pitchBefore = ship.pitch;
     clampShipPitch(ship);
@@ -209,8 +223,12 @@ inline void resetShipRotationState(Ship& ship)
 {
     ship.yawRate = 0.f;
     ship.pitchRate = 0.f;
+    ship.rollRate = 0.f;
     ship.yawInput = 0.f;
     ship.pitchInput = 0.f;
+    ship.rollInput = 0.f;
+    ship.strafeRightInput = 0.f;
+    ship.strafeUpInput = 0.f;
     ship.precisionInput = false;
 }
 
@@ -232,16 +250,18 @@ inline float cruiseSpeedLimit(const Ship& ship)
 /** Points throttle at the ship's current forward speed, so flight assist carries on rather than braking. */
 inline void matchThrottleToVelocity(Ship& ship)
 {
-    const float forwardSpeed = dot(ship.velocity, shipForward(ship));
+    // Speeds are relative to the assist frame, and full throttle is the speed limit if there is one.
+    const float top = ship.speedLimit > 0.f ? ship.speedLimit : ship.maxSpeed;
+    const float forwardSpeed = dot(ship.velocity - ship.assistFrameVelocity, shipForward(ship));
 
     if (forwardSpeed >= 0.f)
     {
         ship.reverseThrust = false;
-        ship.throttle = ship.maxSpeed > 0.f ? std::clamp(forwardSpeed / ship.maxSpeed, 0.f, 1.f) : 0.f;
+        ship.throttle = top > 0.f ? std::clamp(forwardSpeed / top, 0.f, 1.f) : 0.f;
         return;
     }
 
-    const float reverseSpeed = ship.maxSpeed * ship.reverseSpeedFraction;
+    const float reverseSpeed = top * ship.reverseSpeedFraction;
     ship.reverseThrust = true;
     ship.throttle = reverseSpeed > 0.f ? std::clamp(-forwardSpeed / reverseSpeed, 0.f, 1.f) : 0.f;
 }

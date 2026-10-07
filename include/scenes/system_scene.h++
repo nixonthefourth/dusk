@@ -17,6 +17,7 @@
 #include "systems/docking_computer.h++"
 #include "ui/galaxy_map.h++"
 #include "ui/menu_button.h++"
+#include "systems/docking_control.h++"
 #include "systems/docking_fees.h++"
 #include "systems/save_game.h++"
 #include "systems/trading.h++"
@@ -61,7 +62,7 @@ public:
           font_("assets/fonts/Jersey15-Regular.ttf"),
           label_(font_, "", 28),
           statusText_(font_, "", 24),
-          hintText_(font_, "[G] GALAXY MAP\n[M] SYSTEM MAP\n[T] TARGET\n[C] DOCK", 15),
+          hintText_(font_, "[G] GALAXY MAP\n[M] SYSTEM MAP\n[T] TARGET\n[C] REQUEST DOCKING\n[V] AUTO-DOCK\n[LEFT/RIGHT] ROLL", 15),
           messageText_(font_, "", 30)
     {
         statusText_.setFillColor(style::dockingStatus);
@@ -153,43 +154,23 @@ public:
                 break;
         }
 
-        // C toggles the docking computer (Elite's docking-computer key).
-        if (keyPressed->code == sf::Keyboard::Key::C)
+        // C asks the station for a docking slot (or gives the permit up); V uses the docking computer.
+        if (keyPressed->code == sf::Keyboard::Key::C || keyPressed->code == sf::Keyboard::Key::V)
         {
-            if (hyperspace_.phase == HyperspacePhase::Countdown)
-            {
-                docking::showMessage(docking_, "HYPERSPACE COUNTDOWN IN PROGRESS", 2.f);
-                return;
-            }
-
-            if (docking_.phase == DockingPhase::Idle)
-            {
-                // The docking computer flies to the station, so lock it as the target too.
-                if (docking::engage(docking_, world_))
-                {
-                    world_.target.type = TargetType::Station;
-
-                    char note[96];
-                    std::snprintf(note, sizeof(note), commander_.hasDockingComputer ? "DOCKING COMPUTER ENGAGED  (FEE %.0f CR)" : "UNION TUG ENGAGED  (%.0f CR ON ARRIVAL)",
-                                  dockingChargeFor(commander_));
-                    docking::showMessage(docking_, note, 3.f);
-                }
-            }
-            else
-            {
-                docking::cancel(docking_);
-            }
-
+            handleDockingKey(keyPressed->code == sf::Keyboard::Key::V);
             return;
         }
 
         if (docking_.phase == DockingPhase::Docked)
         {
             if (keyPressed->code == sf::Keyboard::Key::Enter)
+            {
+                launchPending_ = false;
                 openStationMenu();
+            }
 
             if (keyPressed->code == sf::Keyboard::Key::L)
-                docking::launch(docking_);
+                tryLaunch();
         }
     }
 
@@ -215,6 +196,28 @@ public:
         const SceneTransition transition = pendingTransition_;
         pendingTransition_ = SceneTransition::None;
         return transition;
+    }
+
+    /**
+     * The guidance for the renderer: while a permit is held within reach of the slot (docking by
+     * hand), or while the computer is flying the approach close to it. Nothing otherwise.
+     */
+    std::optional<docking_control::DockingGuidance> dockingGuidance() const override
+    {
+        using namespace docking_control;
+
+        if (!world_.stationActive || !world_.station.dockingPort.valid)
+            return std::nullopt;
+
+        const bool computerApproach = docking_.phase == DockingPhase::Approach ||
+                                      docking_.phase == DockingPhase::Align ||
+                                      docking_.phase == DockingPhase::Enter;
+        const bool permitHeld = dockingControl_.state == PermitState::Granted && docking_.phase == DockingPhase::Idle;
+
+        if ((!computerApproach && !permitHeld) || distanceToMouth(world_) > reservationRange)
+            return std::nullopt;
+
+        return computeGuidance(world_, dockingControl_, docking_.phase);
     }
 
     /** Travel-animation state for the effects renderer. */
@@ -278,6 +281,12 @@ public:
         return trade_;
     }
 
+    /** Read-only view of the docking permit (state, timers, hull contacts), for tests and tools. */
+    const docking_control::DockingControl& dockingControl() const
+    {
+        return dockingControl_;
+    }
+
     /** Read-only view of the docking computer, e.g. for debugging or future HUD elements. */
     const DockingComputer& dockingComputer() const
     {
@@ -305,9 +314,15 @@ public:
         const bool autopilot = docking::controlsShip(docking_);
         const DockingPhase phaseBefore = docking_.phase;
 
+        // The station's side first (the permit, and what it means for the ship this step), then the
+        // world, then what the ship did: any hull contact, the computer, and a manual docking.
+        updateDockingControl(dt);
         updateWorldPhysics(world_, dt, !autopilot);
+        handleHullContact();
         docking::update(docking_, world_, dt);
+        checkManualDocking();
 
+        // A docking has just completed, by hand or by computer.
         if (phaseBefore != DockingPhase::Docked && docking_.phase == DockingPhase::Docked)
         {
             chargeDockingFee();
@@ -419,6 +434,12 @@ private:
     StationMenu stationMenu_;
     Commander commander_;
 
+    /** The station's docking control: the permit the pilot holds, and what hull contacts have been counted. */
+    docking_control::DockingControl dockingControl_;
+
+    /** A launch asked for while another ship was in the slot: it starts by itself once the slot is clear. */
+    bool launchPending_ = false;
+
     /** Every system's market and the trader agents moving goods between them. */
     TradeNetwork trade_;
 
@@ -447,6 +468,8 @@ private:
         syncShipLoad(); // sets the tank size from the fitted module before the carried fuel is clamped to it
         world_.playerShip.fuel = std::min(carriedFuel, world_.playerShip.fuelCapacity);
         docking_ = DockingComputer();
+        dockingControl_ = {};
+        launchPending_ = false;
         stationMenuOpen_ = false;
         wasCruising_ = false;
         cruiseEngageBurst_ = 0.f;
@@ -659,8 +682,7 @@ private:
                 break;
 
             case StationMenuAction::Launch:
-                stationMenuOpen_ = false;
-                docking::launch(docking_);
+                tryLaunch();
                 break;
 
             case StationMenuAction::RefuelFull:
@@ -745,16 +767,246 @@ private:
      */
     void chargeDockingFee()
     {
-        const bool computer = commander_.hasDockingComputer;
         const DockingCharge charge = chargeForDocking(commander_);
         char message[96];
 
         if (charge.paid + 0.5 >= charge.due)
-            std::snprintf(message, sizeof(message), "%s  -%.0f CR", computer ? "SPACE UNION DOCKING FEE" : "UNION TUG FEE", charge.paid);
+            std::snprintf(message, sizeof(message), "SPACE UNION DOCKING FEE  -%.0f CR", charge.paid);
         else
-            std::snprintf(message, sizeof(message), "%s  -%.0f CR (ALL YOU HAD)", computer ? "SPACE UNION DOCKING FEE" : "UNION TUG FEE", charge.paid);
+            std::snprintf(message, sizeof(message), "SPACE UNION DOCKING FEE  -%.0f CR (ALL YOU HAD)", charge.paid);
 
         docking::showMessage(docking_, message, 4.f);
+    }
+
+    /**
+     * Launches, or, if another ship is in the slot (entering or leaving), queues the launch. A queued
+     * launch reserves the slot, so no new ship starts through it; the ships already in it finish, and
+     * the launch then starts by itself (see updateDockingControl()).
+     */
+    void tryLaunch()
+    {
+        stationMenuOpen_ = false;
+
+        if (docking_control::slotOccupiedByNpc(world_))
+        {
+            launchPending_ = true;
+            docking::showMessage(docking_, "LAUNCH QUEUED: ANOTHER SHIP IS IN THE SLOT", 3.f);
+            return;
+        }
+
+        docking::launch(docking_);
+    }
+
+    /**
+     * C and V. C asks the station for a docking slot, or gives the permit up. V is the docking
+     * computer: with a permit it takes over the approach, and without one it asks for a permit and
+     * engages as soon as it's granted. Either key hands a flying computer back to the pilot while
+     * that is still possible.
+     */
+    void handleDockingKey(bool autoDock)
+    {
+        using namespace docking_control;
+
+        if (hyperspace_.phase == HyperspacePhase::Countdown)
+        {
+            docking::showMessage(docking_, "HYPERSPACE COUNTDOWN IN PROGRESS", 2.f);
+            return;
+        }
+
+        // The computer is flying (or the ship is docked): cancel it if it still can be.
+        if (docking_.phase != DockingPhase::Idle)
+        {
+            docking::cancel(docking_);
+            return;
+        }
+
+        if (autoDock)
+        {
+            if (!commander_.hasDockingComputer)
+            {
+                docking::showMessage(docking_, "NO DOCKING COMPUTER: BUY ONE UNDER UPGRADES", 3.f);
+                return;
+            }
+
+            if (dockingControl_.state == PermitState::Granted)
+            {
+                if (docking::engage(docking_, world_))
+                {
+                    world_.target.type = TargetType::Station;
+                    docking::showMessage(docking_, "DOCKING COMPUTER ENGAGED", 3.f);
+                }
+
+                return;
+            }
+
+            // No permit yet: ask for one, and engage when it comes.
+            if (dockingControl_.state == PermitState::None && !requestDocking(dockingControl_, world_))
+                return;
+
+            dockingControl_.autoDockWhenGranted = true;
+            return;
+        }
+
+        if (dockingControl_.state == PermitState::None)
+        {
+            if (requestDocking(dockingControl_, world_))
+                world_.target.type = TargetType::Station;
+        }
+        else
+        {
+            cancelPermit(dockingControl_, "DOCKING PERMIT CANCELLED");
+        }
+    }
+
+    /**
+     * The station's docking control for this step: advances the request and the permit, drops a
+     * request left far behind, starts the docking computer if it was waiting for a permit, puts the
+     * ship in or out of docking mode, tells NPC ships whether the slot is the player's, and shows
+     * whatever the station just said.
+     */
+    void updateDockingControl(float dt)
+    {
+        using namespace docking_control;
+
+        updateControl(dockingControl_, world_, dt);
+
+        const bool asking = dockingControl_.state == PermitState::Requesting || dockingControl_.state == PermitState::Queued;
+
+        if (asking && world_.stationActive && length(world_.playerShip.position - world_.station.position) > requestRange * 1.3f)
+            cancelPermit(dockingControl_, "REQUEST CANCELLED: OUT OF RANGE");
+
+        if (dockingControl_.state == PermitState::Granted && dockingControl_.autoDockWhenGranted && docking_.phase == DockingPhase::Idle)
+        {
+            dockingControl_.autoDockWhenGranted = false;
+
+            if (docking::engage(docking_, world_))
+            {
+                world_.target.type = TargetType::Station;
+                docking::showMessage(docking_, "DOCKING COMPUTER ENGAGED", 3.f);
+            }
+        }
+
+        const bool dockingMode = inDockingMode(dockingControl_, world_, docking_.phase);
+        applyDockingMode(world_.playerShip, world_, dockingMode);
+
+        if (dockingMode && !dockingControl_.wasDockingMode)
+        {
+            dockingControl_.keyCardTimer = keyCardSeconds;
+            docking::showMessage(docking_, "DOCKING MODE: SPEEDS ARE RELATIVE TO THE STATION", 3.f);
+        }
+
+        dockingControl_.wasDockingMode = dockingMode;
+
+        // A queued launch starts once the slot is clear (and is dropped if the ship is no longer docked).
+        if (launchPending_)
+        {
+            if (docking_.phase != DockingPhase::Docked)
+                launchPending_ = false;
+            else if (!slotOccupiedByNpc(world_))
+            {
+                launchPending_ = false;
+                docking::launch(docking_);
+            }
+        }
+
+        world_.playerSlotReserved = slotReservedByPlayer(dockingControl_, world_, docking_.phase) || launchPending_;
+
+        if (!dockingControl_.event.empty())
+        {
+            docking::showMessage(docking_, dockingControl_.event, 3.f);
+            dockingControl_.event.clear();
+        }
+    }
+
+    /**
+     * A scrape against the station: the Union fines it (from credits above the reserve only), and the
+     * third one under a permit revokes it. Contacts closing slower than scrapeSpeed, and repeats
+     * within the cooldown of one bounce, don't count.
+     */
+    void handleHullContact()
+    {
+        using namespace docking_control;
+
+        const StationImpact& impact = world_.stationImpact;
+
+        if (!impact.happened || impact.speed < scrapeSpeed || dockingControl_.scrapeCooldown > 0.f)
+            return;
+
+        dockingControl_.scrapeCooldown = scrapeCooldownSeconds;
+        const double fine = fineForContact(commander_);
+        char message[96];
+
+        if (fine > 0.5)
+            std::snprintf(message, sizeof(message), "UNION FINE: HULL CONTACT  -%.0f CR", fine);
+        else
+            std::snprintf(message, sizeof(message), "HULL CONTACT");
+
+        docking::showMessage(docking_, message, 2.5f);
+
+        if (dockingControl_.state == PermitState::Granted && ++dockingControl_.scrapes >= maxScrapes)
+            cancelPermit(dockingControl_, "DOCKING PERMIT REVOKED: " + std::to_string(maxScrapes) + " HULL CONTACTS");
+    }
+
+    /** Finishes a manual docking once the ship is deep enough in the slot and slow enough: the computer takes over and settles it. */
+    void checkManualDocking()
+    {
+        if (docking_.phase != DockingPhase::Idle || !world_.playerShip.dockingMode)
+            return;
+
+        if (docking_control::manualDockingComplete(world_))
+        {
+            docking::completeManualDocking(docking_, world_);
+            docking_control::cancelPermit(dockingControl_, "");
+        }
+    }
+
+    /** The line shown above the dashboard: the docking prompt, the state of the request, or the computer's phase. */
+    std::string dockingStatusText() const
+    {
+        using docking_control::PermitState;
+
+        if (docking_.phase == DockingPhase::Docked)
+        {
+            std::string status = docking::phaseLabel(docking_.phase);
+            return stationMenuOpen_ ? status : status + "   [ENTER] STATION MENU   [L] LAUNCH";
+        }
+
+        if (docking_.phase != DockingPhase::Idle)
+        {
+            std::string status = docking::phaseLabel(docking_.phase);
+
+            if (docking::canCancel(docking_))
+                status += "   [V] TAKE CONTROL";
+
+            return status;
+        }
+
+        if (!world_.stationActive)
+            return {};
+
+        char text[96];
+
+        switch (dockingControl_.state)
+        {
+            case PermitState::None:
+                std::snprintf(text, sizeof(text), "[C] REQUEST DOCKING  %.0f CR", dockingChargeFor(commander_));
+                return std::string(text) + (commander_.hasDockingComputer ? "   [V] AUTO-DOCK" : "");
+
+            case PermitState::Requesting:
+                return "DOCKING REQUEST: TRANSMITTING   [C] CANCEL";
+
+            case PermitState::Queued:
+                return "REQUEST QUEUED: SLOT BUSY   [C] CANCEL";
+
+            case PermitState::Granted:
+            {
+                const int remaining = static_cast<int>(dockingControl_.permitRemaining);
+                std::snprintf(text, sizeof(text), "DOCKING PERMIT %d:%02d   [C] CANCEL", remaining / 60, remaining % 60);
+                return std::string(text) + (commander_.hasDockingComputer ? "   [V] AUTO-DOCK" : "");
+            }
+        }
+
+        return {};
     }
 
     /** Copies the hold and the fitted tank onto the ship, so the thrusters, turn rate and HUD all feel them. */
@@ -929,6 +1181,9 @@ private:
         const int systemIndex = std::clamp(save.systemIndex, 0, static_cast<int>(galaxy_.systems.size()) - 1);
         enterSystem(systemIndex);
         world_.playerShip.fuel = std::clamp(save.fuel, 0.f, world_.playerShip.fuelCapacity);
+
+        dockingControl_ = {};
+        launchPending_ = false;
 
         if (docking::dockImmediately(docking_, world_))
             openStationMenu();
@@ -1164,19 +1419,7 @@ private:
     void drawDockingStatus(sf::RenderTarget& target)
     {
         const sf::Vector2u size = target.getSize();
-        std::string status = docking::phaseLabel(docking_.phase);
-
-        if (docking_.phase == DockingPhase::Idle && world_.stationActive)
-        {
-            // The prompt says what docking will cost: the computer's fee, or the Union tug's.
-            char prompt[64];
-            std::snprintf(prompt, sizeof(prompt), commander_.hasDockingComputer ? "[C] DOCKING COMPUTER  %.0f CR" : "[C] UNION TUG  %.0f CR", dockingChargeFor(commander_));
-            status = prompt;
-        }
-        else if (docking::canCancel(docking_))
-            status += "   [C] CANCEL";
-        else if (docking_.phase == DockingPhase::Docked && !stationMenuOpen_)
-            status += "   [ENTER] STATION MENU   [L] LAUNCH";
+        std::string status = dockingStatusText();
 
         if (!status.empty())
         {
@@ -1192,7 +1435,7 @@ private:
             messageText_.setString(docking_.message);
             const std::uint8_t alpha = static_cast<std::uint8_t>(255.f * std::min(1.f, docking_.messageTimer));
             messageText_.setFillColor(style::withAlpha(style::message, static_cast<int>(alpha)));
-            ui::centerText(messageText_, {static_cast<float>(size.x) * 0.5f, static_cast<float>(size.y) * 0.22f});
+            ui::centerText(messageText_, {static_cast<float>(size.x) * 0.5f, static_cast<float>(size.y) * 0.25f});
             target.draw(messageText_);
         }
     }

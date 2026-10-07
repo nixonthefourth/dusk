@@ -193,6 +193,40 @@ struct Ship {
     /** True while the pilot holds the precision modifier (reduced turn rates for fine aiming). */
     bool precisionInput = false;
 
+    /* ---- Roll, strafing and the docking frame ---------------------------------------------- */
+
+    /** Maximum roll rate in radians per second, and the current roll rate (Left/Right arrows). */
+    float rollSpeed = 1.35f;
+    float rollRate = 0.f;
+
+    /** Pilot intent: roll demand in [-1, 1]. Positive rolls left (the right wing rises). */
+    float rollInput = 0.f;
+
+    /** Pilot intent in docking mode: slide demands in [-1, 1] for the strafe thrusters (right, up). */
+    float strafeRightInput = 0.f;
+    float strafeUpInput = 0.f;
+
+    /** Slide speed at full strafe demand, in world units per second, relative to the docking frame. */
+    float strafeSpeed = 40.f;
+
+    /**
+     * True in docking mode (holding a docking permit close to the station): turning is always fine,
+     * Shift turns A/D/Q/E into strafe thrusters, and flight assist can't be switched off.
+     */
+    bool dockingMode = false;
+
+    /** When above zero, full throttle means this speed rather than maxSpeed, for fine thrust control. */
+    float speedLimit = 0.f;
+
+    /**
+     * The velocity flight assist measures speed against: zero in open space, the station's velocity
+     * in docking mode (so speeds are relative to the station, which itself orbits a planet).
+     */
+    Vec3 assistFrameVelocity;
+
+    /** Roll rate added to the commanded one, in radians per second: matches the slot's spin in docking mode. */
+    float rollFeedForward = 0.f;
+
     /* ---- In-system cruise ------------------------------------------------------------------ */
 
     /** True while the in-system cruise drive is engaged. */

@@ -87,6 +87,9 @@ struct StationDockingInfo {
     Vec3 normal;      // pointing out of the station through the slot
     Vec3 slotAxis;    // the slot's long side; ships roll to line their wings up with it
     Vec3 velocity;    // the station's world velocity (it orbits a moving planet)
+
+    /** False while the player holds the slot: NPCs don't start docking or launching until it's free again. */
+    bool slotFree = true;
 };
 
 /** The point out in front of the slot that NPCs fly to before lining up. */
@@ -289,7 +292,7 @@ inline void respawnNpc(
     // Some arrivals come out of the station instead, so it's visibly busy.
     std::uniform_real_distribution<float> chance(0.f, 1.f);
 
-    if (dock.exists && chance(rng) < launchOnArrivalChance)
+    if (dock.exists && dock.slotFree && chance(rng) < launchOnArrivalChance)
         beginLaunch(npc, dock);
 }
 
@@ -336,7 +339,8 @@ inline void updateNpcShip(
 
     if (npc.state == NpcState::Docked)
     {
-        if (npc.stateTimer >= npc.dockDuration)
+        // Waits inside until the slot is free (the player may be docking or launching).
+        if (npc.stateTimer >= npc.dockDuration && dock.slotFree)
             beginLaunch(npc, dock);
         return;
     }
@@ -428,8 +432,9 @@ inline void updateNpcShip(
 
     if (toStation)
     {
-        // At the approach point: line up and go in.
-        if (distanceToTarget <= dockApproachArrival)
+        // At the approach point: line up and go in, once the slot is free. Until then it loiters
+        // around the approach point (it keeps flying, so it circles rather than hovering).
+        if (distanceToTarget <= dockApproachArrival && dock.slotFree)
         {
             const Vec3 offset = npc.ship.position - dock.mouth;
             npc.dockDistance = dot(offset, dock.normal);

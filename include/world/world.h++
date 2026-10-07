@@ -10,6 +10,7 @@
 #define DUSK_WORLD_H
 
 #include "objects/asteroid.h++"
+#include "systems/station_collision.h++"
 #include "objects/cube.h++"
 #include "objects/planet.h++"
 #include "objects/ship.h++"
@@ -64,6 +65,16 @@ struct World {
 
     /** What the player has targeted, shown on the scanner, compass and in-view brackets. */
     TargetLock target;
+
+    /**
+     * True while the player holds the station's docking slot: a docking permit with the ship in the
+     * approach, the docking computer flying, or a launch in progress. NPC ships wait outside (or
+     * inside) while it is set. Written by the scene each step.
+     */
+    bool playerSlotReserved = false;
+
+    /** What the player's ship touched on the station in the latest physics step, for fines and warnings. */
+    StationImpact stationImpact;
 
     /** Asteroid belts in this system: the star's belts, then planets' debris belts. Rocks are streamed on demand. */
     std::vector<AsteroidBelt> asteroidBelts;
@@ -423,6 +434,7 @@ inline void updateNpcShips(World& world, float dt)
         dock.normal = stationDockNormal(world.station);
         dock.slotAxis = stationDockSlotAxis(world.station);
         dock.velocity = stationVelocity(world);
+        dock.slotFree = !world.playerSlotReserved;
     }
 
     for (NpcShip& npc : world.npcShips)
@@ -757,6 +769,13 @@ inline void updateWorldPhysics(World& world, float dt, bool integratePlayerShip 
 
     if (world.stationActive)
         updateStation(world.station, dt);
+
+    // The station hull and slot walls are solid. Checked once the station has moved this step, and
+    // not while the docking computer is flying the ship (it follows the slot exactly).
+    world.stationImpact = {};
+
+    if (integratePlayerShip && world.stationActive)
+        world.stationImpact = station_collision::resolveShipStationCollision(world.playerShip, world.station, stationVelocity(world));
 
     updateWorldCollisions(world);
 }

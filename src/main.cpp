@@ -11,6 +11,7 @@
 #include "rendering/station_renderer.h++"
 #include "rendering/hud_renderer.h++"
 #include "rendering/asteroid_renderer.h++"
+#include "rendering/docking_guidance_renderer.h++"
 #include "rendering/travel_effects_renderer.h++"
 #include "ui/style.h++"
 #include "rendering/planet_renderer.h++"
@@ -66,6 +67,7 @@ int main() {
     const StationRenderer stationRenderer(projectionConfig);
     const ShipRenderer shipRenderer(projectionConfig);
     const HudRenderer hudRenderer;
+    const DockingGuidanceRenderer guidanceRenderer(projectionConfig);
 
     // Swaps scenes when the active one asks to (PLAY on the menu, EXIT), and resets per-scene
     // state that lives out here: edge-triggered key tracking and the camera spring.
@@ -186,8 +188,20 @@ int main() {
         // tunnel covers the whole view.
         travelEffectsRenderer.draw(window, renderWorld, camera, sceneManager.activeScene().travelEffects());
 
+        // While a docking approach is under way, the corridor goes over the 3D view and the alignment
+        // panel with the HUD.
+        const auto guidance = sceneManager.activeScene().dockingGuidance();
+
+        if (guidance && sceneManager.activeScene().showsHud())
+            guidanceRenderer.drawCorridor(window, *guidance, camera);
+
         if (sceneManager.activeScene().showsHud())
+        {
             hudRenderer.draw(window, renderWorld, camera);
+
+            if (guidance)
+                guidanceRenderer.drawPanel(window, *guidance);
+        }
 
         sceneManager.activeScene().drawOverlay(window);
         window.display();

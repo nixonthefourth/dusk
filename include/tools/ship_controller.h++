@@ -159,12 +159,33 @@ inline void updateShipFromKeyboard(Ship& ship, float dt, ShipInputState& inputSt
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::X))
         ship.throttle = 0.f;
 
-    // Turn demands; the physics step spins the ship toward these rates and stops it on release.
-    ship.yawInput = keyAxis(sf::Keyboard::Key::A, sf::Keyboard::Key::D);
-    ship.pitchInput = keyAxis(sf::Keyboard::Key::E, sf::Keyboard::Key::Q);
-    ship.precisionInput =
+    const bool shift =
         sf::Keyboard::isKeyPressed(sf::Keyboard::Key::LShift) ||
         sf::Keyboard::isKeyPressed(sf::Keyboard::Key::RShift);
+
+    // Roll is always available: Left rolls left, Right rolls right.
+    ship.rollInput = keyAxis(sf::Keyboard::Key::Right, sf::Keyboard::Key::Left);
+
+    if (ship.dockingMode && shift)
+    {
+        // Docking mode: holding Shift turns A/D/Q/E into thrusters that slide the ship (right/left
+        // and up/down) instead of turning it, for lining up with the slot without changing heading.
+        ship.yawInput = 0.f;
+        ship.pitchInput = 0.f;
+        ship.strafeRightInput = keyAxis(sf::Keyboard::Key::A, sf::Keyboard::Key::D);
+        ship.strafeUpInput = keyAxis(sf::Keyboard::Key::E, sf::Keyboard::Key::Q);
+    }
+    else
+    {
+        // Turn demands; the physics step spins the ship toward these rates and stops it on release.
+        ship.yawInput = keyAxis(sf::Keyboard::Key::A, sf::Keyboard::Key::D);
+        ship.pitchInput = keyAxis(sf::Keyboard::Key::E, sf::Keyboard::Key::Q);
+        ship.strafeRightInput = 0.f;
+        ship.strafeUpInput = 0.f;
+    }
+
+    // Docking mode always uses the fine turn rates; otherwise Shift asks for them.
+    ship.precisionInput = ship.dockingMode || shift;
 
     if (keyPressedThisFrame(sf::Keyboard::Key::Down, inputState.reverseToggleWasDown) && !ship.cruiseEngaged)
     {
@@ -172,7 +193,8 @@ inline void updateShipFromKeyboard(Ship& ship, float dt, ShipInputState& inputSt
         ship.throttle = 0.f;
     }
 
-    if (keyPressedThisFrame(sf::Keyboard::Key::F, inputState.assistToggleWasDown))
+    // Flight assist can't be switched off in docking mode: the speed limit and strafing depend on it.
+    if (keyPressedThisFrame(sf::Keyboard::Key::F, inputState.assistToggleWasDown) && !ship.dockingMode)
     {
         ship.flightAssist = !ship.flightAssist;
 

@@ -426,20 +426,23 @@ private:
         const float barWidth = std::min(150.f, viewport.width * 0.5f - 175.f);
         const sf::Color throttleColor = ship.reverseThrust ? style::throttleReverse : style::throttleForward;
 
-        drawText(target, ship.cruiseEngaged ? "CRUISE" : "SPEED", {x, top + 10.f}, 15, style::textDim);
-        drawText(target, std::to_string(static_cast<int>(std::round(shipSpeed(ship)))), {x + 60.f, top + 2.f}, 28, style::textPrimary);
+        // In docking mode speed is measured against the station, which is what the speed limit refers to.
+        const float shownSpeed = length(ship.velocity - ship.assistFrameVelocity);
+        drawText(target, ship.cruiseEngaged ? "CRUISE" : (ship.dockingMode ? "REL SPD" : "SPEED"), {x, top + 10.f}, 15, style::textDim);
+        drawText(target, std::to_string(static_cast<int>(std::round(shownSpeed))), {x + 60.f, top + 2.f}, 28, style::textPrimary);
 
         // Total mass (hull + fuel + cargo): it drops as fuel burns, and the ship gets livelier.
         char mass[24];
         std::snprintf(mass, sizeof(mass), "%.1f t", shipTotalMass(ship));
         drawText(target, mass, {x + 34.f + barWidth, top + 10.f}, 15, style::textDim, 1.f);
 
+        const float topSpeed = ship.speedLimit > 0.f ? ship.speedLimit : ship.maxSpeed;
         const float speedScale = ship.cruiseEngaged
             ? ship.cruiseMaxSpeed
-            : ship.maxSpeed * (ship.reverseThrust ? ship.reverseSpeedFraction : 1.f);
+            : topSpeed * (ship.reverseThrust ? ship.reverseSpeedFraction : 1.f);
 
         drawFillBar(target, ship.reverseThrust ? "REV" : "THR", {x, top + 44.f}, barWidth, ship.throttle, throttleColor);
-        drawFillBar(target, "SPD", {x, top + 60.f}, barWidth, speedScale > 0.f ? shipSpeed(ship) / speedScale : 0.f, style::speedBar);
+        drawFillBar(target, "SPD", {x, top + 60.f}, barWidth, speedScale > 0.f ? shownSpeed / speedScale : 0.f, style::speedBar);
 
         // Fuel gauge, red below a fifth of the tank, with the tonnes left beside it.
         const float fuelFraction = ship.fuelCapacity > 0.f ? ship.fuel / ship.fuelCapacity : 0.f;
@@ -609,6 +612,7 @@ private:
 
         drawCentreBar(target, "YAW", {x, top + 46.f}, barWidth, ship.yawSpeed > 0.f ? ship.yawRate / ship.yawSpeed : 0.f);
         drawCentreBar(target, "PCH", {x, top + 64.f}, barWidth, ship.pitchSpeed > 0.f ? ship.pitchRate / ship.pitchSpeed : 0.f);
+        drawCentreBar(target, "RLL", {x, top + 82.f}, barWidth, ship.rollSpeed > 0.f ? ship.rollRate / ship.rollSpeed : 0.f);
 
         // Target compass: where the target lies relative to the nose. Filled when ahead, hollow
         // red when behind.
@@ -629,7 +633,7 @@ private:
 
         if (!position)
         {
-            drawText(target, "NO TARGET   [T] LOCK", {x, top + 88.f}, 17, style::textDim);
+            drawText(target, "NO TARGET   [T] LOCK", {x, top + 100.f}, 17, style::textDim);
             return;
         }
 
@@ -657,7 +661,7 @@ private:
         drawText(
             target,
             std::string(targetLabel(world)) + "  " + formatWorldDistance(gap) + "   CLOSING " + formatSigned(closing),
-            {x, top + 88.f},
+            {x, top + 100.f},
             17,
             style::targetMarker
         );

@@ -29,6 +29,11 @@ struct DockingPort {
     Vec3 normal = {0.f, 0.f, 1.f};
     Vec3 slotAxis = {1.f, 0.f, 0.f};
     float depth = 0.f;
+
+    /** Half-size of the slot opening: along its long side (slotAxis) and across it (normal x slotAxis). */
+    float halfWidth = 0.f;
+    float halfHeight = 0.f;
+
     bool valid = false;
 };
 
@@ -195,6 +200,17 @@ inline bool configureDockingPort(
         return false;
 
     port.slotAxis = normalized(alongSlot);
+
+    // The opening's half-size, from the ring of mouth vertices.
+    const Vec3 across = cross(port.normal, port.slotAxis);
+
+    for (int index : mouthVertices)
+    {
+        const Vec3 offset = station.model.vertices[static_cast<std::size_t>(index)] - port.mouth;
+        port.halfWidth = std::max(port.halfWidth, std::abs(dot(offset, port.slotAxis)));
+        port.halfHeight = std::max(port.halfHeight, std::abs(dot(offset, across)));
+    }
+
     port.valid = true;
 
     station.dockingPort = port;
@@ -218,6 +234,25 @@ inline Vec3 stationDockNormal(const Station& station)
 inline Vec3 stationDockSlotAxis(const Station& station)
 {
     return normalized(stationDirectionToWorld(station, station.dockingPort.slotAxis));
+}
+
+/** World-space direction across the docking slot (perpendicular to both its normal and its long side). */
+inline Vec3 stationDockVertical(const Station& station)
+{
+    return normalized(cross(stationDockNormal(station), stationDockSlotAxis(station)));
+}
+
+/** The station's angular velocity in world space: its spin about the direction the slot faces, in radians per second. */
+inline Vec3 stationAngularVelocity(const Station& station)
+{
+    return normalized(station.dockFacing) * station.rotationSpeed;
+}
+
+/** Converts a world-space point into the station's local model space (the inverse of stationLocalToWorld()). */
+inline Vec3 stationWorldToLocal(const Station& station, const Vec3& world)
+{
+    const Vec3 offset = world - station.position;
+    return {dot(offset, station.axisX), dot(offset, station.axisY), dot(offset, station.axisZ)};
 }
 
 /** Returns the station's current collision radius, derived from its object size. */

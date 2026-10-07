@@ -20,7 +20,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - One reused `SystemScene` that regenerates its entire world from a system's own seed the moment you enter it, so system #217 always looks and plays out the same way.
 - Real orbital mechanics: planets orbit a central star under actual Newtonian gravity, integrated with velocity Verlet, and the star's own gravity pulls on the player ship too.
 - An OBJ-modelled space station procedurally placed in orbit around a random planet, in systems that roll one. It spins Elite-style around its docking axis, with the slot facing along its orbit.
-- A docking computer (a paid upgrade): press `C` and the ship flies itself to the station, lines up, matches the station's spin, and slides into the docking slot. Once docked, the station screen opens; launching backs the ship out, turns it around, and hands control back.
+- Docking by request: ask the station for a slot (`C`), then fly in by hand with a speed limit relative to the station, strafe thrusters, roll on the arrow keys, an Apollo-style alignment panel and a corridor of rings in the 3D view, with a solid station that fines you for scraping it. Or buy the docking computer (`V`), which flies the approach for you, slowly: about 50 seconds from request to docked.
 - Simple-reflex NPC ships that roam, avoid planets and stars, occasionally head to the station and dock, and periodically "warp out" and back in — no memory, no planning, just current-state reflexes.
 - A living trade economy: every system has its own market, prices follow supply and demand, you buy and sell at stations, and 300 simple-reflex trader agents move goods between systems on their own. Tech systems now really export tech goods, a bug that had left the best goods almost unobtainable.
 - A camera that chases the ship from behind, plus an orbit "showcase" mode.
@@ -76,7 +76,7 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [x] Simple-reflex agent (S-RA) NPC ships
   - [ ] Missions
 - [ ] End goal: reach the centre of the galaxy
-- [~] Newtonian physics
+- [x] Newtonian physics
   - [x] Ship thrust follows Newton's first law, integrated with velocity Verlet
   - [x] Objects act upon one another — the star and every planet exert real gravity on each other and on the ship
   - [x] Flight assist: velocity-holding thruster control, switchable back to raw Newtonian flight
@@ -101,7 +101,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [x] World occupations (mining, engineering and tech, agricultural)
 - [ ] Mission variety (live cargo transport, mining, bounty hunting, cargo transport, station defence/offence)
 - [x] NPC interactions — NPC ships roam, dock, and warp on their own; nothing talks to the player yet
-- [ ] HUD
+- [x] HUD
   - [x] Thrust
   - [x] Relative velocity/pitch/yaw
   - [x] Targeting, radar-esque (station only so far)
@@ -110,7 +110,7 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [x] Fuel expenditure (mass matters)
 - [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear) — cargo bays, fuel tanks, the docking computer and the two chart scanners are for sale; the rest are still to come
 - [x] Save/load: three commander slots, named commanders, saving at stations
-- [~] Docking — automatic docking and launch work, NPCs dock and launch visibly, and the station screen offers refuelling; every docking pays a Space Union fee, and the docking computer is a paid upgrade (a Union tug does the job until you can afford it); manual docking is next
+- [x] Docking: request a slot from the station, then dock by hand or with the docking computer; NPCs dock, launch and queue for the slot visibly; every docking pays a Space Union fee
 - [~] Space stations: small, medium, large — one procedurally placed small station (`station_s.obj`) per eligible system today
 - [x] Wireframe graphics style
 - [x] Animations
@@ -169,6 +169,7 @@ Flight controls:
 - `D`: yaw ship right.
 - `Q`: pitch nose up.
 - `E`: pitch nose down.
+- `Left` / `Right` arrows: roll left / right (works everywhere, not just when docking).
 - `Shift` (hold): precision turning, about a third of the normal turn rate.
 - `F`: toggle flight assist.
 - `J`: charge the cruise drive (it engages after 1.2 s; press again to cancel), or drop out of cruise. Refused while mass-locked.
@@ -180,7 +181,9 @@ Once you're in a system:
 - `G`: open the galactic chart.
 - `M`: open the system map.
 - `T`: lock or clear the target (the station is the only target for now).
-- `C`: dock. With a docking computer the ship flies itself to the station for the Space Union's 15 CR fee; without one, a Union tug does it for 200 CR (see [Docking Fees](#docking-fees)). The fee is taken when the docking completes, and the prompt shows what it will be. Press again during the approach or line-up to cancel (free); once the ship starts entering the slot the sequence is committed. Engaging it also locks the station as your target.
+- `C`: ask the station for a docking slot (within 20 km), or give up the request or permit. The prompt shows the 15 CR docking fee. See [Manual Docking](#manual-docking).
+- `V`: the docking computer (a paid upgrade). With a permit it flies the approach; without one it asks for a permit and engages once it's granted. `C` or `V` hands control back while that is still possible.
+- With a permit, close to the station (docking mode): speeds become relative to the station and capped by a limit that tightens near the slot, and `Shift` + `A`/`D`/`Q`/`E` slides the ship instead of turning it. A key card appears on screen.
 
 On the galactic chart:
 
@@ -265,6 +268,8 @@ include/
     trading.h++
     upgrades.h++
     docking_fees.h++
+    docking_control.h++
+    station_collision.h++
     orbital_physics.h++
     npc_ai.h++
     docking_computer.h++
@@ -293,6 +298,7 @@ include/
     planet_renderer.h++
     asteroid_renderer.h++
     travel_effects_renderer.h++
+    docking_guidance_renderer.h++
     station_renderer.h++
     ship_renderer.h++
     hud_renderer.h++
@@ -549,7 +555,7 @@ struct Ship {
 
     float yaw;
     float pitch;
-    float roll;                         // docking computer only
+    float roll;                         // Left/Right arrows; the docking computer sets it directly too
     float throttle;                     // speed demand with flight assist, thrust fraction without
     bool reverseThrust;
 
@@ -630,6 +636,8 @@ inline Vec3 shipAcceleration(const Ship& ship, float dt = 0.f, const Vec3& exter
 
 **Rotation** is integrated in the same step. Input writes `yawInput`/`pitchInput`; `integrateShipRotation()` eases the actual rates toward `input × maxRate` with an exponential response (`turnResponseTime` spinning up, the shorter `turnStopTime` slowing down), then advances yaw and pitch. A 50 ms tap moves the nose about 2°, or about 0.7° with `Shift` held. NPCs and the docking computer still set yaw and pitch directly and leave the inputs at zero.
 
+**Roll** works like yaw and pitch: `rollInput` (the `Left`/`Right` arrows) asks for a rate up to `rollSpeed`, `integrateShipRotation()` eases the real `rollRate` toward it with the same mass-scaled response, and `roll` is wrapped into [−π, π]. In docking mode `rollFeedForward` adds the slot's spin to the commanded rate. Yaw and pitch stay Euler angles about the world's vertical and the ship's own right axis, so roll tilts the ship (and its flight-assist thrust frame, scanner and strafe directions) without changing where the nose points.
+
 **Cruise** is deliberately not Newtonian. While engaged, `integrateCruise()` sets speed along the nose, chasing `throttle × cruiseMaxSpeed` but hard-capped by `cruiseSpeedLimit()`: `maxSpeed + cruiseSlowdownRate × cruiseMargin`. `cruiseMargin` is the distance to the nearest mass-lock boundary (`cruiseMarginAt()` in `world.h++`: half a body's radius plus 5000 units above its surface, or 12000 units from the station). Heading straight at a planet, the cap shrinks with the distance, so speed decays smoothly and the drive drops out at the boundary at normal-space top speed. `disengageCruise()` clamps speed to `maxSpeed` and re-points throttle at it, so flight assist carries on instead of braking.
 
 ```cpp
@@ -674,7 +682,7 @@ These run inside `updateWorldPhysics()` and move the ship:
 - **`resolveShipBodyContact()`.** If the ship (player or visible NPC) has sunk into a planet or the star, it is moved back to the surface along the line from the body's centre. It then loses the part of its velocity, relative to that body, that points inward, and drops out of cruise. That lets you skim a planet but never fly through it. The menu scene's placeholder star isn't a real star (`isStar` is false), so it is never solid.
 - **`resolveShipRockContact()`,** called for every belt rock and drifting rock within reach by `resolveShipAsteroidContact()`. It does the same against a rock, treated as a sphere at 85% of its jagged radius so grazing a spike doesn't snag. Velocity is taken relative to the rock, so a passing belt rock shoves you along with it. Rocks are treated as far heavier than the ship, so they never move.
 
-The station has no contact response. The docking computer flies the ship in and out of it, and ships are expected to stay out of its way otherwise.
+The station *does* have a contact response now, for the player's ship: its own model is the collider, so the hull and the walls of the docking slot are solid (see [Manual Docking](#the-station-is-solid)). NPC ships don't collide with it; they follow the slot exactly. The planets and asteroids keep their own responses, described above.
 
 ### Detection
 
@@ -757,25 +765,140 @@ Instead of tumbling on Euler angles, a station has an explicit orientation basis
 
 `DockingPort` describes the slot in model space: the centre of the opening (`mouth`), the centre of its back wall (`back`), the outward `normal`, the long side of the slot (`slotAxis`), and its `depth`. It's built from vertex indices by `configureDockingPort()`. For `station_s.obj`, vertices 1–16 (0-based 0–15) outline the slot: the even ring sits on the hull, and the odd ring is the same outline two model units deeper. If you export a new station model, find the equivalent rings and pass their indices in `enterSystem()`.
 
+## Manual Docking
+
+Docking starts with a request and is then flown by hand. The docking computer (see below) is the automatic alternative.
+
+| Step | What happens |
+| --- | --- |
+| 1. **Request** (`C`) | Within 20 km of the station you ask for a slot. The station answers after 2 seconds. Beyond 20 km the request is refused with the distance (`STATION OUT OF RANGE: 26.0K (LIMIT 20.0K)`). |
+| 2. **Queue** | If another ship is entering or leaving the slot, the request waits: `REQUEST QUEUED: SLOT BUSY`. Once the slot is clear the station waits 1.5 seconds, then grants. After 45 seconds without a clear slot the request is refused (`DENIED: NO SLOT AVAILABLE`). |
+| 3. **Permit** | `DOCKING GRANTED`. The permit lasts 5 minutes, then expires. `C` again gives it up. |
+| 4. **Docking mode** | Within 3,000 units of the slot, a permit puts the ship in docking mode (below). |
+| 5. **Fly in** | Line up with the slot and slide in. The station is solid: touching it bounces you and the Space Union fines you. |
+| 6. **Docked** | Once the nose is near the back wall and you're slow enough, the computer takes over for a moment, eases the ship onto the slot's axis and opens the station screen. The 15 CR docking fee is taken. |
+
+### Docking mode
+
+While you hold a permit within 3,000 units of the slot:
+
+- **Speeds are measured against the station**, not the sky. Stations orbit their planets at roughly 80–260 u/s, so flight assist is given the station's velocity as its reference frame (`Ship::assistFrameVelocity`) and the HUD says `REL SPD`. Throttle 0 means "stay put relative to the station".
+- **Throttle is capped by a speed limit that tightens as the slot nears**: 8% of the distance to the slot, kept between 30 and 120 u/s, and 20 u/s once inside it (`speedLimitAt()`). Full throttle means the limit, so the whole throttle range is useful at docking speeds.
+- **Turning is always fine** (the precision rates, about 0.47 rad/s), and flight assist can't be switched off.
+- **Holding Shift turns `A`/`D`/`Q`/`E` into strafe thrusters**: `A`/`D` slide left and right, `Q`/`E` slide up and down, at up to 40 u/s relative to the station, so you can line up with the slot without changing heading.
+- **The roll follows the slot's spin.** The slot turns once every 42 seconds (8.6° a second). With `rollAssist` on, docking mode adds the station's spin component along the ship's nose to the commanded roll rate (`Ship::rollFeedForward`), so a ship you leave alone stays matched and you only correct the angle with the arrow keys. Set `docking_control::rollAssist` to `false` to hold the roll rate by hand instead.
+- **The guidance panel and the corridor appear** (below), and a key card shows the keys for the first 15 seconds.
+
+| Key | Always | In docking mode |
+| --- | --- | --- |
+| `W` / `S` | throttle | throttle (speed relative to the station, capped by the limit) |
+| `A` / `D` | yaw | yaw; with `Shift`, slide left / right |
+| `Q` / `E` | pitch up / down | pitch; with `Shift`, slide up / down |
+| `Left` / `Right` arrows | roll left / right | roll |
+| `C` | request a slot, or cancel the request or permit | the same |
+| `V` | docking computer (needs the upgrade) | the same |
+
+Roll on `Left`/`Right` works everywhere, not just when docking. It uses the same rate-controlled model as yaw and pitch, scaled by the ship's mass, and positive roll lifts the right wing.
+
+### How much room there is
+
+Measured on the real models (`halfWidth` and `halfHeight` of the slot opening are computed from its vertices in `configureDockingPort()`):
+
+| | Size |
+| --- | --- |
+| Slot opening | 650 × 325 units, 260 deep |
+| Ship | 500 wide (wingspan) × 300 long × 102 thick |
+| Room sideways, at the parking depth | ±84 units |
+| Room sideways, near the mouth | ±144 units |
+| Roll error that still fits, when centred | ±32° at the parking depth, ±40° near the mouth |
+
+So the slot is tight but fair, and roll is the most forgiving axis, as long as you keep up with the spin.
+
+### The station is solid
+
+`include/systems/station_collision.h++` collides the ship against the station's own model, including the walls of the slot. The model is a closed solid with outward-facing triangles (checked: no holes, no wrongly wound faces, and the slot is a genuine cavity), so it can serve as the collider directly.
+
+- **What's tested.** The ship is represented by a cloud of sample points: its vertices, the midpoint of every edge and the centre of every face, so a thin rim can't slip between two points. About 350 points are tested each step, and only when the ship is within about a thousand units of the station.
+- **Inside or outside.** A point is inside if a majority of three ray casts, in unrelated directions, cross an odd number of faces. My first version asked instead whether the nearest triangle faced away from the point, which is cheaper but wrong beside a vertex or edge, where neighbouring faces disagree: it reported points up to 5,000 units *outside* the hull as inside. A ramming test caught it.
+- **Response.** The deepest sample point is found and the ship is pushed straight out through the nearest surface. The part of its velocity relative to the wall that points into the wall is reversed with a restitution of 0.3. The wall's velocity includes the slot's spin, and the ship's includes its own roll, so a ship rolling in step with the slot meets its walls at rest. This repeats up to four times for a ship wedged in a corner.
+- **Cost.** About 0.7 ms per physics step near the station, and nothing beyond it.
+- **Not while the computer flies.** The computer places the ship exactly on the slot's axis, so collisions are skipped then.
+
+Tested by flying 60 ships into the station from random headings, rolls and speeds (40–300 u/s): 49 touched it, and none was ever left embedded in the hull. A ship flown down the corridor from 400 to 4,400 units out, centred, never registered a false contact.
+
+### Hull contacts and fines
+
+A contact closing at 5 u/s or more counts as a scrape. The Union fines each one 25 CR (`collisionFine`), at most once every 1.5 seconds so a single bounce isn't charged several times, and **only out of spendable credits** (those above the docking reserve), so a fine can never leave you unable to pay the docking fee: with 30 CR the fine is 15, and with 15 CR there is none. The third scrape under one permit revokes it (`DOCKING PERMIT REVOKED: 3 HULL CONTACTS`).
+
+### Guidance
+
+While a permit is held within 4,000 units, or the computer is flying close to the slot, the renderer (`include/rendering/docking_guidance_renderer.h++`) draws two things.
+
+**The corridor.** Ten slot-shaped rings in the 3D view, from the mouth out to 2,900 units, joined by rails along their corners and fading with distance. They turn with the slot, so flying down the middle of the rings is flying straight into it.
+
+**The panel**, in the style of Apollo's docking displays, at the left of the screen:
+
+- **Position scope.** The slot's opening (white) with the ship's own footprint (orange: wingspan by thickness) inside it, at the ship's real offset and tilted by its real roll error. Docking by eye is a matter of fitting the orange shape inside the white one. The footprint is clipped to the scope, so a ship far off the slot is cut off at its edge.
+- **Nose scope.** A dot showing where the nose points against straight into the slot, at 7 pixels per degree.
+- **Readouts**, coloured green, yellow or red: `RANGE` still to go, `CLOSING` speed against the limit, `OFFSET` from the slot axis, `ALIGN` (nose error), `ROLL ERR` and `SLIDE` (sideways speed).
+- **A speed bar** with a tick at the limit.
+
+The slot can be matched two ways round, 180° apart. The scope's axes are turned to match the pilot's view (`DockingGuidance::axisU`/`axisV`), so left and right always mean the pilot's left and right whichever way up the ship is.
+
+### Slot traffic
+
+The slot holds one ship at a time. A ship entering or launching from it (NPC or player) blocks a request, which queues behind it. In the other direction, while you hold a permit within 4,000 units, or the computer is flying you in or out, or a launch of yours is queued, NPC ships don't start docking or launching: they circle the approach point or wait inside. A ship sitting docked doesn't hold the slot, or the station's traffic would stop for as long as you stayed. If you press launch while an NPC is in the slot, the launch queues (`LAUNCH QUEUED: ANOTHER SHIP IS IN THE SLOT`), the slot is reserved so no new NPC starts, and the launch begins by itself the moment it clears. (A first version just refused the launch, which at game start, when several NPCs launch in a row, made the pilot wait nearly a minute pressing `L` repeatedly.)
+
+### Does it work? Tests
+
+Tested with a scripted pilot that can only do what a keyboard can: digital on/off yaw, pitch, roll and slide, and a throttle.
+
+| Test | Result |
+| --- | --- |
+| 24 random starts, 2.4–2.9 km out, off to the side, random heading and roll (half rolled the other way round) | **24 of 24 docked**, a mean of about 70 seconds, with no hull contacts, paying the 15 CR fee each time |
+| 8 starts with NPC traffic competing for the slot | 8 of 8 docked |
+| 8 starts with the roll assist off | 8 of 8 docked (see below) |
+| Request out of range, in range, queued behind traffic, never cleared, left alone for 5 minutes | refused with the distance; granted after 2 s; granted 1.5 s after the slot cleared; `NO SLOT AVAILABLE` after 45 s; `PERMIT EXPIRED` |
+| NPC wanting to launch while the player holds the slot | waits; launches within 3 seconds of the player leaving |
+| Ship driven into the face beside the slot | fined 25 CR at 8.3 s, 9.9 s; the third contact revoked the permit; with 30 CR the fine was 15, with 15 CR none |
+
+An honest limit: the scripted pilot reads the roll error directly and reacts with no delay, so the result with the assist off doesn't prove the assist is unnecessary for a person. That is why it stays on by default and is a single constant.
+
+### Manual docking: tuning
+
+Everything is a named constant at the top of `include/systems/docking_control.h++`: `requestRange`, `requestDelay`, `queueTimeout`, `clearanceDelay`, `permitDuration`, `dockingModeRange`, `reservationRange`, the speed-limit numbers, `completionMargin` and `completionSpeed` (the nose within 50 units of the back wall and under 25 u/s relative to the station), `scrapeSpeed`, `scrapeCooldownSeconds`, `maxScrapes` and `rollAssist`. `strafeSpeed` is on the ship, and the fee and fine are in `docking_fees.h++`.
+
 ## Docking Computer
 
-The docking computer is a ship upgrade (2,500 CR, see [Upgrades](#upgrades)), and every docking pays the Space Union a fee (see [Docking Fees](#docking-fees)); a ship without the computer is docked by the same autopilot, as a Union tug. The autopilot itself is `include/systems/docking_computer.h++`, a `DockingComputer` state machine driven by `SystemScene`:
+The docking computer is a ship upgrade (2,500 CR, see [Upgrades](#upgrades)) and the automatic alternative to [docking by hand](#manual-docking). It uses the same request and permit flow: `V` with a permit engages it, and `V` without one asks the station for a permit and engages as soon as it is granted. Every docking, by hand or by computer, pays the Space Union's 15 CR fee (see [Docking Fees](#docking-fees)). The autopilot itself is `include/systems/docking_computer.h++`, a `DockingComputer` state machine driven by `SystemScene`:
 
 ```text
 Idle -> Approach -> Align -> Enter -> Docked -> LaunchReverse -> LaunchTurn -> Idle
           |           |
-          +-----------+--> Disengage -> Idle   (cancelled with C)
+          +-----------+--> Disengage -> Idle   (cancelled with C or V)
 ```
 
-With the approach speed capped at 1,300 u/s (`maxApproachSpeed`; the measurement below was taken at the earlier 1,400 u/s, so it's a little slower now), docking from the far end of a large system is slow: in the 120-case test every docking completed, but the slowest took 966 seconds of game time, about 16 minutes. From the usual spawn point it takes about a minute. Cruising closer first, or raising the cap for the far leg, avoids that.
+**How fast it flies.** It used to be far too quick. The Enter phase slid along the slot axis at `clamp(remaining × 0.5, 90, 450)` u/s, covering the whole 1,600 unit corridor in about five seconds, and a launch-to-docked took about 10 seconds with the ship still doing about 90 u/s at the mouth. It is now deliberately slow:
+
+| | Before | Now |
+| --- | --- | --- |
+| Speed along the slot while entering | `clamp(remaining × 0.5, 90, 450)` | `clamp(remaining × 0.2, 15, 45)` u/s |
+| Speed near the station on the approach | uncapped | at most `max(60, 0.12 × distance to the slot)` u/s |
+| Speed backing out on a launch | the same as entering | `clamp(remaining × 0.4, 45, 160)` u/s |
+| Speed handed back to you after a launch | 300 u/s outward | 90 u/s outward |
+| Request to docked, from the launch point | about 10 s | **about 50 s** (2 s for the station to answer) |
+| Launch, slot to control handed back | about 10 s | about 12 s |
+| Speed entering the corridor / the slot itself | up to 450 u/s | about 39 u/s / about 20 u/s |
+
+The long leg from far away is unchanged: `maxApproachSpeed` (1,300 u/s) still sets how fast it crosses a system. From the far end of a large system the whole docking therefore still takes a long time (in a 120-case test across many systems every docking completed, the slowest, from the far end of a system, taking 1,101 seconds, about 18 minutes), though most of that is the long leg, not the final approach.
 
 While it's active, `SystemScene::acceptsShipInput()` returns `false` and `updatePhysics()` calls `updateWorldPhysics(world, dt, false)` so the player ship skips normal integration; `docking::update()` then positions the ship itself. The flight is kinematic — the docking computer places the ship rather than thrusting it — which keeps it smooth and reliable while the target is orbiting a moving planet.
 
 - **Approach** flies to a point 1600 units in front of the slot. Far out, it heads straight there; within a few thousand units it blends in the approach point's own velocity, so it can keep pace with the orbiting station. The velocity *relative* to that point is kept as persistent state and smoothed — recomputing it from the ship's velocity each frame would let the station's centripetal acceleration show up as a constant lag. The path avoids the star, planets and the station hull (a detour waypoint for whatever is in the way, plus local steering away from nearby surfaces), and the speed drops near surfaces so the ship has room to turn.
-- **Align** holds the ship on the approach point, points the nose down the slot, and rolls the ship to match the slot's long side. The ship's new `roll` field exists for this; player controls leave it at zero.
+- **Align** holds the ship on the approach point, points the nose down the slot, and rolls the ship to match the slot's long side (`rollToMatchSlot()`).
 - **Enter** slides the ship down the slot axis, still matching the station's spin, until the nose is 10 units from the back wall.
 - **Docked** keeps the ship parked in the slot and opens the station screen (see [Station Services](#station-services)).
-- **LaunchReverse** backs the ship straight out to 900 units, **LaunchTurn** turns it to face away and levels the wings, and control returns with the ship moving at the station's speed plus 300 units per second outward.
+- **LaunchReverse** backs the ship straight out to 900 units, **LaunchTurn** turns it to face away and levels the wings, and control returns with the ship moving at the station's speed plus 90 units per second outward. A launch queues behind any ship in the slot (see [Slot traffic](#slot-traffic)).
 
 The station screen is a `StationMenu` (`include/ui/station_menu.h++`), drawn from `SystemScene::drawOverlay()`; its buttons use the helpers in `include/ui/menu_button.h++`, which the main menu shares.
 
@@ -817,6 +940,8 @@ NPCs dock the way the player's docking computer does, so you can watch it happen
 4. **Launching.** The ship appears just inside the slot, nose out and wings on the slot, flies out along the axis at 340 u/s, and hands over to normal roaming flight 3,000 units out. It then levels its wings as it goes.
 
 Frequency: after each roam leg an NPC now heads for the station 55% of the time (it used to be 25%). In addition, 35% of ships arriving in a system appear launching from the station rather than in open space, so the station is busy from the moment you arrive. In a headless test of the start system, 15 minutes saw 37 dockings and 44 launches, with about 10 ships within 15,000 units of the station at any moment.
+
+NPCs share the slot with the player (see [Slot traffic](#slot-traffic)). `StationDockingInfo::slotFree` is false while the player holds the slot, and while it is false an NPC at the approach point keeps flying past it (so it circles) rather than entering, a docked one stays inside rather than launching, and a newly arriving one doesn't appear launching.
 
 `NpcShip::isVisible()` is what `main.cpp`'s render loop checks before drawing an NPC — only `Inactive` (warped out) and `Docked` (inside the station) ships are invisible.
 
@@ -931,7 +1056,7 @@ A fully loaded freighter is a sluggish one. That only affects flying by hand, si
 | Cargo Bay Mk2 | 4,200 CR | +10 t of hold, 20 t in all; replaces Mk1 |
 | Fuel Tank Mk1 | 2,000 CR | +4 t of tank, 10 t in all (66.7 LY of jumps) |
 | Fuel Tank Mk2 | 3,500 CR | +8 t of tank, 14 t in all (93.3 LY); replaces Mk1 |
-| Docking Computer | 2,500 CR | auto-docking on `C` for the 15 CR fee (see [Docking Fees](#docking-fees)) |
+| Docking Computer | 2,500 CR | the `V` key: auto-docking once the station grants a slot (see [Docking Computer](#docking-computer)) |
 | Economics Scanner | 1,500 CR | the galactic chart shows every system's exports (see [Scanners](#scanners-and-what-the-chart-knows)) |
 | Political Scanner | 1,000 CR | the chart shows every system's development, and colours its dots |
 
@@ -1111,55 +1236,30 @@ The scanner turns "probably" into the exact two to four goods. And a station's o
 
 ## Docking Fees
 
-Every docking pays the Space Union. The rules are in `include/systems/docking_fees.h++`:
+Every docking pays the Space Union a fee of **15 CR** (`dockingFee` in `include/systems/docking_fees.h++`), whether the pilot flew in by hand or used the docking computer. It is taken when the docking *completes*: not when a request or an approach is cancelled (an early cancel is free), and not when a saved game loads you straight into a station, since you didn't dock. A message names it, `SPACE UNION DOCKING FEE -15 CR`, and the `[C]` prompt shows it beforehand (`[C] REQUEST DOCKING  15 CR`).
 
-| Ship | Charge |
-| --- | --- |
-| with a docking computer | **15 CR** (`dockingFee`) |
-| without one | **200 CR** (`unionTugFee`): a Union tug flies the ship in |
+Hull contacts are fined separately: 25 CR a scrape, out of spendable credits only (see [Manual Docking](#hull-contacts-and-fines)).
 
-**Why a tug.** The docking computer is a paid upgrade (2,500 CR), but a new commander has 1,000 CR and there is no manual docking yet. If docking simply required the computer, anyone who launched before affording it could never dock again: no selling, no refuelling, no saving, and no way to earn the money. So without the computer, `C` still docks you, by the same autopilot, for the tug's higher charge. The computer then pays for itself by saving 185 CR on every docking, roughly 14 trips.
+### The spending reserve
 
-**How the price was chosen.** My first estimate simulated a greedy trader paying a charge at every docking and counted the trades needed to earn 2,700 CR (the 2,500 CR computer plus 200 CR) from 1,000 CR. **This table ignores the spending reserve, which came later; see the corrected table under [the spending reserve](#docking-fees) below.**
+Nothing can be bought, whether goods, fuel or an upgrade, if it would leave you with less than your next docking costs, which is **15 CR** (`spendingReserve()` is simply `dockingChargeFor()`). The station screen's header shows what's spendable (`SPENDABLE 985.0   RESERVE 15 FOR DOCKING`), buying stops at the boundary, and a refusal says why: `KEEPING 15 CR FOR DOCKING` when you hold enough but not enough to keep the reserve, `NOT ENOUGH CREDITS` when you simply don't have it. Upgrade cards say `KEEPS 200 CR IN RESERVE` when the upgrade rule, which keeps 200 CR of working capital, is what stops you.
 
-| Charge per docking | Trades to afford the computer |
-| --- | --- |
-| 15 CR | 4.4 |
-| 150 CR | 5.7 |
-| 200 CR (the shipped value) | 5.8 |
-| 250 CR | 6.6 |
-| 450 CR | 8.7 |
+The rule exists to close a loophole. The fee used to be capped at what you held, so a commander could spend *everything*, arrive with almost nothing and dock for free. Measured through the real scene when the charge was 200 CR, a commander who spent as much as the game allowed arrived with 3.6 CR and paid 3.6 CR of the fee; with the reserve they arrived with 210.5 CR and paid all 200. A randomised test of 54,700 key presses and mouse clicks across 800 starting situations found 815 purchases that dipped below the reserve before the rule, and none after, with no negative credits and no overfull tank or hold.
 
-Without the reserve, 200 CR made the computer a real early goal (about six good trades). With the reserve it does not: see below.
+**The Union takes at most what you have.** This is now only a last safety net. Because purchases keep the reserve, a commander can no longer end up unable to pay by *spending*. It still applies to someone who has fallen below the reserve through fines or trading losses, and a commander with an empty purse and a hold of goods to sell must still be able to dock, or they could never earn their way out. So `chargeForDocking()` takes `min(fee, credits)`: with 10 CR the docking costs 10 CR, and with 0 CR it's free. The message adds `(ALL YOU HAD)` when the fee wasn't covered.
 
-**When it's charged.** `SystemScene::chargeDockingFee()` takes the fee when a docking *completes*. It is not taken when you cancel (an early cancel is free, tested), and not when a saved game loads you straight into a station, since you didn't dock. A message names the fee, `SPACE UNION DOCKING FEE -15 CR` or `UNION TUG FEE -200 CR`, and the `[C]` prompt shows it beforehand (`[C] DOCKING COMPUTER  15 CR`, `[C] UNION TUG  200 CR`).
+### History: the Union tug
 
-**The spending reserve.** Nothing can be bought, whether goods, fuel or an upgrade, if it would leave you with less than what your next docking costs. That's **200 CR on the Union tug and 15 CR with the docking computer** (`spendingReserve()` is simply `dockingChargeFor()`). The station screen's header shows what's spendable (`SPENDABLE 250.0   RESERVE 200 FOR DOCKING`), buying stops at the boundary, and a refusal says why: `KEEPING 200 CR FOR DOCKING` when you hold enough but not enough to keep the reserve, `NOT ENOUGH CREDITS` when you simply don't have it. Upgrade cards say `KEEPS 200 CR IN RESERVE` in the same situation.
+Before manual docking existed, the docking computer was the *only* way to dock, and it is a paid upgrade (2,500 CR) while a new commander has 1,000 CR. So a commander who launched before affording it could never dock again. A "Union tug" covered that: without the computer, `C` docked you by the same autopilot for a much larger charge (it ended at 200 CR). Combined with the spending reserve (which was then also 200 CR), that made the early game close to unwinnable. I simulated a greedy trader starting with 1,000 CR:
 
-The rule exists to close a loophole. The fee used to be capped at what you held, so a commander could spend *everything*, arrive with almost nothing and dock for free. Measured through the real scene, spending as much as the game allowed and then docking on the tug:
-
-| | Credits on arrival | Fee due | Fee paid |
-| --- | --- | --- | --- |
-| before the reserve | 3.6 | 200 | **3.6** |
-| with the reserve | 210.5 | 200 | **200** |
-
-A randomised test of 54,700 key presses and mouse clicks across 800 starting situations (credits from 0 to 5,000, with and without the computer) found 815 purchases that dipped below the reserve before, and none after. It also found no negative credits and no overfull tank or hold.
-
-The reserve is tied to the *actual* charge on purpose. A flat 200 CR would make a computer owner hold back 200 CR to cover a 15 CR fee. In simulation, a computer owner starting with 250 CR grew to about 6,800 CR in 25 trips with the 15 CR reserve, but stalled at about 212 CR with a flat 200 reserve. Upgrades keep their own 200 CR "working capital" rule as well (`upgradeReserveCredits`), and the larger of the two applies.
-
-**A cost to know about: the tug and the reserve together are harsh.** Each docking costs the tug's 200 CR, and you can only spend what's above the reserve, so a tug-docking commander's profit has to beat the fee out of a smaller stake. I simulated a greedy trader (10 t hold) starting with 1,000 CR, with the reserve equal to the tug fee. These numbers are for the new rule, and they replace the earlier table that ignored the reserve:
-
-| Tug fee (= reserve) | Trades to afford the computer (2,500 CR + reserve) | Credits after 25 trades from 1,000 CR | From 400 CR |
+| Tug fee (= reserve) | Trades to afford the computer | Credits after 25 trades from 1,000 CR | From 400 CR |
 | --- | --- | --- | --- |
 | 50 CR | 7.2 | 9,875 | 6,653 |
-| 75 CR | 8.4 | 9,035 | 1,011 |
 | 100 CR | 8.8 | 9,468 | 74 |
 | 150 CR | 13.4 | 6,742 | 108 |
-| **200 CR (shipped)** | **54.8, and some never get there** | 756 | 159 |
+| 200 CR | 54.8, and some never get there | 756 | 159 |
 
-There's a cliff between 150 and 200 CR: at 200 CR the fee is about as large as a typical trade's profit, so a new commander barely grows and one who starts lower collapses to about 100–160 CR, where nothing can be bought at all, because spendable credits are zero. At 100 CR a new commander needs about nine trades, which is what the 200 CR fee took before the reserve existed. **If the early game feels like a grind, lowering `unionTugFee` is the fix, and the reserve follows it automatically.** I left your 200 CR in place.
-
-**The Union takes at most what you have.** This is now only a last safety net. Because purchases keep the reserve, a commander can no longer end up unable to pay by *spending*. It still applies to someone who has fallen below the reserve through fees or trading losses, and a commander with an empty purse and a hold of goods to sell must still be able to dock, or they could never earn their way out. So `chargeForDocking()` takes `min(fee, credits)`: with 100 CR a tug docking costs 100 CR, and with 0 CR it's free. The message adds `(ALL YOU HAD)` when the fee wasn't covered.
+Once docking could be done by hand the tug had no job, so it was retired: the fee is a flat 15 CR for everyone, the reserve is 15 CR, and the computer is a convenience you can buy when you want it, not a toll you have to pay. At a 15 CR reserve a commander starting with only 250 CR grew to about 6,800 CR in 25 trades in the same simulation.
 
 ## Station Services
 
@@ -1571,9 +1671,9 @@ The flight HUD lives in `include/rendering/hud_renderer.h++`. It is a single `Hu
 
 **Dashboard** (`dashboardHeight = 122` pixels along the bottom, which scenes keep their own text clear of):
 
-- Left: speed (or cruise speed) with the ship's total mass beside it, a throttle bar (labelled REV in red when reversing), a speed bar on the same scale, a fuel gauge and a hold gauge (HOLD, tonnes carried against hold size), (with flight assist on, the throttle bar is where you're heading and the speed bar is where you've got to), and the status line. That line shows flight assist in its own colour (`style::assistOn` blue for FA ON, `style::assistOff` orange for FA OFF), followed by cruise state in the accent: `[J] CRUISE`, `CRUISE CHARGING n%`, `MASS LOCKED`, `[J] DROP`, or `NO FUEL` in red.
+- Left: speed (or cruise speed; labelled `REL SPD` and measured against the station in docking mode) with the ship's total mass beside it, a throttle bar (labelled REV in red when reversing), a speed bar on the same scale, a fuel gauge and a hold gauge (HOLD, tonnes carried against hold size), (with flight assist on, the throttle bar is where you're heading and the speed bar is where you've got to), and the status line. That line shows flight assist in its own colour (`style::assistOn` blue for FA ON, `style::assistOff` orange for FA OFF), followed by cruise state in the accent: `[J] CRUISE`, `CRUISE CHARGING n%`, `MASS LOCKED`, `[J] DROP`, or `NO FUEL` in red.
 - Centre: an Elite-style 3D scanner. The ellipse is the ship's horizontal plane seen from above and behind, forward up the scope; each contact sits on the plane at its ship-relative position with a stalk up or down to its height. NPC ships show as bars, the station as an accent-orange square (ringed when targeted), and your own ship as a gold dot at the centre. The range is `scannerRange = 25000` units.
-- Right: heading (000–359, with 000 along world `+z`) and pitch in degrees, centre-zero bars for the current yaw and pitch rates, and the target compass. The compass dot shows where the target lies relative to the nose: filled when ahead, hollow red when behind. Underneath are the target's name, distance and closing speed (positive while the gap shrinks).
+- Right: heading (000–359, with 000 along world `+z`) and pitch in degrees, centre-zero bars for the current yaw, pitch and roll rates (YAW, PCH, RLL), and the target compass. The compass dot shows where the target lies relative to the nose: filled when ahead, hollow red when behind. Underneath are the target's name, distance and closing speed (positive while the gap shrinks).
 
 **In view:**
 
@@ -1862,8 +1962,8 @@ This is still intentionally small:
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
 - Missions don't exist yet, so trading is the only way to earn credits.
-- The spending reserve and the Union tug fee interact strongly (see [Docking Fees](#docking-fees)): at a 200 CR fee the early game is very slow for a commander without the computer, and a commander who ends up at or below the reserve with an empty hold can't buy anything. Lowering `unionTugFee` fixes the first; a relief grant or a hold-empty waiver would fix the second, and neither exists yet.
-- There is no manual docking, which is why a Union tug exists (see [Docking Fees](#docking-fees)). Once manual docking exists, the tug could become a rarely-needed service and the computer a pure convenience.
+- Hull contacts only fine you: there is no hull damage, no repair and no insurance. NPC ships pass through the station and through the player's ship.
+- Yaw and pitch are Euler angles about the world's vertical and the ship's right axis, so with the ship rolled they don't turn the ship about its own axes. Roll is a banking angle, not a full 3D attitude: fine for lining up with a slot, but not an aerobatic flight model.
 - The chart scanners are all-or-nothing and aren't remembered per system: visiting a system doesn't reveal its exports or development without the scanner.
 - Fuel is only ever bought at stations; there's no fuel scooping from stars, and no way to refuel in open space.
 - Saving is only possible while docked, and a save holds the commander, credits, fuel, hold, bay, system and play time, plus the trading economy. Nothing else about the world is saved; it's regenerated from the seed.

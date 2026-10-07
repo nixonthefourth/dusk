@@ -8,6 +8,7 @@
 #ifndef DUSK_SCENE_H
 #define DUSK_SCENE_H
 
+#include "systems/docking_control.h++"
 #include "systems/save_game.h++"
 #include "systems/travel_effects.h++"
 #include <optional>
@@ -58,6 +59,12 @@ public:
      * after slot selection and naming). Handed over once; empty for scenes that don't start games.
      */
     virtual std::optional<GameLaunch> consumeGameLaunch()
+    {
+        return std::nullopt;
+    }
+
+    /** Docking guidance (the approach corridor and alignment panel) while a docking approach is under way. */
+    virtual std::optional<docking_control::DockingGuidance> dockingGuidance() const
     {
         return std::nullopt;
     }

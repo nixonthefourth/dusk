@@ -43,7 +43,7 @@ inline const std::array<ShipUpgrade, 7>& upgradeCatalogue()
         {"CARGO BAY MK2", "A bigger bay: +10 t, 20 t in all. Replaces Mk1.", 4200.0, UpgradeKind::CargoBay, 2},
         {"FUEL TANK MK1", "A larger tank: +4 t, 10 t in all (66 LY of jumps).", 2000.0, UpgradeKind::FuelTank, 1},
         {"FUEL TANK MK2", "A bigger tank: +8 t, 14 t in all (93 LY). Replaces Mk1.", 3500.0, UpgradeKind::FuelTank, 2},
-        {"DOCKING COMPUTER", "Auto-docking on [C] for the Space Union's 15 CR fee.", 2500.0, UpgradeKind::DockingComputer, 1},
+        {"DOCKING COMPUTER", "Auto-docking on [V] once the station grants a slot.", 2500.0, UpgradeKind::DockingComputer, 1},
         {"ECONOMICS SCANNER", "Shows every system's exports on the galactic chart.", 1500.0, UpgradeKind::EconomicsScanner, 1},
         {"POLITICAL SCANNER", "Shows every system's development, Poor to Progressive.", 1000.0, UpgradeKind::PoliticalScanner, 1},
     }};
