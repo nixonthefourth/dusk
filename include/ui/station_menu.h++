@@ -85,6 +85,10 @@ struct StationMenuView {
     std::string commanderName;
     double credits = 0.0;
 
+    /** What can be spent (credits above the reserve) and the reserve itself: what the next docking costs. */
+    double spendable = 0.0;
+    double reserve = 0.0;
+
     float fuel = 0.f;
     float fuelCapacity = 0.f;
     float hullMass = 0.f;
@@ -539,7 +543,12 @@ private:
         drawText(target, font, view.title, {x, frame.position.y + 6.f}, 30, style::stationMenuTitle);
         drawText(target, font, "COMMANDER " + view.commanderName, {x, frame.position.y + 40.f}, 15, style::textDim);
 
-        drawText(target, font, formatCredits(view.credits), {right, frame.position.y + 10.f}, 22, style::accent, 1.f);
+        const float creditsWidth = drawText(target, font, formatCredits(view.credits), {right, frame.position.y + 10.f}, 22, style::accent, 1.f);
+
+        // How much of it can actually be spent: everything above the reserve kept for docking.
+        char spendable[48];
+        std::snprintf(spendable, sizeof(spendable), "SPENDABLE %.1f   RESERVE %.0f FOR DOCKING", view.spendable, view.reserve);
+        drawText(target, font, spendable, {right - creditsWidth - 16.f, frame.position.y + 17.f}, 13, style::textDim, 1.f);
 
         char fuel[96];
         std::snprintf(fuel, sizeof(fuel), "FUEL %.1f / %.1f t     CARGO %d / %d t", view.fuel, view.fuelCapacity, view.cargoUsed, view.cargoCapacity);
@@ -801,6 +810,11 @@ private:
 
                     if (upgrade.offer.cost < upgrade.listPrice - 0.5)
                         drawText(target, font, "AFTER TRADE-IN", {right, bounds.position.y + 22.f}, 11, style::textDim, 1.f);
+                    else if (upgrade.offer.reserveBlocked)
+                    {
+                        std::snprintf(buffer, sizeof(buffer), "KEEPS %.0f CR IN RESERVE", upgrade.offer.reserve);
+                        drawText(target, font, buffer, {right, bounds.position.y + 22.f}, 11, style::warning, 1.f);
+                    }
                     else if (!affordable)
                         drawText(target, font, "NOT ENOUGH CREDITS", {right, bounds.position.y + 22.f}, 11, style::warning, 1.f);
 
@@ -909,7 +923,7 @@ private:
         if (view.fillQuote.tankFull)
             note = "The tank is full.";
         else if (view.fillQuote.limitedByCredits)
-            note = "You can't afford a full tank; FILL TANK buys as much as your credits allow.";
+            note = "You can't afford a full tank; FILL TANK buys as much as you can spend while keeping the docking reserve.";
 
         drawParagraph(target, font, note, {x, y}, page.size.x, 16, view.fillQuote.limitedByCredits ? style::warning : style::textSecondary);
 

@@ -8,6 +8,7 @@
 
 #include "objects/commander.h++"
 #include "objects/ship.h++"
+#include "systems/docking_fees.h++"
 #include "procgen/statistical.h++"
 #include "systems/economy.h++"
 #include <algorithm>
@@ -60,7 +61,8 @@ inline RefuelQuote quoteRefuel(const Ship& ship, const Commander& commander, flo
 
     if (pricePerTonne > 0.f)
     {
-        const float affordable = static_cast<float>(commander.credits / pricePerTonne);
+        // Fuel, like everything else, can't take you below the spending reserve.
+        const float affordable = static_cast<float>(spendableCredits(commander) / pricePerTonne);
 
         if (affordable < tonnes)
         {

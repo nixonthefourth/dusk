@@ -595,6 +595,8 @@ private:
         view.title = currentSystemName_ + " STATION";
         view.commanderName = commander_.name;
         view.credits = commander_.credits;
+        view.spendable = spendableCredits(commander_);
+        view.reserve = spendingReserve(commander_);
         view.fuel = ship.fuel;
         view.fuelCapacity = ship.fuelCapacity;
         view.hullMass = ship.mass;
@@ -620,7 +622,7 @@ private:
             row.stock = static_cast<int>(std::floor(trade_.stock(currentSystemIndex_, good)));
             row.held = commander_.cargo.of(good);
             row.versusAverage = trade_.versusAverage(currentSystemIndex_, good);
-            row.canBuy = trade_.quoteBuy(currentSystemIndex_, good, 1, commander_.cargoRoom(), commander_.credits).tonnes > 0;
+            row.canBuy = trade_.quoteBuy(currentSystemIndex_, good, 1, commander_.cargoRoom(), spendableCredits(commander_)).tonnes > 0;
             row.canSell = row.held > 0;
             view.market.push_back(row);
         }
@@ -675,7 +677,15 @@ private:
                 if (bought.tonnes > 0.f)
                     std::snprintf(message, sizeof(message), "REFUELLED %.1f t  -%.0f CR", bought.tonnes, bought.cost);
                 else
-                    std::snprintf(message, sizeof(message), "%s", bought.tankFull ? "TANK ALREADY FULL" : "NOT ENOUGH CREDITS");
+                {
+                    // Short of credits, or holding enough but not enough to keep the docking reserve?
+                    if (bought.tankFull)
+                        std::snprintf(message, sizeof(message), "TANK ALREADY FULL");
+                    else if (commander_.credits >= price * 0.1f)
+                        std::snprintf(message, sizeof(message), "KEEPING %.0f CR FOR DOCKING", spendingReserve(commander_));
+                    else
+                        std::snprintf(message, sizeof(message), "NOT ENOUGH CREDITS");
+                }
 
                 docking::showMessage(docking_, message, 2.f);
                 break;
@@ -770,7 +780,7 @@ private:
         if (action == StationMenuAction::BuyGoodOne || action == StationMenuAction::BuyGoodMax)
         {
             const int wanted = action == StationMenuAction::BuyGoodMax ? std::max(1, commander_.cargoRoom()) : 1;
-            const trading::TradeQuote quote = trade_.buy(system, good, wanted, commander_.cargoRoom(), commander_.credits);
+            const trading::TradeQuote quote = trade_.buy(system, good, wanted, commander_.cargoRoom(), spendableCredits(commander_));
 
             if (quote.tonnes > 0)
             {
@@ -780,9 +790,14 @@ private:
             }
             else
             {
-                std::snprintf(message, sizeof(message), "%s",
-                              quote.limit == trading::Limit::SoldOut ? "SOLD OUT"
-                              : (quote.limit == trading::Limit::HoldFull ? "HOLD FULL" : "NOT ENOUGH CREDITS"));
+                if (quote.limit == trading::Limit::SoldOut)
+                    std::snprintf(message, sizeof(message), "SOLD OUT");
+                else if (quote.limit == trading::Limit::HoldFull)
+                    std::snprintf(message, sizeof(message), "HOLD FULL");
+                else if (reserveBlocks(commander_, static_cast<double>(trade_.buyPrice(system, good))))
+                    std::snprintf(message, sizeof(message), "KEEPING %.0f CR FOR DOCKING", spendingReserve(commander_));
+                else
+                    std::snprintf(message, sizeof(message), "NOT ENOUGH CREDITS");
             }
         }
         else
@@ -822,7 +837,12 @@ private:
 
             case UpgradeStatus::Installed: std::snprintf(message, sizeof(message), "ALREADY INSTALLED"); break;
             case UpgradeStatus::HaveBetter: std::snprintf(message, sizeof(message), "YOU ALREADY HAVE A BETTER ONE"); break;
-            case UpgradeStatus::CantAfford: std::snprintf(message, sizeof(message), "NOT ENOUGH CREDITS (KEEP %.0f CR TO TRADE)", upgradeReserveCredits); break;
+            case UpgradeStatus::CantAfford:
+                if (offer.reserveBlocked)
+                    std::snprintf(message, sizeof(message), "KEEPING %.0f CR IN RESERVE", offer.reserve);
+                else
+                    std::snprintf(message, sizeof(message), "NOT ENOUGH CREDITS");
+                break;
         }
 
         syncShipLoad();

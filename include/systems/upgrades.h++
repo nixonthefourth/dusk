@@ -11,6 +11,8 @@
 #include "objects/cargo.h++"
 #include "objects/commander.h++"
 #include "objects/fuel_tank.h++"
+#include "systems/docking_fees.h++"
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <string>
@@ -79,7 +81,10 @@ inline double upgradeValue(UpgradeKind kind, int tier)
 /** Fraction of its list price the outfitters give back for the module being replaced. */
 constexpr double tradeInFraction = 0.5;
 
-/** Credits the commander must keep after buying an upgrade, so there's always something left to trade with. */
+/**
+ * Credits the commander must keep after buying an upgrade, so there's always something left to
+ * trade with. (The docking reserve also applies, whichever is larger: see spendingReserve().)
+ */
 constexpr double upgradeReserveCredits = 200.0;
 
 /** Why an upgrade can or can't be bought right now. */
@@ -89,6 +94,10 @@ enum class UpgradeStatus { Available, Installed, HaveBetter, CantAfford };
 struct UpgradeOffer {
     UpgradeStatus status = UpgradeStatus::Available;
     double cost = 0.0;
+
+    /** The credits an upgrade must leave you with, and whether that (not lack of credits) is what stops you buying it. */
+    double reserve = 0.0;
+    bool reserveBlocked = false;
 };
 
 /**
@@ -115,7 +124,9 @@ inline UpgradeOffer offerFor(const ShipUpgrade& upgrade, const Commander& comman
     }
 
     offer.cost = upgrade.price - tradeInFraction * upgradeValue(upgrade.kind, fitted);
-    offer.status = commander.credits - offer.cost >= upgradeReserveCredits ? UpgradeStatus::Available : UpgradeStatus::CantAfford;
+    offer.reserve = std::max(upgradeReserveCredits, spendingReserve(commander));
+    offer.status = commander.credits - offer.cost >= offer.reserve ? UpgradeStatus::Available : UpgradeStatus::CantAfford;
+    offer.reserveBlocked = offer.status == UpgradeStatus::CantAfford && commander.credits >= offer.cost;
     return offer;
 }
 

@@ -767,7 +767,7 @@ Idle -> Approach -> Align -> Enter -> Docked -> LaunchReverse -> LaunchTurn -> I
           +-----------+--> Disengage -> Idle   (cancelled with C)
 ```
 
-With the approach speed capped at 1,400 u/s (`maxApproachSpeed`), docking from the far end of a large system is slow: in the 120-case test every docking completed, but the slowest took 966 seconds of game time, about 16 minutes. From the usual spawn point it takes about a minute. Cruising closer first, or raising the cap for the far leg, avoids that.
+With the approach speed capped at 1,300 u/s (`maxApproachSpeed`; the measurement below was taken at the earlier 1,400 u/s, so it's a little slower now), docking from the far end of a large system is slow: in the 120-case test every docking completed, but the slowest took 966 seconds of game time, about 16 minutes. From the usual spawn point it takes about a minute. Cruising closer first, or raising the cap for the far leg, avoids that.
 
 While it's active, `SystemScene::acceptsShipInput()` returns `false` and `updatePhysics()` calls `updateWorldPhysics(world, dt, false)` so the player ship skips normal integration; `docking::update()` then positions the ship itself. The flight is kinematic — the docking computer places the ship rather than thrusting it — which keeps it smooth and reliable while the target is orbiting a moving planet.
 
@@ -873,7 +873,7 @@ The market page shows each good's price against the galaxy average, green when c
 
 ### Buying and selling
 
-`quoteBuy()` and `quoteSell()` price an order **one tonne at a time**: each tonne is priced at the stock level it finds, then stock moves by a tonne before the next. Large orders therefore pay a little more when buying and receive a little less when selling. A buy stops at whichever limit it hits first: hold room, the station's stock, or your credits. A sale stops at what you carry. Whole tonnes only.
+`quoteBuy()` and `quoteSell()` price an order **one tonne at a time**: each tonne is priced at the stock level it finds, then stock moves by a tonne before the next. Large orders therefore pay a little more when buying and receive a little less when selling. A buy stops at whichever limit it hits first: hold room, the station's stock, or your spendable credits (what's above the [spending reserve](#docking-fees)). A sale stops at what you carry. Whole tonnes only.
 
 You can't make money by flipping within a system: buying 10 t and selling it straight back loses 3.5–3.8% (the spread plus the slippage), checked across a thousand-system sample. `buy()` and `sell()` apply a quote to the market's stock; `SystemScene::tradeSelectedGood()` moves the goods and credits.
 
@@ -940,7 +940,7 @@ A fully loaded freighter is a sluggish one. That only affects flying by hand, si
 - Tiers of one kind **replace one another**, and a kind never affects another (owning a Mk2 cargo bay doesn't make a Mk1 fuel tank "worse").
 - The tier you're replacing is **traded in at half its list price**, so Cargo Bay Mk1 → Mk2 costs 4,200 − 900 = 3,300 CR and Fuel Tank Mk1 → Mk2 costs 3,500 − 1,000 = 2,500 CR. Buying Mk2 directly costs the full list price. The docking computer and the scanners have no trade-in.
 - You can't buy something you already have (`Installed`) or a lesser tier than you have (`HaveBetter`).
-- An upgrade must **leave you at least 200 CR** (`upgradeReserveCredits`), because a commander with an empty purse and an empty hold could never trade again. Even the cheapest tonne anywhere costs 32.6 CR, so the reserve always buys six tonnes. The boundaries are exact and tested: Fuel Mk1 is refused at 2,199 CR and allowed at 2,200; the docking computer at 2,699 and 2,700; Fuel Mk2 over Mk1 at 2,699 and 2,700.
+- An upgrade must **leave you at least 200 CR** (`upgradeReserveCredits`, or the docking reserve if that's larger), because a commander with an empty purse and an empty hold could never trade again. Even the cheapest tonne anywhere costs 32.6 CR, so the reserve always buys six tonnes. The boundaries are exact and tested: Fuel Mk1 is refused at 2,199 CR and allowed at 2,200; the docking computer at 2,699 and 2,700; Fuel Mk2 over Mk1 at 2,699 and 2,700.
 
 `installUpgrade()` fits an upgrade to the commander, and `buyUpgrade()` takes the credits first. The new tank size reaches the ship at once through `SystemScene::syncShipLoad()`. A bigger tank does **not** fill itself: the fuel aboard stays what it was, and refuelling at the station tops it up.
 
@@ -1120,7 +1120,7 @@ Every docking pays the Space Union. The rules are in `include/systems/docking_fe
 
 **Why a tug.** The docking computer is a paid upgrade (2,500 CR), but a new commander has 1,000 CR and there is no manual docking yet. If docking simply required the computer, anyone who launched before affording it could never dock again: no selling, no refuelling, no saving, and no way to earn the money. So without the computer, `C` still docks you, by the same autopilot, for the tug's higher charge. The computer then pays for itself by saving 185 CR on every docking, roughly 14 trips.
 
-**How the price was chosen.** I simulated a greedy trader paying a charge at every docking and counted the trades needed to earn 2,700 CR (the 2,500 CR computer plus the 200 CR reserve) from 1,000 CR:
+**How the price was chosen.** My first estimate simulated a greedy trader paying a charge at every docking and counted the trades needed to earn 2,700 CR (the 2,500 CR computer plus 200 CR) from 1,000 CR. **This table ignores the spending reserve, which came later; see the corrected table under [the spending reserve](#docking-fees) below.**
 
 | Charge per docking | Trades to afford the computer |
 | --- | --- |
@@ -1130,11 +1130,36 @@ Every docking pays the Space Union. The rules are in `include/systems/docking_fe
 | 250 CR | 6.6 |
 | 450 CR | 8.7 |
 
-I suggested 250 CR; the shipped 200 CR makes the computer a real early goal (about six good trades, around 15 minutes from an optimal trader) without being a grind. A human trader will be slower than this simulation.
+Without the reserve, 200 CR made the computer a real early goal (about six good trades). With the reserve it does not: see below.
 
 **When it's charged.** `SystemScene::chargeDockingFee()` takes the fee when a docking *completes*. It is not taken when you cancel (an early cancel is free, tested), and not when a saved game loads you straight into a station, since you didn't dock. A message names the fee, `SPACE UNION DOCKING FEE -15 CR` or `UNION TUG FEE -200 CR`, and the `[C]` prompt shows it beforehand (`[C] DOCKING COMPUTER  15 CR`, `[C] UNION TUG  200 CR`).
 
-**The Union takes at most what you have.** A commander with nothing in their purse and a hold of goods to sell must still be able to dock, or they could never earn their way out. So `chargeForDocking()` takes `min(fee, credits)`: with 100 CR a tug docking costs 100 CR, and with 0 CR it's free. The message adds `(ALL YOU HAD)` when the fee wasn't covered.
+**The spending reserve.** Nothing can be bought, whether goods, fuel or an upgrade, if it would leave you with less than what your next docking costs. That's **200 CR on the Union tug and 15 CR with the docking computer** (`spendingReserve()` is simply `dockingChargeFor()`). The station screen's header shows what's spendable (`SPENDABLE 250.0   RESERVE 200 FOR DOCKING`), buying stops at the boundary, and a refusal says why: `KEEPING 200 CR FOR DOCKING` when you hold enough but not enough to keep the reserve, `NOT ENOUGH CREDITS` when you simply don't have it. Upgrade cards say `KEEPS 200 CR IN RESERVE` in the same situation.
+
+The rule exists to close a loophole. The fee used to be capped at what you held, so a commander could spend *everything*, arrive with almost nothing and dock for free. Measured through the real scene, spending as much as the game allowed and then docking on the tug:
+
+| | Credits on arrival | Fee due | Fee paid |
+| --- | --- | --- | --- |
+| before the reserve | 3.6 | 200 | **3.6** |
+| with the reserve | 210.5 | 200 | **200** |
+
+A randomised test of 54,700 key presses and mouse clicks across 800 starting situations (credits from 0 to 5,000, with and without the computer) found 815 purchases that dipped below the reserve before, and none after. It also found no negative credits and no overfull tank or hold.
+
+The reserve is tied to the *actual* charge on purpose. A flat 200 CR would make a computer owner hold back 200 CR to cover a 15 CR fee. In simulation, a computer owner starting with 250 CR grew to about 6,800 CR in 25 trips with the 15 CR reserve, but stalled at about 212 CR with a flat 200 reserve. Upgrades keep their own 200 CR "working capital" rule as well (`upgradeReserveCredits`), and the larger of the two applies.
+
+**A cost to know about: the tug and the reserve together are harsh.** Each docking costs the tug's 200 CR, and you can only spend what's above the reserve, so a tug-docking commander's profit has to beat the fee out of a smaller stake. I simulated a greedy trader (10 t hold) starting with 1,000 CR, with the reserve equal to the tug fee. These numbers are for the new rule, and they replace the earlier table that ignored the reserve:
+
+| Tug fee (= reserve) | Trades to afford the computer (2,500 CR + reserve) | Credits after 25 trades from 1,000 CR | From 400 CR |
+| --- | --- | --- | --- |
+| 50 CR | 7.2 | 9,875 | 6,653 |
+| 75 CR | 8.4 | 9,035 | 1,011 |
+| 100 CR | 8.8 | 9,468 | 74 |
+| 150 CR | 13.4 | 6,742 | 108 |
+| **200 CR (shipped)** | **54.8, and some never get there** | 756 | 159 |
+
+There's a cliff between 150 and 200 CR: at 200 CR the fee is about as large as a typical trade's profit, so a new commander barely grows and one who starts lower collapses to about 100–160 CR, where nothing can be bought at all, because spendable credits are zero. At 100 CR a new commander needs about nine trades, which is what the 200 CR fee took before the reserve existed. **If the early game feels like a grind, lowering `unionTugFee` is the fix, and the reserve follows it automatically.** I left your 200 CR in place.
+
+**The Union takes at most what you have.** This is now only a last safety net. Because purchases keep the reserve, a commander can no longer end up unable to pay by *spending*. It still applies to someone who has fallen below the reserve through fees or trading losses, and a commander with an empty purse and a hold of goods to sell must still be able to dock, or they could never earn their way out. So `chargeForDocking()` takes `min(fee, credits)`: with 100 CR a tug docking costs 100 CR, and with 0 CR it's free. The message adds `(ALL YOU HAD)` when the fee wasn't covered.
 
 ## Station Services
 
@@ -1153,7 +1178,7 @@ The menu itself owns only its selection. Everything it displays comes from a `St
 
 **Refuelling** (`include/systems/refuelling.h++`) is a pair of pure functions:
 
-- `quoteRefuel()` works out what a purchase would deliver: never more than the tank has room for, never more than you can pay for, in 0.1 t steps. A purchase that fills the tank tops it off exactly.
+- `quoteRefuel()` works out what a purchase would deliver: never more than the tank has room for, never more than you can spend while keeping the [spending reserve](#docking-fees), in 0.1 t steps. A purchase that fills the tank tops it off exactly.
 - `buyFuel()` applies the quote.
 
 The price comes from the local economy: `fuelPricePerTonne()` multiplies the 15 CR/t base by `economyTierMultiplier()`, so fuel costs 17.25 CR/t in Poor systems, 15 in Developing and 12.75 in Progressive. The page shows the gauge, your current and full-tank jump range, your ship's mass against its hull mass, the price, and two buttons that show what they'll buy: FILL (or TANK FULL / NO CREDITS) and BUY 1 t. The two buttons are different actions (`RefuelFull`, `RefuelOneTonne`), and the scene acts on the action it is given, never on how it was triggered. (It once guessed from the input device, so clicking BUY 1 t, which isn't a key press, bought the whole tank. The bug was reproduced with injected key presses and mouse clicks before the fix, and the same events were re-run afterwards for every path. Those throwaway test programs are not part of the repository, which has no test suite yet.)
@@ -1837,6 +1862,7 @@ This is still intentionally small:
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
 - Missions don't exist yet, so trading is the only way to earn credits.
+- The spending reserve and the Union tug fee interact strongly (see [Docking Fees](#docking-fees)): at a 200 CR fee the early game is very slow for a commander without the computer, and a commander who ends up at or below the reserve with an empty hold can't buy anything. Lowering `unionTugFee` fixes the first; a relief grant or a hold-empty waiver would fix the second, and neither exists yet.
 - There is no manual docking, which is why a Union tug exists (see [Docking Fees](#docking-fees)). Once manual docking exists, the tug could become a rarely-needed service and the computer a pure convenience.
 - The chart scanners are all-or-nothing and aren't remembered per system: visiting a system doesn't reveal its exports or development without the scanner.
 - Fuel is only ever bought at stations; there's no fuel scooping from stars, and no way to refuel in open space.
