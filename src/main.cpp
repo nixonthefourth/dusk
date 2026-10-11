@@ -12,6 +12,7 @@
 #include "rendering/hud_renderer.h++"
 #include "rendering/asteroid_renderer.h++"
 #include "rendering/docking_guidance_renderer.h++"
+#include "rendering/mining_renderer.h++"
 #include "rendering/travel_effects_renderer.h++"
 #include "ui/style.h++"
 #include "rendering/planet_renderer.h++"
@@ -68,6 +69,7 @@ int main() {
     const ShipRenderer shipRenderer(projectionConfig);
     const HudRenderer hudRenderer;
     const DockingGuidanceRenderer guidanceRenderer(projectionConfig);
+    const MiningRenderer miningRenderer(projectionConfig);
 
     // Swaps scenes when the active one asks to (PLAY on the menu, EXIT), and resets per-scene
     // state that lives out here: edge-triggered key tracking and the camera spring.
@@ -183,6 +185,9 @@ int main() {
             if (npc.isVisible())
                 shipRenderer.draw(window, npc.ship, camera);
         }
+
+        // Mining lasers and the ore flying in, over the rocks and ships they light up.
+        miningRenderer.draw(window, renderWorld, camera);
 
         // Cruise and hyperspace animations sit over the 3D view and under the HUD; the hyperspace
         // tunnel covers the whole view.

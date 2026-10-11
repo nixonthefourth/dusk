@@ -51,6 +51,25 @@ namespace procgen {
     }
 
     /**
+     * A belt rock's identity, from its belt's seed, its streaming cell and its index within the
+     * cell: the same rock gets the same id however often it is regenerated. The top bit is kept
+     * clear (drifting rocks use it), and the id is never 0.
+     */
+    inline std::uint64_t beltRockId(std::uint32_t beltSeed, int x, int y, int z, int index)
+    {
+        std::uint64_t h = 0xCBF29CE484222325ull ^ beltSeed;
+
+        for (const std::int64_t part : {static_cast<std::int64_t>(x), static_cast<std::int64_t>(y), static_cast<std::int64_t>(z), static_cast<std::int64_t>(index)})
+        {
+            h ^= static_cast<std::uint64_t>(part) + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
+            h *= 0x100000001B3ull;
+        }
+
+        h = (h ^ (h >> 31)) & 0x7FFFFFFFFFFFFFFFull;
+        return h == 0 ? 1 : h;
+    }
+
+    /**
      * Seed for one streaming cell: the belt seed and the cell's integer coordinates, hashed together.
      * The same cell always gets the same seed, so its rocks are identical every time they're generated.
      */
@@ -203,6 +222,7 @@ namespace procgen {
 
                         rock.position = beltToWorld(belt, local);
                         rock.velocity = beltVelocityAt(belt, rock.position);
+                        rock.id = beltRockId(belt.seed, ix, iy, iz, n);
                         visit(rock);
                     }
                 }

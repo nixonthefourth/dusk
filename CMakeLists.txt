@@ -54,6 +54,11 @@ add_executable(dusk src/main.cpp
         include/objects/fuel_tank.h++
         include/systems/docking_fees.h++
         include/systems/docking_control.h++
+        include/systems/mining.h++
+        include/objects/mining_hatch.h++
+        include/objects/hardpoints.h++
+        include/world/mining_state.h++
+        include/rendering/mining_renderer.h++
         include/systems/station_collision.h++
         include/rendering/docking_guidance_renderer.h++
         include/ui/menu_button.h++

@@ -48,6 +48,13 @@ struct Asteroid {
     float radius = 100.f;
     int shape = 0;
 
+    /**
+     * Identity: the same rock always gets the same id, so mining can remember how much it has
+     * taken from it. Belt rocks get theirs from their belt's seed, streaming cell and place in it;
+     * drifting rocks get a running number with the top bit set. 0 means none.
+     */
+    std::uint64_t id = 0;
+
     /** Unit spin axis, spin rate (rad/s) and starting angle: rocks tumble slowly. */
     Vec3 spinAxis = {0.f, 1.f, 0.f};
     float spinRate = 0.f;

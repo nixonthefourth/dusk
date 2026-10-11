@@ -166,6 +166,9 @@ inline void updateShipFromKeyboard(Ship& ship, float dt, ShipInputState& inputSt
     // Roll is always available: Left rolls left, Right rolls right.
     ship.rollInput = keyAxis(sf::Keyboard::Key::Right, sf::Keyboard::Key::Left);
 
+    // Space fires the selected hardpoint group for as long as it is held.
+    ship.fireInput = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Space);
+
     if (ship.dockingMode && shift)
     {
         // Docking mode: holding Shift turns A/D/Q/E into thrusters that slide the ship (right/left

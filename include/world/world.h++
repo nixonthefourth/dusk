@@ -11,6 +11,7 @@
 
 #include "objects/asteroid.h++"
 #include "systems/station_collision.h++"
+#include "world/mining_state.h++"
 #include "objects/cube.h++"
 #include "objects/planet.h++"
 #include "objects/ship.h++"
@@ -88,6 +89,13 @@ struct World {
 
     /** Randomness for drifting-rock spawns (cosmetic, so not tied to the system seed). */
     std::mt19937 driftRng{0x5EEDu};
+
+    /** The next drifting rock's identity number (the top bit is set on top of it, to keep clear of belt rock ids). */
+    std::uint64_t nextDriftingRockId = 1;
+
+    /** Tonnes mined from each rock in this system, and what the mining lasers are doing (see mining.h++). */
+    mining::MiningLedger miningLedger;
+    mining::MiningState mining;
 
     /**
      * Seconds of simulated time in this system; drives belt orbits and tumbling rocks. A double,
@@ -240,16 +248,17 @@ inline void resolveShipAsteroidContact(Ship& ship, const World& world)
 
     for (const AsteroidBelt& belt : world.asteroidBelts)
     {
+        // Mined rocks are smaller: the ship bumps into what's left of them.
         procgen::forEachAsteroidNear(belt, ship.position, reach, [&](const Asteroid& rock)
         {
-            resolveShipRockContact(ship, rock);
+            resolveShipRockContact(ship, world.miningLedger.shrunk(rock));
         });
     }
 
     for (const Asteroid& rock : world.driftingAsteroids)
     {
         if (length(rock.position - ship.position) < reach)
-            resolveShipRockContact(ship, rock);
+            resolveShipRockContact(ship, world.miningLedger.shrunk(rock));
     }
 }
 
@@ -316,6 +325,9 @@ inline bool spawnDriftingAsteroid(World& world, Asteroid& rock, bool initial)
     std::mt19937& rng = world.driftRng;
     std::uniform_real_distribution<float> unit(0.f, 1.f);
     std::normal_distribution<float> gauss(0.f, 1.f);
+
+    // A respawned rock is a new rock, with a fresh identity (and nothing mined from it).
+    rock.id = (std::uint64_t{1} << 63) | world.nextDriftingRockId++;
 
     const Ship& ship = world.playerShip;
     const float shipSpeed = length(ship.velocity);

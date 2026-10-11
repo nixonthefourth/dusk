@@ -8,6 +8,10 @@
 
 #include "objects/cargo.h++"
 #include "objects/fuel_tank.h++"
+#include "objects/hardpoints.h++"
+#include "objects/mining_hatch.h++"
+#include <optional>
+#include <vector>
 #include <algorithm>
 #include <string>
 
@@ -36,6 +40,35 @@ struct Commander {
      */
     bool hasEconomicsScanner = false;
     bool hasPoliticalScanner = false;
+
+    /** The mining module (a paid upgrade): two mining lasers and the mining hatch, and what the hatch holds. */
+    bool hasMiningModule = false;
+    MiningHatch hatch;
+
+    /** Which fitted hardpoint group is selected, as an index into hardpoints(). */
+    int selectedHardpoint = 0;
+
+    /** The hardpoint groups fitted to the ship, in the order the hardpoint key cycles through them. */
+    std::vector<HardpointKind> hardpoints() const
+    {
+        std::vector<HardpointKind> fitted;
+
+        if (hasMiningModule)
+            fitted.push_back(HardpointKind::MiningLaser);
+
+        return fitted;
+    }
+
+    /** The selected hardpoint group, if anything is fitted. */
+    std::optional<HardpointKind> selectedHardpointKind() const
+    {
+        const auto fitted = hardpoints();
+
+        if (fitted.empty())
+            return std::nullopt;
+
+        return fitted[static_cast<std::size_t>(std::clamp(selectedHardpoint, 0, static_cast<int>(fitted.size()) - 1))];
+    }
 
     /** Tank size in tonnes: 6 standard, 10 with a Mk1 tank, 14 with a Mk2 tank. */
     float fuelCapacity() const

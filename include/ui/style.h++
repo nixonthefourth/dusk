@@ -216,6 +216,17 @@ namespace style {
     /** Main menu: save-slot cards and the commander name field. */
     inline constexpr sf::Color slotCardFill{8, 12, 18, 225};
 
+    /** Mining: the laser beam (a glow and a bright core), sparks at the impact, and the colour of each resource's ore. */
+    inline constexpr sf::Color miningBeamGlow{80, 255, 190, 70};
+    inline constexpr sf::Color miningBeamCore{200, 255, 235};
+    inline constexpr sf::Color miningSpark{255, 230, 160};
+    inline constexpr sf::Color oreIron{210, 120, 90};
+    inline constexpr sf::Color oreSilicates{220, 200, 150};
+    inline constexpr sf::Color oreNickel{190, 195, 175};
+    inline constexpr sf::Color oreWaterIce{170, 220, 255};
+    inline constexpr sf::Color oreCobalt{100, 145, 235};
+    inline constexpr sf::Color orePlatinum{240, 240, 255};
+
     /** Docking guidance: readings that are fine, borderline and wrong; the slot aperture, the ship's footprint, and the 3D corridor. */
     inline constexpr sf::Color dockingGood = profit;
     inline constexpr sf::Color dockingCaution = caution;

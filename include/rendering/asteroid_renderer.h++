@@ -157,16 +157,17 @@ private:
 
         for (const AsteroidBelt& belt : world.asteroidBelts)
         {
+            // Mined rocks are drawn shrunk by what has been taken from them.
             procgen::forEachAsteroidNear(belt, camera.position, drawDistance, [&](const Asteroid& rock)
             {
-                drawRock(batch, world, camera, viewport, viewMatrix, focal, time, rock, belt.shapes, belt.coarseShapeCount);
+                drawRock(batch, world, camera, viewport, viewMatrix, focal, time, world.miningLedger.shrunk(rock), belt.shapes, belt.coarseShapeCount);
             });
         }
 
         for (const Asteroid& rock : world.driftingAsteroids)
         {
             if (length(rock.position - camera.position) <= drawDistance + rock.radius)
-                drawRock(batch, world, camera, viewport, viewMatrix, focal, time, rock, world.looseRockShapes, world.looseCoarseShapeCount);
+                drawRock(batch, world, camera, viewport, viewMatrix, focal, time, world.miningLedger.shrunk(rock), world.looseRockShapes, world.looseCoarseShapeCount);
         }
 
         if (!batch.dots.empty())

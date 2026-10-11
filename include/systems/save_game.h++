@@ -26,7 +26,7 @@
 constexpr int saveSlotCount = 3;
 
 /** Bumped whenever the save format changes; older files are still read (unknown keys are ignored, missing ones default). */
-constexpr int saveFormatVersion = 4;
+constexpr int saveFormatVersion = 5;
 
 /** Longest commander name allowed, in characters. */
 constexpr std::size_t maxCommanderNameLength = 16;
@@ -82,6 +82,11 @@ struct SaveGame {
     /** Whether the economics and political scanners have been bought. */
     bool economicsScanner = false;
     bool politicalScanner = false;
+
+    /** Whether the mining module has been bought, the selected hardpoint group, and what the mining hatch holds (resource key, tonnes). */
+    bool miningModule = false;
+    int hardpoint = 0;
+    std::vector<std::pair<std::string, float>> hatch;
 
     /**
      * The trading network's state: the galaxy clock, every market stock that has moved away from
@@ -242,6 +247,15 @@ inline std::string serialiseSave(const SaveGame& save)
     out << "autoDock=" << (save.autoDock ? 1 : 0) << '\n';
     out << "economicsScanner=" << (save.economicsScanner ? 1 : 0) << '\n';
     out << "politicalScanner=" << (save.politicalScanner ? 1 : 0) << '\n';
+    out << "miningModule=" << (save.miningModule ? 1 : 0) << '\n';
+    out << "hardpoint=" << save.hardpoint << '\n';
+
+    for (const auto& [resource, tonnes] : save.hatch)
+    {
+        char line[96];
+        std::snprintf(line, sizeof(line), "hatch=%s,%.3f\n", resource.c_str(), static_cast<double>(tonnes));
+        out << line;
+    }
 
     for (const auto& [good, tonnes] : save.cargo)
         out << "cargo=" << good << ',' << tonnes << '\n';
@@ -341,6 +355,17 @@ inline std::optional<SaveGame> parseSave(const std::string& text)
             save.economicsScanner = std::atoi(value.c_str()) != 0;
         else if (key == "politicalScanner")
             save.politicalScanner = std::atoi(value.c_str()) != 0;
+        else if (key == "miningModule")
+            save.miningModule = std::atoi(value.c_str()) != 0;
+        else if (key == "hardpoint")
+            save.hardpoint = std::max(0, std::atoi(value.c_str()));
+        else if (key == "hatch")
+        {
+            const auto fields = splitFields(value);
+
+            if (fields.size() == 2)
+                save.hatch.emplace_back(fields[0], std::max(0.f, static_cast<float>(std::atof(fields[1].c_str()))));
+        }
         else if (key == "cargo")
         {
             const auto fields = splitFields(value);

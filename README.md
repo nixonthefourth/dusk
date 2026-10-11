@@ -21,6 +21,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - Real orbital mechanics: planets orbit a central star under actual Newtonian gravity, integrated with velocity Verlet, and the star's own gravity pulls on the player ship too.
 - An OBJ-modelled space station procedurally placed in orbit around a random planet, in systems that roll one. It spins Elite-style around its docking axis, with the slot facing along its orbit.
 - Docking by request: ask the station for a slot (`C`), then fly in by hand with a speed limit relative to the station, strafe thrusters, roll on the arrow keys, an Apollo-style alignment panel and a corridor of rings in the 3D view, with a solid station that fines you for scraping it. Or buy the docking computer (`V`), which flies the approach for you, slowly: about 50 seconds from request to docked.
+- Asteroid mining: buy the Mining Module (2,400 CR), point the nose at a rock and hold `Space`. Twin laser beams cut ore, fragments of iron, nickel, cobalt, silicates, water ice or platinum fly into a 5 t mining hatch, and the rock shrinks as you mine it. `R` cycles hardpoint groups, ready for weapons.
 - Simple-reflex NPC ships that roam, avoid planets and stars, occasionally head to the station and dock, and periodically "warp out" and back in — no memory, no planning, just current-state reflexes.
 - A living trade economy: every system has its own market, prices follow supply and demand, you buy and sell at stations, and 300 simple-reflex trader agents move goods between systems on their own. Tech systems now really export tech goods, a bug that had left the best goods almost unobtainable.
 - A camera that chases the ship from behind, plus an orbit "showcase" mode.
@@ -108,7 +109,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [~] Physics
   - [x] Object-level collision hitboxes
   - [x] Fuel expenditure (mass matters)
-- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear) — cargo bays, fuel tanks, the docking computer and the two chart scanners are for sale; the rest are still to come
+- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear): cargo bays, fuel tanks, the docking computer, both chart scanners and the mining module exist; guns and jump drives are still to come
 - [x] Save/load: three commander slots, named commanders, saving at stations
 - [x] Docking: request a slot from the station, then dock by hand or with the docking computer; NPCs dock, launch and queue for the slot visibly; every docking pays a Space Union fee
 - [~] Space stations: small, medium, large — one procedurally placed small station (`station_s.obj`) per eligible system today
@@ -170,6 +171,8 @@ Flight controls:
 - `Q`: pitch nose up.
 - `E`: pitch nose down.
 - `Left` / `Right` arrows: roll left / right (works everywhere, not just when docking).
+- `Space` (hold): fire the selected hardpoint group (the mining lasers, for now). See [Mining](#mining).
+- `R`: select the next fitted hardpoint group.
 - `Shift` (hold): precision turning, about a third of the normal turn rate.
 - `F`: toggle flight assist.
 - `J`: charge the cruise drive (it engages after 1.2 s; press again to cancel), or drop out of cruise. Refused while mass-locked.
@@ -243,6 +246,8 @@ include/
     asteroid.h++
     commander.h++
     cargo.h++
+    mining_hatch.h++    (mined resources and the hatch)
+    hardpoints.h++      (hardpoint kinds and muzzle positions)
     fuel_tank.h++
     star.h++
     collision_body.h++
@@ -269,6 +274,7 @@ include/
     upgrades.h++
     docking_fees.h++
     docking_control.h++
+    mining.h++
     station_collision.h++
     orbital_physics.h++
     npc_ai.h++
@@ -282,6 +288,7 @@ include/
 
   world/
     world.h++
+    mining_state.h++    (the mining ledger and the lasers' state)
     starfield.h++
 
   ui/
@@ -299,6 +306,7 @@ include/
     asteroid_renderer.h++
     travel_effects_renderer.h++
     docking_guidance_renderer.h++
+    mining_renderer.h++
     station_renderer.h++
     ship_renderer.h++
     hud_renderer.h++
@@ -1059,6 +1067,7 @@ A fully loaded freighter is a sluggish one. That only affects flying by hand, si
 | Docking Computer | 2,500 CR | the `V` key: auto-docking once the station grants a slot (see [Docking Computer](#docking-computer)) |
 | Economics Scanner | 1,500 CR | the galactic chart shows every system's exports (see [Scanners](#scanners-and-what-the-chart-knows)) |
 | Political Scanner | 1,000 CR | the chart shows every system's development, and colours its dots |
+| Mining Module | 2,400 CR | two mining lasers and a 5 t mining hatch (see [Mining](#mining)); a one-off, like the scanners |
 
 `offerFor()` works out what an upgrade would cost the commander and whether they can have it:
 
@@ -1105,6 +1114,8 @@ A save (`SaveGame` in `include/systems/save_game.h++`) holds:
 | `cargo`, `cargoModule` | tonnes of each good in the hold, and the fitted bay (0 none, 1 Mk1, 2 Mk2) |
 | `fuelTank`, `autoDock` | the fitted fuel tank module (0, 1, 2) and whether the docking computer has been bought |
 | `economicsScanner`, `politicalScanner` | whether each chart scanner has been bought |
+| `miningModule`, `hardpoint` | whether the mining module has been bought, and the selected hardpoint group |
+| `hatch` | one line per resource in the mining hatch: `hatch=Iron,1.250` |
 | `galaxyTime` | the trading economy's clock, in game seconds |
 | `stocks` | every market stock that has moved a few percent from its baseline |
 | `agents` | all 300 trader agents: where each is, where it's going, what it carries |
@@ -1157,7 +1168,7 @@ agent=412,415,2120.6,Wines,50,9
 savedAt=2026-10-05 20:44
 ```
 
-Version 2 added the hold, the bay and the trading economy; version 3 added the fuel tank and the docking computer; version 4 added the two scanners. Older saves still load: a version 1 save comes back with an empty hold, no bay and a fresh economy, and a version 2 or 3 save comes back with whatever it had and no scanners (the chart shows `UNKNOWN` until you buy them). A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
+Version 2 added the hold, the bay and the trading economy; version 3 added the fuel tank and the docking computer; version 4 added the two scanners; version 5 added the mining module, the selected hardpoint and the mining hatch. Older saves still load: a version 1 save comes back with an empty hold, no bay and a fresh economy, and a version 2 or 3 save comes back with whatever it had and no scanners (the chart shows `UNKNOWN` until you buy them). A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
 
 Three choices keep it robust:
 
@@ -1233,6 +1244,103 @@ The scanner turns "probably" into the exact two to four goods. And a station's o
 **Not remembered.** A system's exports and development stay hidden until you own the scanner even after you've visited it. That keeps the rule simple, but it's a choice: a "discovered systems" memory would be an easy addition if you'd rather visiting revealed things.
 
 **How it's built.** The scene hands the chart a small `ChartIntel` struct (`development`, `exports`), set from the commander's two scanner flags, every time it draws. The chart never draws the hidden information and then covers it up: for an unknown system it draws `UNKNOWN`, and `systemColor()` returns one neutral colour for every dot (`style::chartUnscanned`). The scanners are saved as `economicsScanner` and `politicalScanner`.
+
+## Mining
+
+Mining needs the **Mining Module** (2,400 CR, see [Upgrades](#upgrades)): two mining lasers under the nose and a separate 5 t **mining hatch** for the ore. Point the nose at a rock within 1,500 units and hold `Space`. The beams cut ore from it, the ore breaks off in small fragments that are flung off the rock and pulled into the hatch, and the rock shrinks as it is mined.
+
+### Hardpoints and keys
+
+Anything mounted on the hull that fires is a **hardpoint** (`include/objects/hardpoints.h++`). The ship fires one *selected group* at a time:
+
+| Key | Does |
+| --- | --- |
+| `Space` (hold) | fire the selected hardpoint group |
+| `R` | select the next fitted group |
+
+Only the mining laser exists so far. `HardpointKind` already lists `PulseLaser` and `RocketPod`, and `Commander::hardpoints()` builds the list `R` cycles through from what is fitted. So weapons only need adding to that list, the catalogue and a firing branch; the controls, the selection, the readout and the save stay as they are. With only the mining laser fitted, `R` says `HARDPOINT: MINING LASER (THE ONLY ONE FITTED)`.
+
+Hardpoints won't fire, and the readout says why, when there is nothing fitted, while docking or docked, in hyperspace, while the cruise drive is charging or engaged, or within 5,000 units of a station (`NO-FIRE ZONE`, as in Elite). A refusal is announced once per press of `Space`, not every frame.
+
+### Resources
+
+Mining yields raw resources, not market goods (`include/objects/mining_hatch.h++`). They are kept in the hatch, apart from the cargo hold, and are meant for missions, which are still to come.
+
+| Resource | Weight | Share of rocks it is the main resource of (measured over 200,000 rocks) |
+| --- | --- | --- |
+| Iron ore | 30 | 30.1% |
+| Silicates | 24 | 24.0% |
+| Nickel | 18 | 17.8% |
+| Water ice | 16 | 16.0% |
+| Cobalt | 9 | 9.1% |
+| Platinum | 3 | 3.0% |
+
+Each rock has a **main** resource and a different **secondary** one, both picked by these weights from the rock's identity, so the same rock is always made of the same things. A fragment is the main resource 70% of the time and the secondary one otherwise.
+
+### Rocks: identity, yield and shrinking
+
+Belt rocks aren't stored. They are regenerated from their belt's seed whenever they are near (see [Asteroid Belts](#asteroid-belts)), so to remember how much has been taken from one, each rock needs a stable identity. `Asteroid::id` is a hash of the belt's seed, the rock's streaming cell and its index in that cell (`procgen::beltRockId()`), with the top bit clear. Drifting rocks get a running number with the top bit set, and a recycled drifting rock is a new rock. Computing the id draws nothing from the random streams, so every belt is exactly as before: a checksum over 236 rocks matched the parent commit.
+
+`World::miningLedger` keeps tonnes taken per rock id (`include/world/mining_state.h++`):
+
+- A rock **yields** 0.006 t per unit of radius, between 0.3 t and 14 t: about 0.4 t for a 70-unit pebble, 1.2 t for a typical 200-unit rock, 6.6 t for an 1,100-unit one, and the 14 t ceiling for a big boulder (`rockCapacity()`).
+- A rock **shrinks** as it is mined. Its volume drops in proportion to what is taken, down to a third of the original when it's mined out, so its radius ends at 0.7 of what it was (`radiusScale()`). The shrunk size is used everywhere a rock is: drawing, the ship's collisions with it, and the laser's aim.
+- The ledger belongs to the `World`, so it starts empty on entering a system: **rocks are whole again after a jump or a reload.** Keeping it would mean saving it, and a long game could mine thousands of rocks.
+
+### How a step of mining works
+
+`mining::updateMining()` (`include/systems/mining.h++`), called by the scene each physics step after the world has moved:
+
+1. **Aim.** A ray from between the two muzzles along the nose finds the nearest rock it enters within 1,500 units (`findLaserTarget()`), testing belt rocks and drifting rocks at their current, shrunk collision radius.
+2. **Cut.** While a rock is held, ore accumulates at 0.15 t a second (an empty hatch fills in about half a minute). Every 0.05 t breaks off as a fragment, never more than the rock holds or the hatch has room for, counting fragments already in flight.
+3. **Fly in.** A fragment is flung sideways along the rock's surface (and a little outward), then curves into the hatch on the ship's underside over about 1.2 seconds, following the ship as it moves. My first version threw fragments straight out from the surface, which from a chase camera sends them back along the line of sight, hidden in the impact flash. A screenshot showed the problem and printing their screen positions confirmed it.
+4. **Land.** A fragment's tonnes go into the hatch when it arrives, not when it is cut. Fragments in flight keep coming after `Space` is let go.
+
+The status the readout shows is one of `READY`, `MINING`, `NO ROCK IN RANGE`, `ROCK DEPLETED` or `HATCH FULL`. The last two are also announced as messages when they start.
+
+### The hatch
+
+`Commander::hatch` holds tonnes per resource, up to 5 t. Its ore adds to the ship's mass, through `Ship::hatchMass` and `shipTotalMass()`, so a full hatch handles like 5 t of cargo. It is separate from the cargo hold and doesn't show on the HOLD gauge. The station header shows `HATCH 2.8 / 5 t` once the module is fitted.
+
+**The hatch can't be emptied yet.** Resources aren't market goods and there are no missions yet, so once it is full, mining stops (`HATCH FULL`) until there is something to spend the ore on.
+
+### The animation
+
+`include/rendering/mining_renderer.h++`, drawn after the ships:
+
+- **Two beams**, one from each muzzle, converging on the impact point (or running to full range if nothing is hit). Each is a wide soft glow under a narrow bright core, flickering slightly out of step with the other, and both fade in and out over 0.15 seconds.
+- **Muzzle flares** at the two muzzles.
+- **The impact**: a pulsing flash and nine sparks thrown off it, redrawn every thirtieth of a second.
+- **The fragments**: small tumbling shards in their resource's colour (rust for iron, sand for silicates, ice blue for water ice, and so on; see `style::ore*`), each with a short trail.
+- **The rock shrinking**, since rocks are drawn at their mined size.
+
+### The readout
+
+While a hardpoint group is fitted, two lines above the dashboard on the left show the selected group and what it is doing (`[R] MINING LASER   [SPACE] FIRE   MINING`), and the hatch (`HATCH 1.25 / 5 t`). While a rock is held, the second line also shows what the rock is made of and how much is left (`ROCK: SILICATES + WATER ICE, 39% LEFT`).
+
+### Saving
+
+Save format version 5 adds `miningModule`, `hardpoint` (the selected group) and one `hatch=<resource>,<tonnes>` line per resource held. Older saves load with no module and an empty hatch. An unknown resource key (from a newer version) is skipped, and a hatch never loads over capacity.
+
+### Mining: tests
+
+| Test | Result |
+| --- | --- |
+| A belt's rocks regenerated twice | 163 rocks, identical ids both times, all distinct, none zero, top bit clear |
+| Main resources over 200,000 rocks | within 0.2 points of the weights, and never the same as the secondary |
+| Mining a 600-unit rock for 10 s | 0.145 t/s; first ore in the hatch after 1.4 s; ore cut = hatch + in flight, exactly |
+| ...for 40 s more | the rock mined out (3.6 t: 2.5 t of its main resource, 1.1 t of its secondary), drawn at 0.70 of its radius |
+| Letting go mid-stream | everything in flight still arrives |
+| Hatch at 4.98 t | ends at exactly 5.00 t, and `HATCH FULL` is announced |
+| Aiming away, or at a rock 1,800 units off | `NO ROCK IN RANGE` |
+| Through the scene: buying the module, pressing install again | 2,400 CR taken once |
+| Firing 2.8 km from the station | refused: `NO-FIRE ZONE` |
+| Firing with the cruise drive charging, 150 km from anything | refused: `HARDPOINTS OFFLINE IN CRUISE` |
+| 12 s of mining | 1.60 t in the hatch, ship mass up by exactly that, HOLD gauge untouched |
+| Save, then load into a fresh scene | module, hatch (1.75 t) and the ship's hatch mass all restored; a version 4 save loads with no module |
+| Rendered with the game's own renderers | beams, flash, sparks, fragments and the shrinking rock all visible |
+
+The logic tests also run cleanly under AddressSanitizer and UndefinedBehaviorSanitizer.
 
 ## Docking Fees
 
@@ -1962,6 +2070,7 @@ This is still intentionally small:
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
 - Missions don't exist yet, so trading is the only way to earn credits.
+- Mining: the mining hatch can't be emptied or sold yet (its resources are for missions, which don't exist yet), so mining stops once it is full. Mined rocks are whole again after a jump or a reload. The lasers have no heat or power cost, don't affect ships or the station, and NPCs don't mine.
 - Hull contacts only fine you: there is no hull damage, no repair and no insurance. NPC ships pass through the station and through the player's ship.
 - Yaw and pitch are Euler angles about the world's vertical and the ship's right axis, so with the ship rolled they don't turn the ship about its own axes. Roll is a banking angle, not a full 3D attitude: fine for lining up with a slot, but not an aerobatic flight model.
 - The chart scanners are all-or-nothing and aren't remembered per system: visiting a system doesn't reveal its exports or development without the scanner.

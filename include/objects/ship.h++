@@ -146,6 +146,9 @@ struct Ship {
      * commander's hold; the thrusters and the turn rate feel the mass, the HUD shows both.
      */
     float cargoMass = 0.f;
+
+    /** Ore in the mining hatch, in tonnes: it adds to the ship's mass like cargo, but isn't in the hold. */
+    float hatchMass = 0.f;
     float cargoCapacity = 10.f;
 
     /** When true, the flight computer converts throttle into a velocity and fires thrusters to hold it. */
@@ -226,6 +229,9 @@ struct Ship {
 
     /** Roll rate added to the commanded one, in radians per second: matches the slot's spin in docking mode. */
     float rollFeedForward = 0.f;
+
+    /** Pilot intent: true while the fire key (Space) is held. What fires is the selected hardpoint group. */
+    bool fireInput = false;
 
     /* ---- In-system cruise ------------------------------------------------------------------ */
 

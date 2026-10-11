@@ -18,6 +18,7 @@
 #include "ui/galaxy_map.h++"
 #include "ui/menu_button.h++"
 #include "systems/docking_control.h++"
+#include "systems/mining.h++"
 #include "systems/docking_fees.h++"
 #include "systems/save_game.h++"
 #include "systems/trading.h++"
@@ -62,6 +63,8 @@ public:
           font_("assets/fonts/Jersey15-Regular.ttf"),
           label_(font_, "", 28),
           statusText_(font_, "", 24),
+          hardpointText_(font_, "", 16),
+          hardpointDetailText_(font_, "", 14),
           hintText_(font_, "[G] GALAXY MAP\n[M] SYSTEM MAP\n[T] TARGET\n[C] REQUEST DOCKING\n[V] AUTO-DOCK\n[LEFT/RIGHT] ROLL", 15),
           messageText_(font_, "", 30)
     {
@@ -155,6 +158,13 @@ public:
         }
 
         // C asks the station for a docking slot (or gives the permit up); V uses the docking computer.
+        // R cycles through the fitted hardpoint groups (Space, held, fires the selected one).
+        if (keyPressed->code == sf::Keyboard::Key::R)
+        {
+            cycleHardpoint();
+            return;
+        }
+
         if (keyPressed->code == sf::Keyboard::Key::C || keyPressed->code == sf::Keyboard::Key::V)
         {
             handleDockingKey(keyPressed->code == sf::Keyboard::Key::V);
@@ -321,6 +331,7 @@ public:
         handleHullContact();
         docking::update(docking_, world_, dt);
         checkManualDocking();
+        updateHardpoints(dt);
 
         // A docking has just completed, by hand or by computer.
         if (phaseBefore != DockingPhase::Docked && docking_.phase == DockingPhase::Docked)
@@ -375,6 +386,7 @@ public:
         target.draw(label_);
         target.draw(hintText_); // a short column under the system name, clear of the heading tape
         drawDockingStatus(target);
+        drawHardpointReadout(target);
 
         if (hyperspace_.phase == HyperspacePhase::Countdown)
             drawHyperspaceText(target);
@@ -391,6 +403,13 @@ private:
     sf::Font font_;
     sf::Text label_;
     sf::Text statusText_;
+
+    /** The hardpoint readout above the dashboard on the left: the selected group and its state, then the hatch and the target rock. */
+    sf::Text hardpointText_;
+    sf::Text hardpointDetailText_;
+
+    /** Whether the fire key was held last step, so a refusal is announced once per press. */
+    bool fireWasHeld_ = false;
     sf::Text hintText_;
     sf::Text messageText_;
 
@@ -633,6 +652,9 @@ private:
         // Hold, market and upgrades.
         view.cargoUsed = commander_.cargo.total();
         view.cargoCapacity = commander_.cargoCapacity();
+        view.hasHatch = commander_.hasMiningModule;
+        view.hatchTonnes = commander_.hatch.total();
+        view.hatchCapacity = miningHatchCapacity;
         view.cargoModuleName = cargoModuleName(commander_.cargoModule);
         view.traderNote = trade_.describeTraderEvent(currentSystemIndex_);
 
@@ -795,6 +817,139 @@ private:
         }
 
         docking::launch(docking_);
+    }
+
+    /** Selects the next fitted hardpoint group (R), and says which is selected. */
+    void cycleHardpoint()
+    {
+        const auto fitted = commander_.hardpoints();
+
+        if (fitted.empty())
+        {
+            docking::showMessage(docking_, "NO HARDPOINTS FITTED: SEE UPGRADES", 2.5f);
+            return;
+        }
+
+        commander_.selectedHardpoint = (std::clamp(commander_.selectedHardpoint, 0, static_cast<int>(fitted.size()) - 1) + 1) % static_cast<int>(fitted.size());
+        const std::string name = hardpointName(fitted[static_cast<std::size_t>(commander_.selectedHardpoint)]);
+        docking::showMessage(docking_, "HARDPOINT: " + name + (fitted.size() == 1 ? " (THE ONLY ONE FITTED)" : ""), 2.f);
+    }
+
+    /**
+     * Why the selected hardpoint group can't fire right now, or nullptr if it can: nothing fitted,
+     * docking or docked, in hyperspace or cruise, or inside a station's no-fire zone.
+     */
+    const char* hardpointBlockReason() const
+    {
+        const Ship& ship = world_.playerShip;
+        const auto selected = commander_.selectedHardpointKind();
+
+        if (!selected)
+            return "NO HARDPOINTS FITTED: SEE UPGRADES";
+
+        if (docking_.phase != DockingPhase::Idle)
+            return "HARDPOINTS OFFLINE WHILE DOCKING";
+
+        if (hyperspace_.phase != HyperspacePhase::None)
+            return "HARDPOINTS OFFLINE IN HYPERSPACE";
+
+        if (ship.cruiseEngaged || ship.cruiseCharge >= 0.f)
+            return "HARDPOINTS OFFLINE IN CRUISE";
+
+        if (world_.stationActive && length(ship.position - world_.station.position) < mining::noFireZoneRadius)
+            return "NO-FIRE ZONE: TOO CLOSE TO THE STATION";
+
+        if (*selected != HardpointKind::MiningLaser)
+            return "HARDPOINT NOT AVAILABLE YET";
+
+        return nullptr;
+    }
+
+    /**
+     * The hardpoints for this step: the fire key fires the selected group if nothing blocks it
+     * (a refusal is announced once per press), and mining runs (fragments keep flying in after
+     * the key is let go). The hatch's new weight goes onto the ship.
+     */
+    void updateHardpoints(float dt)
+    {
+        const bool trigger = acceptsShipInput() && world_.playerShip.fireInput;
+        const char* blocked = trigger ? hardpointBlockReason() : nullptr;
+
+        if (trigger && blocked && !fireWasHeld_)
+            docking::showMessage(docking_, blocked, 2.f);
+
+        fireWasHeld_ = trigger;
+
+        const bool fire = trigger && !blocked;
+        const mining::MiningEvent event = mining::updateMining(world_, commander_.hatch, fire, dt);
+
+        if (event == mining::MiningEvent::HatchFilled)
+            docking::showMessage(docking_, "MINING HATCH FULL", 2.5f);
+        else if (event == mining::MiningEvent::RockDepleted)
+            docking::showMessage(docking_, "ROCK DEPLETED: FIND ANOTHER", 2.5f);
+
+        syncShipLoad();
+    }
+
+    /**
+     * The hardpoint readout above the dashboard on the left, while a hardpoint group is fitted:
+     * the group and what it's doing on one line, and the hatch (and, while mining, the rock's
+     * make-up and what is left in it) on the line above.
+     */
+    void drawHardpointReadout(sf::RenderTarget& target)
+    {
+        const auto selected = commander_.selectedHardpointKind();
+
+        if (!selected || stationMenuOpen_ || docking_.phase == DockingPhase::Docked)
+            return;
+
+        const sf::Vector2u size = target.getSize();
+        const float baseline = static_cast<float>(size.y) - HudRenderer::dashboardHeight - 10.f;
+        const mining::MiningState& state = world_.mining;
+        const char* blocked = hardpointBlockReason();
+
+        // What the lasers are doing, or why they can't fire.
+        std::string status;
+        sf::Color statusColor = style::textDim;
+
+        if (blocked && state.status == mining::LaserStatus::Off)
+            status = blocked;
+        else
+        {
+            status = mining::laserStatusLabel(state.status);
+
+            if (state.status == mining::LaserStatus::Mining)
+                statusColor = style::profit;
+            else if (state.status == mining::LaserStatus::HatchFull || state.status == mining::LaserStatus::Depleted)
+                statusColor = style::caution;
+        }
+
+        hardpointText_.setString(std::string("[R] ") + hardpointName(*selected) + "   [SPACE] FIRE   " + status);
+        hardpointText_.setFillColor(statusColor == style::textDim ? style::textSecondary : statusColor);
+        const sf::FloatRect bounds = hardpointText_.getLocalBounds();
+        hardpointText_.setOrigin({bounds.position.x, bounds.position.y + bounds.size.y});
+        hardpointText_.setPosition({18.f, baseline});
+        target.draw(hardpointText_);
+
+        char detail[160];
+        const float hatch = commander_.hatch.total();
+
+        if (state.status == mining::LaserStatus::Mining || state.status == mining::LaserStatus::Depleted || state.status == mining::LaserStatus::HatchFull)
+        {
+            std::snprintf(detail, sizeof(detail), "HATCH %.2f / %.0f t     ROCK: %s + %s, %.0f%% LEFT", static_cast<double>(hatch), static_cast<double>(miningHatchCapacity),
+                          miningResourceName(state.targetComposition.main), miningResourceName(state.targetComposition.secondary), static_cast<double>(state.targetRemainingFraction * 100.f));
+        }
+        else
+        {
+            std::snprintf(detail, sizeof(detail), "HATCH %.2f / %.0f t", static_cast<double>(hatch), static_cast<double>(miningHatchCapacity));
+        }
+
+        hardpointDetailText_.setString(detail);
+        hardpointDetailText_.setFillColor(hatch >= miningHatchCapacity - 0.001f ? style::caution : style::textDim);
+        const sf::FloatRect detailBounds = hardpointDetailText_.getLocalBounds();
+        hardpointDetailText_.setOrigin({detailBounds.position.x, detailBounds.position.y + detailBounds.size.y});
+        hardpointDetailText_.setPosition({18.f, baseline - 24.f});
+        target.draw(hardpointDetailText_);
     }
 
     /**
@@ -1014,6 +1169,7 @@ private:
     {
         world_.playerShip.fuelCapacity = commander_.fuelCapacity();
         world_.playerShip.cargoMass = static_cast<float>(commander_.cargo.total());
+        world_.playerShip.hatchMass = commander_.hatch.total();
         world_.playerShip.cargoCapacity = static_cast<float>(commander_.cargoCapacity());
     }
 
@@ -1119,6 +1275,14 @@ private:
         save.autoDock = commander_.hasDockingComputer;
         save.economicsScanner = commander_.hasEconomicsScanner;
         save.politicalScanner = commander_.hasPoliticalScanner;
+        save.miningModule = commander_.hasMiningModule;
+        save.hardpoint = commander_.selectedHardpoint;
+
+        for (MiningResource resource : allMiningResources)
+        {
+            if (commander_.hatch.of(resource) > 0.0005f)
+                save.hatch.emplace_back(miningResourceKey(resource), commander_.hatch.of(resource));
+        }
 
         for (int good = 0; good < goodCount; ++good)
         {
@@ -1164,6 +1328,16 @@ private:
         commander_.hasDockingComputer = save.autoDock;
         commander_.hasEconomicsScanner = save.economicsScanner;
         commander_.hasPoliticalScanner = save.politicalScanner;
+        commander_.hasMiningModule = save.miningModule;
+        commander_.selectedHardpoint = save.hardpoint;
+        commander_.hatch = {};
+
+        // Unknown resources (from a newer version) are skipped, and the hatch never loads over capacity.
+        for (const auto& [key, tonnes] : save.hatch)
+        {
+            if (const auto resource = miningResourceFromKey(key))
+                commander_.hatch.add(*resource, std::min(tonnes, std::max(0.f, miningHatchCapacity - commander_.hatch.total())));
+        }
         commander_.cargo = {};
 
         for (const auto& [name, tonnes] : save.cargo)

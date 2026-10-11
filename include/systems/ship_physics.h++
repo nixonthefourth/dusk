@@ -43,7 +43,7 @@
 /** Everything the thrusters have to move: hull, fuel and cargo, in tonnes. */
 inline float shipTotalMass(const Ship& ship)
 {
-    return ship.mass + std::max(0.f, ship.fuel) + std::max(0.f, ship.cargoMass);
+    return ship.mass + std::max(0.f, ship.fuel) + std::max(0.f, ship.cargoMass) + std::max(0.f, ship.hatchMass);
 }
 
 /**

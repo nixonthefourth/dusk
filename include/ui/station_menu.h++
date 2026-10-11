@@ -103,6 +103,11 @@ struct StationMenuView {
     /** The hold: tonnes carried, hold size, the fitted bay, and the market and upgrade rows. */
     int cargoUsed = 0;
     int cargoCapacity = 0;
+
+    /** The mining hatch, if the mining module is fitted: tonnes held and capacity. */
+    bool hasHatch = false;
+    float hatchTonnes = 0.f;
+    float hatchCapacity = 0.f;
     std::string cargoModuleName;
     std::vector<MarketRowView> market;
     std::vector<UpgradeRowView> upgrades;
@@ -551,7 +556,10 @@ private:
         drawText(target, font, spendable, {right - creditsWidth - 16.f, frame.position.y + 17.f}, 13, style::textDim, 1.f);
 
         char fuel[96];
-        std::snprintf(fuel, sizeof(fuel), "FUEL %.1f / %.1f t     CARGO %d / %d t", view.fuel, view.fuelCapacity, view.cargoUsed, view.cargoCapacity);
+        if (view.hasHatch)
+            std::snprintf(fuel, sizeof(fuel), "FUEL %.1f / %.1f t     CARGO %d / %d t     HATCH %.1f / %.0f t", view.fuel, view.fuelCapacity, view.cargoUsed, view.cargoCapacity, static_cast<double>(view.hatchTonnes), static_cast<double>(view.hatchCapacity));
+        else
+            std::snprintf(fuel, sizeof(fuel), "FUEL %.1f / %.1f t     CARGO %d / %d t", view.fuel, view.fuelCapacity, view.cargoUsed, view.cargoCapacity);
         drawText(target, font, fuel, {right, frame.position.y + 38.f}, 16, style::textSecondary, 1.f);
     }
 

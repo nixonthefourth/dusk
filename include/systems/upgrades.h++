@@ -18,7 +18,7 @@
 #include <string>
 
 /** What an upgrade is: each kind has its own slot on the ship, and tiers within it replace one another. */
-enum class UpgradeKind { CargoBay, FuelTank, DockingComputer, EconomicsScanner, PoliticalScanner };
+enum class UpgradeKind { CargoBay, FuelTank, DockingComputer, EconomicsScanner, PoliticalScanner, MiningModule };
 
 /** One thing the outfitting page can sell. */
 struct ShipUpgrade {
@@ -35,9 +35,9 @@ struct ShipUpgrade {
 };
 
 /** The catalogue, in the order the outfitting page lists it. */
-inline const std::array<ShipUpgrade, 7>& upgradeCatalogue()
+inline const std::array<ShipUpgrade, 8>& upgradeCatalogue()
 {
-    static const std::array<ShipUpgrade, 7> catalogue =
+    static const std::array<ShipUpgrade, 8> catalogue =
     {{
         {"CARGO BAY MK1", "Extra hold space: +5 t, 15 t in all.", 1800.0, UpgradeKind::CargoBay, 1},
         {"CARGO BAY MK2", "A bigger bay: +10 t, 20 t in all. Replaces Mk1.", 4200.0, UpgradeKind::CargoBay, 2},
@@ -46,6 +46,7 @@ inline const std::array<ShipUpgrade, 7>& upgradeCatalogue()
         {"DOCKING COMPUTER", "Auto-docking on [V] once the station grants a slot.", 2500.0, UpgradeKind::DockingComputer, 1},
         {"ECONOMICS SCANNER", "Shows every system's exports on the galactic chart.", 1500.0, UpgradeKind::EconomicsScanner, 1},
         {"POLITICAL SCANNER", "Shows every system's development, Poor to Progressive.", 1000.0, UpgradeKind::PoliticalScanner, 1},
+        {"MINING MODULE", "Two mining lasers and a 5 t mining hatch for the ore.", 2400.0, UpgradeKind::MiningModule, 1},
     }};
 
     return catalogue;
@@ -61,6 +62,7 @@ inline int installedTier(const Commander& commander, UpgradeKind kind)
         case UpgradeKind::DockingComputer: return commander.hasDockingComputer ? 1 : 0;
         case UpgradeKind::EconomicsScanner: return commander.hasEconomicsScanner ? 1 : 0;
         case UpgradeKind::PoliticalScanner: return commander.hasPoliticalScanner ? 1 : 0;
+        case UpgradeKind::MiningModule: return commander.hasMiningModule ? 1 : 0;
     }
 
     return 0;
@@ -140,6 +142,7 @@ inline void installUpgrade(Commander& commander, const ShipUpgrade& upgrade)
         case UpgradeKind::DockingComputer: commander.hasDockingComputer = true; break;
         case UpgradeKind::EconomicsScanner: commander.hasEconomicsScanner = true; break;
         case UpgradeKind::PoliticalScanner: commander.hasPoliticalScanner = true; break;
+        case UpgradeKind::MiningModule: commander.hasMiningModule = true; break;
     }
 }
 
