@@ -227,6 +227,28 @@ namespace style {
     inline constexpr sf::Color oreCobalt{100, 145, 235};
     inline constexpr sf::Color orePlatinum{240, 240, 255};
 
+    /** Combat: pulse and turret bolts (glow, core), the beam laser, rockets and their smoke, sparks, debris, explosions, shield flashes, the turret, target health bars. */
+    inline constexpr sf::Color pulseBoltGlow{255, 80, 50, 90};
+    inline constexpr sf::Color pulseBoltCore{255, 200, 170};
+    inline constexpr sf::Color turretBoltGlow{70, 200, 255, 90};
+    inline constexpr sf::Color turretBoltCore{200, 240, 255};
+    inline constexpr sf::Color beamGlow{255, 40, 90, 80};
+    inline constexpr sf::Color beamCore{255, 190, 210};
+    inline constexpr sf::Color rocketBody{235, 235, 235};
+    inline constexpr sf::Color rocketFlame{255, 190, 80};
+    inline constexpr sf::Color rocketSmoke{160, 160, 165};
+    inline constexpr sf::Color sparkHot{255, 240, 190};
+    inline constexpr sf::Color sparkCool{255, 120, 40};
+    inline constexpr sf::Color debris{200, 200, 190};
+    inline constexpr sf::Color muzzleFlash{255, 235, 200};
+    inline constexpr sf::Color explosionCore{255, 250, 220};
+    inline constexpr sf::Color explosionOuter{255, 140, 40};
+    inline constexpr sf::Color explosionRing{255, 200, 120};
+    inline constexpr sf::Color shieldFlash{110, 180, 255};
+    inline constexpr sf::Color turretBody{190, 200, 215};
+    inline constexpr sf::Color healthShield{110, 180, 255};
+    inline constexpr sf::Color healthHull{248, 132, 63};
+
     /** Docking guidance: readings that are fine, borderline and wrong; the slot aperture, the ship's footprint, and the 3D corridor. */
     inline constexpr sf::Color dockingGood = profit;
     inline constexpr sf::Color dockingCaution = caution;

@@ -18,6 +18,7 @@
 #include "ui/galaxy_map.h++"
 #include "ui/menu_button.h++"
 #include "systems/docking_control.h++"
+#include "systems/combat.h++"
 #include "systems/mining.h++"
 #include "systems/docking_fees.h++"
 #include "systems/save_game.h++"
@@ -27,6 +28,7 @@
 #include "ui/system_map.h++"
 #include "ui/style.h++"
 #include <SFML/Graphics.hpp>
+#include <cstring>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -797,6 +799,25 @@ private:
         else
             std::snprintf(message, sizeof(message), "SPACE UNION DOCKING FEE  -%.0f CR (ALL YOU HAD)", charge.paid);
 
+        // The station's armoury tops the rocket launcher up, as far as spendable credits go.
+        const int missing = commander_.hasRocketLauncher ? rocketMagazine - commander_.rockets : 0;
+
+        if (missing > 0)
+        {
+            const int affordable = static_cast<int>(spendableCredits(commander_) / combat::rocketPrice);
+            const int bought = std::clamp(affordable, 0, missing);
+            commander_.rockets += bought;
+            commander_.credits -= bought * combat::rocketPrice;
+            char rearm[64];
+
+            if (bought == missing)
+                std::snprintf(rearm, sizeof(rearm), "   REARMED %d ROCKETS  -%.0f CR", bought, bought * combat::rocketPrice);
+            else
+                std::snprintf(rearm, sizeof(rearm), "   REARMED %d OF %d ROCKETS  -%.0f CR", bought, missing, bought * combat::rocketPrice);
+
+            std::strncat(message, rearm, sizeof(message) - std::strlen(message) - 1);
+        }
+
         docking::showMessage(docking_, message, 4.f);
     }
 
@@ -859,42 +880,67 @@ private:
         if (world_.stationActive && length(ship.position - world_.station.position) < mining::noFireZoneRadius)
             return "NO-FIRE ZONE: TOO CLOSE TO THE STATION";
 
-        if (*selected != HardpointKind::MiningLaser)
-            return "HARDPOINT NOT AVAILABLE YET";
-
         return nullptr;
     }
 
     /**
-     * The hardpoints for this step: the fire key fires the selected group if nothing blocks it
-     * (a refusal is announced once per press), and mining runs (fragments keep flying in after
-     * the key is let go). The hatch's new weight goes onto the ship.
+     * The hardpoints for this step. The fire key fires the selected group if nothing blocks it (a
+     * refusal is announced once per press). The mining laser cuts ore; the weapons fire through
+     * combat::fireWeapon(). Mining and combat both keep running whatever is selected, so ore and
+     * rockets already in flight carry on, the capacitor recharges and the turret keeps tracking.
+     * The hatch's new weight goes onto the ship, and a target that has gone is dropped.
      */
     void updateHardpoints(float dt)
     {
         const bool trigger = acceptsShipInput() && world_.playerShip.fireInput;
         const char* blocked = trigger ? hardpointBlockReason() : nullptr;
+        const bool justPressed = trigger && !fireWasHeld_;
 
-        if (trigger && blocked && !fireWasHeld_)
+        if (justPressed && blocked)
             docking::showMessage(docking_, blocked, 2.f);
 
         fireWasHeld_ = trigger;
 
+        const auto selected = commander_.selectedHardpointKind();
         const bool fire = trigger && !blocked;
-        const mining::MiningEvent event = mining::updateMining(world_, commander_.hatch, fire, dt);
+        const bool miningSelected = selected && *selected == HardpointKind::MiningLaser;
 
-        if (event == mining::MiningEvent::HatchFilled)
+        const mining::MiningEvent miningEvent = mining::updateMining(world_, commander_.hatch, fire && miningSelected, dt);
+
+        if (miningEvent == mining::MiningEvent::HatchFilled)
             docking::showMessage(docking_, "MINING HATCH FULL", 2.5f);
-        else if (event == mining::MiningEvent::RockDepleted)
+        else if (miningEvent == mining::MiningEvent::RockDepleted)
             docking::showMessage(docking_, "ROCK DEPLETED: FIND ANOTHER", 2.5f);
+
+        world_.combat.turretFitted = commander_.hasTurretLaser;
+        std::vector<combat::CombatEvent> events;
+
+        if (selected && isWeapon(*selected))
+            combat::fireWeapon(world_, *selected, commander_.rockets, fire, justPressed && fire, dt, events);
+
+        combat::updateCombat(world_, dt, events);
+
+        for (const combat::CombatEvent& event : events)
+        {
+            switch (event.kind)
+            {
+                case combat::CombatEventKind::TargetDestroyed: docking::showMessage(docking_, "TARGET DESTROYED", 2.5f); break;
+                case combat::CombatEventKind::ShipDestroyed: docking::showMessage(docking_, "SHIP DESTROYED", 2.f); break;
+                case combat::CombatEventKind::ShieldsDown: docking::showMessage(docking_, "SHIELDS DOWN: IT'S RUNNING", 2.f); break;
+                case combat::CombatEventKind::OutOfRockets: docking::showMessage(docking_, "OUT OF ROCKETS: REARM AT A STATION", 2.5f); break;
+            }
+        }
+
+        if (world_.target.type == TargetType::Ship && !hasValidTarget(world_))
+            world_.target = {};
 
         syncShipLoad();
     }
 
     /**
      * The hardpoint readout above the dashboard on the left, while a hardpoint group is fitted:
-     * the group and what it's doing on one line, and the hatch (and, while mining, the rock's
-     * make-up and what is left in it) on the line above.
+     * the group and what it's doing on one line; on the line above, the hatch (and the rock being
+     * mined) for the mining laser, or the capacitor, the rockets and the target's state for weapons.
      */
     void drawHardpointReadout(sf::RenderTarget& target)
     {
@@ -905,47 +951,97 @@ private:
 
         const sf::Vector2u size = target.getSize();
         const float baseline = static_cast<float>(size.y) - HudRenderer::dashboardHeight - 10.f;
-        const mining::MiningState& state = world_.mining;
         const char* blocked = hardpointBlockReason();
-
-        // What the lasers are doing, or why they can't fire.
+        const bool weapon = isWeapon(*selected);
         std::string status;
-        sf::Color statusColor = style::textDim;
+        sf::Color statusColor = style::textSecondary;
 
-        if (blocked && state.status == mining::LaserStatus::Off)
-            status = blocked;
+        if (weapon)
+        {
+            const combat::WeaponStatus weaponStatus = world_.combat.status;
+
+            if (blocked && weaponStatus != combat::WeaponStatus::Firing)
+                status = blocked;
+            else
+            {
+                status = combat::weaponStatusLabel(weaponStatus);
+
+                if (weaponStatus == combat::WeaponStatus::Firing)
+                    statusColor = style::profit;
+                else if (weaponStatus != combat::WeaponStatus::Ready)
+                    statusColor = style::caution;
+            }
+        }
         else
         {
-            status = mining::laserStatusLabel(state.status);
+            const mining::MiningState& state = world_.mining;
 
-            if (state.status == mining::LaserStatus::Mining)
-                statusColor = style::profit;
-            else if (state.status == mining::LaserStatus::HatchFull || state.status == mining::LaserStatus::Depleted)
-                statusColor = style::caution;
+            if (blocked && state.status == mining::LaserStatus::Off)
+                status = blocked;
+            else
+            {
+                status = mining::laserStatusLabel(state.status);
+
+                if (state.status == mining::LaserStatus::Mining)
+                    statusColor = style::profit;
+                else if (state.status == mining::LaserStatus::HatchFull || state.status == mining::LaserStatus::Depleted)
+                    statusColor = style::caution;
+            }
         }
 
-        hardpointText_.setString(std::string("[R] ") + hardpointName(*selected) + "   [SPACE] FIRE   " + status);
-        hardpointText_.setFillColor(statusColor == style::textDim ? style::textSecondary : statusColor);
+        const auto fitted = commander_.hardpoints();
+        char cycle[24] = "";
+
+        if (fitted.size() > 1)
+            std::snprintf(cycle, sizeof(cycle), " %d/%d", std::clamp(commander_.selectedHardpoint, 0, static_cast<int>(fitted.size()) - 1) + 1, static_cast<int>(fitted.size()));
+
+        hardpointText_.setString(std::string("[R] ") + hardpointName(*selected) + cycle + "   [SPACE] FIRE   " + status);
+        hardpointText_.setFillColor(statusColor);
         const sf::FloatRect bounds = hardpointText_.getLocalBounds();
         hardpointText_.setOrigin({bounds.position.x, bounds.position.y + bounds.size.y});
         hardpointText_.setPosition({18.f, baseline});
         target.draw(hardpointText_);
 
-        char detail[160];
-        const float hatch = commander_.hatch.total();
+        char detail[200];
+        sf::Color detailColor = style::textDim;
 
-        if (state.status == mining::LaserStatus::Mining || state.status == mining::LaserStatus::Depleted || state.status == mining::LaserStatus::HatchFull)
+        if (weapon)
         {
-            std::snprintf(detail, sizeof(detail), "HATCH %.2f / %.0f t     ROCK: %s + %s, %.0f%% LEFT", static_cast<double>(hatch), static_cast<double>(miningHatchCapacity),
-                          miningResourceName(state.targetComposition.main), miningResourceName(state.targetComposition.secondary), static_cast<double>(state.targetRemainingFraction * 100.f));
+            int written = std::snprintf(detail, sizeof(detail), "ENERGY %3.0f%%", static_cast<double>(world_.combat.energy / combat::energyCapacity * 100.f));
+
+            if (commander_.hasRocketLauncher && written > 0)
+                written += std::snprintf(detail + written, sizeof(detail) - static_cast<std::size_t>(written), "     ROCKETS %d / %d", commander_.rockets, rocketMagazine);
+
+            if (const NpcShip* npc = targetedShip(world_); npc && written > 0)
+            {
+                std::snprintf(detail + written, sizeof(detail) - static_cast<std::size_t>(written), "     TARGET SHIELDS %.0f%%  HULL %.0f%%",
+                              static_cast<double>(npc->shields / npcMaxShields * 100.f), static_cast<double>(npc->hull / npcMaxHull * 100.f));
+            }
+
+            if (world_.combat.energy < 15.f)
+                detailColor = style::caution;
         }
         else
         {
-            std::snprintf(detail, sizeof(detail), "HATCH %.2f / %.0f t", static_cast<double>(hatch), static_cast<double>(miningHatchCapacity));
+            const mining::MiningState& state = world_.mining;
+            const float hatch = commander_.hatch.total();
+
+            if (state.status == mining::LaserStatus::Mining || state.status == mining::LaserStatus::Depleted || state.status == mining::LaserStatus::HatchFull)
+            {
+                std::snprintf(detail, sizeof(detail), "HATCH %.2f / %.0f t     ROCK: %s + %s, %.0f%% LEFT", static_cast<double>(hatch), static_cast<double>(miningHatchCapacity),
+                              miningResourceName(state.targetComposition.main), miningResourceName(state.targetComposition.secondary), static_cast<double>(state.targetRemainingFraction * 100.f));
+            }
+            else
+            {
+                std::snprintf(detail, sizeof(detail), "HATCH %.2f / %.0f t", static_cast<double>(hatch), static_cast<double>(miningHatchCapacity));
+            }
+
+            if (hatch >= miningHatchCapacity - 0.001f)
+                detailColor = style::caution;
         }
 
         hardpointDetailText_.setString(detail);
-        hardpointDetailText_.setFillColor(hatch >= miningHatchCapacity - 0.001f ? style::caution : style::textDim);
+        hardpointDetailText_.setFillColor(detailColor);
         const sf::FloatRect detailBounds = hardpointDetailText_.getLocalBounds();
         hardpointDetailText_.setOrigin({detailBounds.position.x, detailBounds.position.y + detailBounds.size.y});
         hardpointDetailText_.setPosition({18.f, baseline - 24.f});
@@ -1277,6 +1373,11 @@ private:
         save.politicalScanner = commander_.hasPoliticalScanner;
         save.miningModule = commander_.hasMiningModule;
         save.hardpoint = commander_.selectedHardpoint;
+        save.pulseLaser = commander_.hasPulseLaser;
+        save.beamLaser = commander_.hasBeamLaser;
+        save.rocketLauncher = commander_.hasRocketLauncher;
+        save.turretLaser = commander_.hasTurretLaser;
+        save.rockets = commander_.rockets;
 
         for (MiningResource resource : allMiningResources)
         {
@@ -1329,6 +1430,11 @@ private:
         commander_.hasEconomicsScanner = save.economicsScanner;
         commander_.hasPoliticalScanner = save.politicalScanner;
         commander_.hasMiningModule = save.miningModule;
+        commander_.hasPulseLaser = save.pulseLaser;
+        commander_.hasBeamLaser = save.beamLaser;
+        commander_.hasRocketLauncher = save.rocketLauncher;
+        commander_.hasTurretLaser = save.turretLaser;
+        commander_.rockets = std::clamp(save.rockets, 0, save.rocketLauncher ? rocketMagazine : 0);
         commander_.selectedHardpoint = save.hardpoint;
         commander_.hatch = {};
 

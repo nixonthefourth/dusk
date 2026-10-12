@@ -45,6 +45,13 @@ struct Commander {
     bool hasMiningModule = false;
     MiningHatch hatch;
 
+    /** The weapon hardpoints (paid upgrades), and the rockets left in the launcher. */
+    bool hasPulseLaser = false;
+    bool hasBeamLaser = false;
+    bool hasRocketLauncher = false;
+    bool hasTurretLaser = false;
+    int rockets = 0;
+
     /** Which fitted hardpoint group is selected, as an index into hardpoints(). */
     int selectedHardpoint = 0;
 
@@ -55,6 +62,18 @@ struct Commander {
 
         if (hasMiningModule)
             fitted.push_back(HardpointKind::MiningLaser);
+
+        if (hasPulseLaser)
+            fitted.push_back(HardpointKind::PulseLaser);
+
+        if (hasBeamLaser)
+            fitted.push_back(HardpointKind::BeamLaser);
+
+        if (hasRocketLauncher)
+            fitted.push_back(HardpointKind::RocketLauncher);
+
+        if (hasTurretLaser)
+            fitted.push_back(HardpointKind::TurretLaser);
 
         return fitted;
     }

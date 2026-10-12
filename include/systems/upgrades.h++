@@ -18,7 +18,7 @@
 #include <string>
 
 /** What an upgrade is: each kind has its own slot on the ship, and tiers within it replace one another. */
-enum class UpgradeKind { CargoBay, FuelTank, DockingComputer, EconomicsScanner, PoliticalScanner, MiningModule };
+enum class UpgradeKind { CargoBay, FuelTank, DockingComputer, EconomicsScanner, PoliticalScanner, MiningModule, PulseLaser, BeamLaser, RocketLauncher, TurretLaser };
 
 /** One thing the outfitting page can sell. */
 struct ShipUpgrade {
@@ -35,9 +35,9 @@ struct ShipUpgrade {
 };
 
 /** The catalogue, in the order the outfitting page lists it. */
-inline const std::array<ShipUpgrade, 8>& upgradeCatalogue()
+inline const std::array<ShipUpgrade, 12>& upgradeCatalogue()
 {
-    static const std::array<ShipUpgrade, 8> catalogue =
+    static const std::array<ShipUpgrade, 12> catalogue =
     {{
         {"CARGO BAY MK1", "Extra hold space: +5 t, 15 t in all.", 1800.0, UpgradeKind::CargoBay, 1},
         {"CARGO BAY MK2", "A bigger bay: +10 t, 20 t in all. Replaces Mk1.", 4200.0, UpgradeKind::CargoBay, 2},
@@ -47,6 +47,10 @@ inline const std::array<ShipUpgrade, 8>& upgradeCatalogue()
         {"ECONOMICS SCANNER", "Shows every system's exports on the galactic chart.", 1500.0, UpgradeKind::EconomicsScanner, 1},
         {"POLITICAL SCANNER", "Shows every system's development, Poor to Progressive.", 1000.0, UpgradeKind::PoliticalScanner, 1},
         {"MINING MODULE", "Two mining lasers and a 5 t mining hatch for the ore.", 2400.0, UpgradeKind::MiningModule, 1},
+        {"PULSE LASER", "Twin fixed lasers on the wings: fast bolts, forward.", 1800.0, UpgradeKind::PulseLaser, 1},
+        {"BEAM LASER", "A fixed continuous beam: the hardest hitter, hungry for energy.", 3200.0, UpgradeKind::BeamLaser, 1},
+        {"ROCKET LAUNCHER", "12 rockets that home on your target. Rearmed when you dock.", 2600.0, UpgradeKind::RocketLauncher, 1},
+        {"TURRET LASER", "A dorsal turret that tracks your locked target by itself.", 4500.0, UpgradeKind::TurretLaser, 1},
     }};
 
     return catalogue;
@@ -63,6 +67,10 @@ inline int installedTier(const Commander& commander, UpgradeKind kind)
         case UpgradeKind::EconomicsScanner: return commander.hasEconomicsScanner ? 1 : 0;
         case UpgradeKind::PoliticalScanner: return commander.hasPoliticalScanner ? 1 : 0;
         case UpgradeKind::MiningModule: return commander.hasMiningModule ? 1 : 0;
+        case UpgradeKind::PulseLaser: return commander.hasPulseLaser ? 1 : 0;
+        case UpgradeKind::BeamLaser: return commander.hasBeamLaser ? 1 : 0;
+        case UpgradeKind::RocketLauncher: return commander.hasRocketLauncher ? 1 : 0;
+        case UpgradeKind::TurretLaser: return commander.hasTurretLaser ? 1 : 0;
     }
 
     return 0;
@@ -143,6 +151,10 @@ inline void installUpgrade(Commander& commander, const ShipUpgrade& upgrade)
         case UpgradeKind::EconomicsScanner: commander.hasEconomicsScanner = true; break;
         case UpgradeKind::PoliticalScanner: commander.hasPoliticalScanner = true; break;
         case UpgradeKind::MiningModule: commander.hasMiningModule = true; break;
+        case UpgradeKind::PulseLaser: commander.hasPulseLaser = true; break;
+        case UpgradeKind::BeamLaser: commander.hasBeamLaser = true; break;
+        case UpgradeKind::RocketLauncher: commander.hasRocketLauncher = true; commander.rockets = rocketMagazine; break;
+        case UpgradeKind::TurretLaser: commander.hasTurretLaser = true; break;
     }
 }
 

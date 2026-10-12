@@ -22,6 +22,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - An OBJ-modelled space station procedurally placed in orbit around a random planet, in systems that roll one. It spins Elite-style around its docking axis, with the slot facing along its orbit.
 - Docking by request: ask the station for a slot (`C`), then fly in by hand with a speed limit relative to the station, strafe thrusters, roll on the arrow keys, an Apollo-style alignment panel and a corridor of rings in the 3D view, with a solid station that fines you for scraping it. Or buy the docking computer (`V`), which flies the approach for you, slowly: about 50 seconds from request to docked.
 - Asteroid mining: buy the Mining Module (2,400 CR), point the nose at a rock and hold `Space`. Twin laser beams cut ore, fragments of iron, nickel, cobalt, silicates, water ice or platinum fly into a 5 t mining hatch, and the rock shrinks as you mine it. `R` cycles hardpoint groups, ready for weapons.
+- Weapons and combat: pulse lasers, a beam laser, homing rockets and a self-aiming turret laser, sharing a weapon capacitor. NPC ships have shields and hull: they flare, run when their shields fail, and explode with debris. `T` locks ships as well as the station.
 - Simple-reflex NPC ships that roam, avoid planets and stars, occasionally head to the station and dock, and periodically "warp out" and back in — no memory, no planning, just current-state reflexes.
 - A living trade economy: every system has its own market, prices follow supply and demand, you buy and sell at stations, and 300 simple-reflex trader agents move goods between systems on their own. Tech systems now really export tech goods, a bug that had left the best goods almost unobtainable.
 - A camera that chases the ship from behind, plus an orbit "showcase" mode.
@@ -109,7 +110,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [~] Physics
   - [x] Object-level collision hitboxes
   - [x] Fuel expenditure (mass matters)
-- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear): cargo bays, fuel tanks, the docking computer, both chart scanners and the mining module exist; guns and jump drives are still to come
+- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear): cargo bays, fuel tanks, the docking computer, both chart scanners, the mining module and four weapons exist; jump drives are still to come
 - [x] Save/load: three commander slots, named commanders, saving at stations
 - [x] Docking: request a slot from the station, then dock by hand or with the docking computer; NPCs dock, launch and queue for the slot visibly; every docking pays a Space Union fee
 - [~] Space stations: small, medium, large — one procedurally placed small station (`station_s.obj`) per eligible system today
@@ -183,7 +184,7 @@ Once you're in a system:
 
 - `G`: open the galactic chart.
 - `M`: open the system map.
-- `T`: lock or clear the target (the station is the only target for now).
+- `T`: step the target lock through the station, then the visible ships within 25 km (nearest first), then nothing. See [Weapons And Combat](#weapons-and-combat).
 - `C`: ask the station for a docking slot (within 20 km), or give up the request or permit. The prompt shows the 15 CR docking fee. See [Manual Docking](#manual-docking).
 - `V`: the docking computer (a paid upgrade). With a permit it flies the approach; without one it asks for a permit and engages once it's granted. `C` or `V` hands control back while that is still possible.
 - With a permit, close to the station (docking mode): speeds become relative to the station and capped by a limit that tightens near the slot, and `Shift` + `A`/`D`/`Q`/`E` slides the ship instead of turning it. A key card appears on screen.
@@ -275,6 +276,7 @@ include/
     docking_fees.h++
     docking_control.h++
     mining.h++
+    combat.h++
     station_collision.h++
     orbital_physics.h++
     npc_ai.h++
@@ -289,6 +291,7 @@ include/
   world/
     world.h++
     mining_state.h++    (the mining ledger and the lasers' state)
+    combat_state.h++    (bolts, rockets, particles, explosions, the capacitor)
     starfield.h++
 
   ui/
@@ -307,6 +310,7 @@ include/
     travel_effects_renderer.h++
     docking_guidance_renderer.h++
     mining_renderer.h++
+    combat_renderer.h++
     station_renderer.h++
     ship_renderer.h++
     hud_renderer.h++
@@ -1068,6 +1072,10 @@ A fully loaded freighter is a sluggish one. That only affects flying by hand, si
 | Economics Scanner | 1,500 CR | the galactic chart shows every system's exports (see [Scanners](#scanners-and-what-the-chart-knows)) |
 | Political Scanner | 1,000 CR | the chart shows every system's development, and colours its dots |
 | Mining Module | 2,400 CR | two mining lasers and a 5 t mining hatch (see [Mining](#mining)); a one-off, like the scanners |
+| Pulse Laser | 1,800 CR | twin fixed lasers firing fast bolts (see [Weapons And Combat](#weapons-and-combat)) |
+| Beam Laser | 3,200 CR | a fixed continuous beam: the most damage, the most energy |
+| Rocket Launcher | 2,600 CR | 12 rockets that home on the locked ship; rearmed when you dock |
+| Turret Laser | 4,500 CR | a dorsal turret that tracks the locked ship by itself |
 
 `offerFor()` works out what an upgrade would cost the commander and whether they can have it:
 
@@ -1116,6 +1124,7 @@ A save (`SaveGame` in `include/systems/save_game.h++`) holds:
 | `economicsScanner`, `politicalScanner` | whether each chart scanner has been bought |
 | `miningModule`, `hardpoint` | whether the mining module has been bought, and the selected hardpoint group |
 | `hatch` | one line per resource in the mining hatch: `hatch=Iron,1.250` |
+| `pulseLaser`, `beamLaser`, `rocketLauncher`, `turretLaser`, `rockets` | which weapons have been bought, and the rockets left in the launcher |
 | `galaxyTime` | the trading economy's clock, in game seconds |
 | `stocks` | every market stock that has moved a few percent from its baseline |
 | `agents` | all 300 trader agents: where each is, where it's going, what it carries |
@@ -1168,7 +1177,7 @@ agent=412,415,2120.6,Wines,50,9
 savedAt=2026-10-05 20:44
 ```
 
-Version 2 added the hold, the bay and the trading economy; version 3 added the fuel tank and the docking computer; version 4 added the two scanners; version 5 added the mining module, the selected hardpoint and the mining hatch. Older saves still load: a version 1 save comes back with an empty hold, no bay and a fresh economy, and a version 2 or 3 save comes back with whatever it had and no scanners (the chart shows `UNKNOWN` until you buy them). A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
+Version 2 added the hold, the bay and the trading economy; version 3 added the fuel tank and the docking computer; version 4 added the two scanners; version 5 added the mining module, the selected hardpoint and the mining hatch; version 6 added the four weapons and the rocket count. Older saves still load: a version 1 save comes back with an empty hold, no bay and a fresh economy, and a version 2 or 3 save comes back with whatever it had and no scanners (the chart shows `UNKNOWN` until you buy them). A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
 
 Three choices keep it robust:
 
@@ -1258,7 +1267,7 @@ Anything mounted on the hull that fires is a **hardpoint** (`include/objects/har
 | `Space` (hold) | fire the selected hardpoint group |
 | `R` | select the next fitted group |
 
-Only the mining laser exists so far. `HardpointKind` already lists `PulseLaser` and `RocketPod`, and `Commander::hardpoints()` builds the list `R` cycles through from what is fitted. So weapons only need adding to that list, the catalogue and a firing branch; the controls, the selection, the readout and the save stay as they are. With only the mining laser fitted, `R` says `HARDPOINT: MINING LASER (THE ONLY ONE FITTED)`.
+The mining laser was the first hardpoint; four weapons followed (see [Weapons And Combat](#weapons-and-combat)). `Commander::hardpoints()` builds the list `R` cycles through from what is fitted, in a fixed order: mining laser, pulse laser, beam laser, rocket launcher, turret laser. With only one fitted, `R` says so: `HARDPOINT: MINING LASER (THE ONLY ONE FITTED)`.
 
 Hardpoints won't fire, and the readout says why, when there is nothing fitted, while docking or docked, in hyperspace, while the cruise drive is charging or engaged, or within 5,000 units of a station (`NO-FIRE ZONE`, as in Elite). A refusal is announced once per press of `Space`, not every frame.
 
@@ -1341,6 +1350,88 @@ Save format version 5 adds `miningModule`, `hardpoint` (the selected group) and 
 | Rendered with the game's own renderers | beams, flash, sparks, fragments and the shrinking rock all visible |
 
 The logic tests also run cleanly under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+## Weapons And Combat
+
+Four weapon hardpoints can be bought on the Upgrades page. Each is a separate upgrade and a separate hardpoint group: `R` cycles through what is fitted (the mining laser included), `Space` fires the selected group, and `T` locks a target. The weapons are in `include/systems/combat.h++` and their effects are drawn by `include/rendering/combat_renderer.h++`.
+
+| Weapon | Price | How it fires | Damage | Notes |
+| --- | --- | --- | --- | --- |
+| **Pulse Laser** | 1,800 CR | fixed, straight ahead: bolts from alternating wing mounts, 8 a second, 3,200 u/s, 2,600 units | 4 a bolt (about 33 a second) | cheap on energy: it can fire indefinitely |
+| **Beam Laser** | 3,200 CR | fixed, straight ahead: a continuous twin beam, 2,200 units | 42 a second | drains the capacitor in 5 seconds of holding it |
+| **Rocket Launcher** | 2,600 CR | rockets from the wing pods, one every 0.55 s; they home on the locked ship | 55, with splash out to 260 units | 12 rockets; rearmed at 30 CR each when you dock |
+| **Turret Laser** | 4,500 CR | a dorsal turret that aims *itself* at the locked ship, leading it, and fires once lined up | 3 a bolt, about 5 a second | can't fire below the ship's own plane (`TARGET OUT OF ARC`) |
+
+### Energy
+
+The lasers draw on a shared weapon capacitor of 100 energy that recharges at 18 a second (`CombatState::energy`): a pulse bolt costs 2, a turret bolt 1.3, and the beam 38 a second. The pulse laser uses less than the capacitor recharges, so it can be held down indefinitely; the beam empties it in five seconds and then fires only in spurts as it trickles back. Rockets don't use energy; they use ammunition. The mining laser costs nothing.
+
+### Targeting
+
+`T` now steps through the station and then every visible ship within scanner range (25 km), nearest first, then back to nothing (`cycleTarget()`). A targeted ship gets brackets sized to it, its shields (blue) and hull (orange) as bars under its label, and a ring on the scanner. A target that is destroyed, docks or warps out is dropped.
+
+The **rocket launcher** homes on the locked ship if it is within 7,000 units and within about 35° of the nose when the rocket is launched. Otherwise the rocket flies straight. A homing rocket turns at up to 2.6 rad/s toward where the ship will be, accelerates to 1,700 u/s on top of the launch speed, and detonates within 140 units of its target, on striking anything else, or when its 6.5 seconds of fuel run out.
+
+The **turret** turns at up to 2.2 rad/s toward where its bolts will meet the locked ship, leading it by the two ships' relative velocity, and fires once its aim is within about 3° of that. With nothing locked it faces forward and fires straight ahead. It sits on top of the hull, so it can't reach below the ship's own plane.
+
+### What weapons hit
+
+Bolts, beams and rockets hit the first thing in their path (`castWeaponRay()`): a visible NPC ship (a 230-unit sphere), a rock (at its mined size), or the station's hull (its real mesh, the same one the ship collides with). The player's own ship is never hit. Hitting a rock or the station throws sparks but does no damage.
+
+### Ships: shields, hull, running and exploding
+
+NPC ships have 40 shield points and 60 hull points (`npcMaxShields`, `npcMaxHull`):
+
+- **Shields** take damage first, flashing as a blue bubble where they are hit, and recharge at 6 a second once the ship hasn't been hit for 5 seconds.
+- **When its shields fail, a ship runs.** It goes to full throttle and warps out 3.5 seconds later, unless it is finished off first. A ship committed to the station's slot (entering or launching) can't run.
+- **Hull** damage throws sparks. At zero the ship **explodes**: a flash and a spreading shock ring, sparks, and 42 pieces of tumbling debris. It leaves play, and the system's traffic brings a new, undamaged ship in one to two and a half minutes later.
+
+Messages announce `SHIELDS DOWN: IT'S RUNNING`, `TARGET DESTROYED` (or `SHIP DESTROYED` for an unlocked one), and `OUT OF ROCKETS: REARM AT A STATION`.
+
+### Rules
+
+Weapons follow the same rules as the mining laser: no firing within 5,000 units of a station (the no-fire zone), while docking or docked, in hyperspace, or with the cruise drive charging or engaged.
+
+### The effects
+
+- **Pulse bolts:** short red-orange streaks with a muzzle flash at each wing mount.
+- **Turret bolts:** cyan streaks from a turret drawn on top of the hull, whose twin barrels visibly turn to follow the target.
+- **The beam:** two red beams with a soft glow and a hot core, flickering, with a pulsing glow where they strike.
+- **Rockets:** a hot point and a flickering flame, trailing smoke that drifts and spreads.
+- **Hits:** shield bubbles flare blue around a ship, and hull hits and rock or station strikes throw sparks.
+- **Explosions:** a flash that swells and fades, a shock ring, and tumbling debris.
+
+Smoke puffs, debris, shock rings and shield bubbles are world-sized and shrink with distance. Live particles are capped at 2,400, so a long fight can't grow them without limit.
+
+### The readout
+
+The hardpoint readout above the dashboard shows the selected group, its place in the cycle (`[R] PULSE LASER 1/4`) and what it is doing (`READY`, `FIRING`, `LOW ENERGY`, `NO ROCKETS`, `TARGET OUT OF ARC`). The line above it shows the capacitor, the rockets left and the locked ship's shields and hull: `ENERGY 88%   ROCKETS 9 / 12   TARGET SHIELDS 60%  HULL 100%`.
+
+### Saving
+
+Save format version 6 adds `pulseLaser`, `beamLaser`, `rocketLauncher`, `turretLaser` and `rockets`. Older saves load with no weapons. Fights in progress, bolts, rockets and damage to ships are not saved.
+
+### Weapons: tests
+
+| Test | Result |
+| --- | --- |
+| Pulse laser on a ship 1 km ahead | shields down at 1.4 s (and it starts running), destroyed at 3.2 s; the capacitor stays full |
+| Beam laser, 1.5 km | destroyed at 2.4 s; held from full, the capacitor runs dry at 5.0 s |
+| Four rockets locked on a ship crossing at 300 u/s, 3 km away | destroyed at 3.3 s; an unlocked rocket flies straight and misses |
+| Rockets held down until empty | `OUT OF ROCKETS` told once while held, and once more on a new press |
+| Turret on a moving ship above and to the side | first shot after 0.4 s of turning; destroyed at 6.9 s |
+| Turret on a ship below the hull | `TARGET OUT OF ARC`, nothing fired |
+| Shields after a short burst | no recharge for 5 seconds, then back to full at 6 a second |
+| `T` with ships at 5, 9 and 40 km and one docked | station, 5 km, 9 km, none (the docked and out-of-range ships are skipped) |
+| Through the scene: buying all four | 12,100 CR taken; `R` cycles all five groups |
+| Pulse laser near the station | refused: `NO-FIRE ZONE` |
+| Rockets at a ship flown by the NPC AI | destroyed with four rockets |
+| Turret on an AI-flown ship to the side | shields down at 3.3 s; it ran and **escaped with 7 hull left** |
+| Docking with 4 rockets | 15 CR fee and 8 × 30 CR for rockets; the launcher is full again |
+| Save version 6, then load | weapons, rockets and selection restored; a version 5 save loads with none |
+| Rendered with the game's own renderers | bolts, beam, rockets and smoke, shield flashes, the explosion and the turret all visible |
+
+The combat logic tests also run cleanly under AddressSanitizer and UndefinedBehaviorSanitizer.
 
 ## Docking Fees
 
@@ -2070,6 +2161,7 @@ This is still intentionally small:
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
 - Missions don't exist yet, so trading is the only way to earn credits.
+- Combat: NPC ships don't fight back, so the player can't be damaged and has no shields or hull of their own. There is no law: destroying ships (even near-defenceless traders) has no consequences, no bounties and no reputation. Ships don't collide with each other, and wrecks leave nothing behind to salvage.
 - Mining: the mining hatch can't be emptied or sold yet (its resources are for missions, which don't exist yet), so mining stops once it is full. Mined rocks are whole again after a jump or a reload. The lasers have no heat or power cost, don't affect ships or the station, and NPCs don't mine.
 - Hull contacts only fine you: there is no hull damage, no repair and no insurance. NPC ships pass through the station and through the player's ship.
 - Yaw and pitch are Euler angles about the world's vertical and the ship's right axis, so with the ship rolled they don't turn the ship about its own axes. Roll is a banking angle, not a full 3D attitude: fine for lining up with a slot, but not an aerobatic flight model.

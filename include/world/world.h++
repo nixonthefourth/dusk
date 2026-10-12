@@ -12,6 +12,7 @@
 #include "objects/asteroid.h++"
 #include "systems/station_collision.h++"
 #include "world/mining_state.h++"
+#include "world/combat_state.h++"
 #include "objects/cube.h++"
 #include "objects/planet.h++"
 #include "objects/ship.h++"
@@ -30,11 +31,14 @@
 #include <random>
 
 /** What kind of object the player has locked as a target. Only the station can be targeted for now. */
-enum class TargetType { None, Station };
+enum class TargetType { None, Station, Ship };
 
 /** The player's current target lock. Room for an index once ships or planets become targetable. */
 struct TargetLock {
     TargetType type = TargetType::None;
+
+    /** For a ship target, its index in World::npcShips. */
+    int shipIndex = -1;
 };
 
 /** Owns all objects that exist in world coordinates. */
@@ -96,6 +100,9 @@ struct World {
     /** Tonnes mined from each rock in this system, and what the mining lasers are doing (see mining.h++). */
     mining::MiningLedger miningLedger;
     mining::MiningState mining;
+
+    /** Weapons: bolts, rockets, explosions and the rest of what combat puts in the world (see combat.h++). */
+    combat::CombatState combat;
 
     /**
      * Seconds of simulated time in this system; drives belt orbits and tumbling rocks. A double,
@@ -526,23 +533,49 @@ inline Vec3 stationVelocity(const World& world)
     return host.velocity + stationOrbitTangent(world) * (std::abs(world.stationOrbitSpeed) * world.stationOrbitRadius);
 }
 
-/** True if the current target still exists (a station can vanish when the system changes). */
+/** How far away a ship can be locked as a target: the scanner's range. */
+constexpr float shipTargetRange = 25000.f;
+
+/** True if NPC ship `index` exists, can be seen, and is close enough to lock. */
+inline bool shipIsTargetable(const World& world, int index)
+{
+    if (index < 0 || index >= static_cast<int>(world.npcShips.size()))
+        return false;
+
+    const NpcShip& npc = world.npcShips[static_cast<std::size_t>(index)];
+    return npc.isVisible() && length(npc.ship.position - world.playerShip.position) <= shipTargetRange;
+}
+
+/** True if the current target lock still points at something that exists. */
 inline bool hasValidTarget(const World& world)
 {
     switch (world.target.type)
     {
         case TargetType::Station: return world.stationActive;
+        case TargetType::Ship: return shipIsTargetable(world, world.target.shipIndex);
         case TargetType::None: break;
     }
 
     return false;
 }
 
-/** World position of the current target, if there is one. */
+/** The targeted NPC ship, if the target is a ship that still exists. */
+inline const NpcShip* targetedShip(const World& world)
+{
+    if (world.target.type != TargetType::Ship || !hasValidTarget(world))
+        return nullptr;
+
+    return &world.npcShips[static_cast<std::size_t>(world.target.shipIndex)];
+}
+
+/** World position of the current target, if there is a valid one. */
 inline std::optional<Vec3> targetPosition(const World& world)
 {
     if (!hasValidTarget(world))
         return std::nullopt;
+
+    if (const NpcShip* npc = targetedShip(world))
+        return npc->ship.position;
 
     return world.station.position;
 }
@@ -550,22 +583,70 @@ inline std::optional<Vec3> targetPosition(const World& world)
 /** World velocity of the current target (zero if there is none). */
 inline Vec3 targetVelocity(const World& world)
 {
+    if (const NpcShip* npc = targetedShip(world))
+        return npc->ship.velocity;
+
     return hasValidTarget(world) ? stationVelocity(world) : Vec3{};
 }
 
 /** Short HUD label for the current target. */
 inline const char* targetLabel(const World& world)
 {
-    return hasValidTarget(world) ? "STATION" : "";
+    if (!hasValidTarget(world))
+        return "";
+
+    return world.target.type == TargetType::Ship ? "SHIP" : "STATION";
 }
 
-/** Steps the target lock to the next available target, wrapping back to none. */
+/**
+ * Steps the target lock along the list of things that can be targeted: the station, then the
+ * visible ships within range from nearest to furthest, then back to nothing.
+ */
 inline void cycleTarget(World& world)
 {
-    if (world.target.type == TargetType::None && world.stationActive)
-        world.target.type = TargetType::Station;
-    else
-        world.target.type = TargetType::None;
+    struct Candidate {
+        TargetType type;
+        int index;
+        float distance;
+    };
+
+    std::vector<Candidate> candidates;
+
+    if (world.stationActive)
+        candidates.push_back({TargetType::Station, -1, 0.f});
+
+    // The ships follow the station, nearest first.
+    const auto firstShip = static_cast<std::ptrdiff_t>(candidates.size());
+
+    for (int i = 0; i < static_cast<int>(world.npcShips.size()); ++i)
+    {
+        if (shipIsTargetable(world, i))
+            candidates.push_back({TargetType::Ship, i, length(world.npcShips[static_cast<std::size_t>(i)].ship.position - world.playerShip.position)});
+    }
+
+    std::sort(candidates.begin() + firstShip, candidates.end(), [](const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
+
+    // Find the current target in the list, and move to the one after it.
+    int current = -1;
+
+    for (int i = 0; i < static_cast<int>(candidates.size()); ++i)
+    {
+        const Candidate& candidate = candidates[static_cast<std::size_t>(i)];
+
+        if (candidate.type == world.target.type && (candidate.type != TargetType::Ship || candidate.index == world.target.shipIndex))
+            current = i;
+    }
+
+    const int next = hasValidTarget(world) ? current + 1 : 0;
+
+    if (next < 0 || next >= static_cast<int>(candidates.size()))
+    {
+        world.target = {};
+        return;
+    }
+
+    world.target.type = candidates[static_cast<std::size_t>(next)].type;
+    world.target.shipIndex = candidates[static_cast<std::size_t>(next)].index;
 }
 
 /** Clears collision hits from every object before fresh detection runs. */

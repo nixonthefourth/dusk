@@ -23,6 +23,10 @@ enum class NpcState {
 };
 
 /** One simple-reflex NPC ship: a Ship body plus AI state layered on top. */
+/** NPC ships' shield and hull points when undamaged. Shields take damage first and recharge; hull doesn't. */
+constexpr float npcMaxShields = 40.f;
+constexpr float npcMaxHull = 60.f;
+
 struct NpcShip {
     /** Reuses the player's Ship type, so it gets the same model, physics, and renderer for free. */
     Ship ship;
@@ -46,6 +50,14 @@ struct NpcShip {
      */
     float dockDistance = 0.f;
     Vec3 dockLateral;
+
+    /** Combat: shield and hull points (the ship is destroyed at 0 hull), and seconds since it was last hit. */
+    float shields = npcMaxShields;
+    float hull = npcMaxHull;
+    float sinceHit = 1e9f;
+
+    /** True once its shields have failed under fire and it is running for it. */
+    bool fleeing = false;
 
     /** Whether this NPC should currently be rendered: everywhere except warped out or inside the station. */
     bool isVisible() const

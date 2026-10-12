@@ -289,6 +289,12 @@ inline void respawnNpc(
     npc.stateTimer = 0.f;
     npc.ship.roll = 0.f;
 
+    // A new arrival: undamaged.
+    npc.shields = npcMaxShields;
+    npc.hull = npcMaxHull;
+    npc.sinceHit = 1e9f;
+    npc.fleeing = false;
+
     // Some arrivals come out of the station instead, so it's visibly busy.
     std::uniform_real_distribution<float> chance(0.f, 1.f);
 

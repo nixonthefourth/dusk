@@ -55,6 +55,9 @@ add_executable(dusk src/main.cpp
         include/systems/docking_fees.h++
         include/systems/docking_control.h++
         include/systems/mining.h++
+        include/systems/combat.h++
+        include/world/combat_state.h++
+        include/rendering/combat_renderer.h++
         include/objects/mining_hatch.h++
         include/objects/hardpoints.h++
         include/world/mining_state.h++

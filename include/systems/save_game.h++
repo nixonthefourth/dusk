@@ -26,7 +26,7 @@
 constexpr int saveSlotCount = 3;
 
 /** Bumped whenever the save format changes; older files are still read (unknown keys are ignored, missing ones default). */
-constexpr int saveFormatVersion = 5;
+constexpr int saveFormatVersion = 6;
 
 /** Longest commander name allowed, in characters. */
 constexpr std::size_t maxCommanderNameLength = 16;
@@ -86,6 +86,13 @@ struct SaveGame {
     /** Whether the mining module has been bought, the selected hardpoint group, and what the mining hatch holds (resource key, tonnes). */
     bool miningModule = false;
     int hardpoint = 0;
+
+    /** The weapon hardpoints bought, and the rockets left in the launcher. */
+    bool pulseLaser = false;
+    bool beamLaser = false;
+    bool rocketLauncher = false;
+    bool turretLaser = false;
+    int rockets = 0;
     std::vector<std::pair<std::string, float>> hatch;
 
     /**
@@ -249,6 +256,11 @@ inline std::string serialiseSave(const SaveGame& save)
     out << "politicalScanner=" << (save.politicalScanner ? 1 : 0) << '\n';
     out << "miningModule=" << (save.miningModule ? 1 : 0) << '\n';
     out << "hardpoint=" << save.hardpoint << '\n';
+    out << "pulseLaser=" << (save.pulseLaser ? 1 : 0) << '\n';
+    out << "beamLaser=" << (save.beamLaser ? 1 : 0) << '\n';
+    out << "rocketLauncher=" << (save.rocketLauncher ? 1 : 0) << '\n';
+    out << "turretLaser=" << (save.turretLaser ? 1 : 0) << '\n';
+    out << "rockets=" << save.rockets << '\n';
 
     for (const auto& [resource, tonnes] : save.hatch)
     {
@@ -359,6 +371,16 @@ inline std::optional<SaveGame> parseSave(const std::string& text)
             save.miningModule = std::atoi(value.c_str()) != 0;
         else if (key == "hardpoint")
             save.hardpoint = std::max(0, std::atoi(value.c_str()));
+        else if (key == "pulseLaser")
+            save.pulseLaser = std::atoi(value.c_str()) != 0;
+        else if (key == "beamLaser")
+            save.beamLaser = std::atoi(value.c_str()) != 0;
+        else if (key == "rocketLauncher")
+            save.rocketLauncher = std::atoi(value.c_str()) != 0;
+        else if (key == "turretLaser")
+            save.turretLaser = std::atoi(value.c_str()) != 0;
+        else if (key == "rockets")
+            save.rockets = std::max(0, std::atoi(value.c_str()));
         else if (key == "hatch")
         {
             const auto fields = splitFields(value);

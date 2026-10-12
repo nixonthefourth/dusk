@@ -228,7 +228,9 @@ private:
         if (onScreen)
         {
             const float focal = (viewport.height * 0.5f) / std::tan(camera.fov * 0.5f / degrees);
-            const float halfSize = std::clamp(stationBoundingRadius(world.station) * focal / projected->depth, 12.f, 220.f);
+            // Brackets sized to the target: a ship, or the whole station.
+            const float targetRadius = world.target.type == TargetType::Ship ? 260.f : stationBoundingRadius(world.station);
+            const float halfSize = std::clamp(targetRadius * focal / projected->depth, 12.f, 220.f);
             const sf::Vector2f c = {projected->position.x, projected->position.y};
             const float corner = std::max(5.f, halfSize * 0.35f);
 
@@ -243,6 +245,18 @@ private:
             }
 
             drawText(target, label, {c.x, c.y + halfSize + 4.f}, 16, style::targetMarker, 0.5f);
+
+            // A ship target shows its shields (blue) and hull (orange) under its label.
+            if (const NpcShip* npc = targetedShip(world))
+            {
+                const float barWidth = 72.f;
+                const sf::Vector2f origin = {c.x - barWidth * 0.5f, c.y + halfSize + 24.f};
+                drawRect(target, origin, {barWidth, 4.f}, style::lineFaint);
+                drawRect(target, origin, {barWidth * std::clamp(npc->shields / npcMaxShields, 0.f, 1.f), 4.f}, style::healthShield);
+                drawRect(target, {origin.x, origin.y + 6.f}, {barWidth, 4.f}, style::lineFaint);
+                drawRect(target, {origin.x, origin.y + 6.f}, {barWidth * std::clamp(npc->hull / npcMaxHull, 0.f, 1.f), 4.f}, style::healthHull);
+            }
+
             return;
         }
 
@@ -574,10 +588,13 @@ private:
         for (const Asteroid& rock : world.driftingAsteroids)
             plotRock(rock);
 
-        for (const NpcShip& npc : world.npcShips)
+        for (int i = 0; i < static_cast<int>(world.npcShips.size()); ++i)
         {
+            const NpcShip& npc = world.npcShips[static_cast<std::size_t>(i)];
+
+            // The targeted ship is ringed, like the station when it's targeted.
             if (npc.isVisible())
-                plot(npc.ship.position, style::scannerShip, false, false);
+                plot(npc.ship.position, style::scannerShip, false, world.target.type == TargetType::Ship && world.target.shipIndex == i);
         }
 
         if (world.stationActive)
