@@ -23,6 +23,7 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - Docking by request: ask the station for a slot (`C`), then fly in by hand with a speed limit relative to the station, strafe thrusters, roll on the arrow keys, an Apollo-style alignment panel and a corridor of rings in the 3D view, with a solid station that fines you for scraping it. Or buy the docking computer (`V`), which flies the approach for you, slowly: about 50 seconds from request to docked.
 - Asteroid mining: buy the Mining Module (2,400 CR), point the nose at a rock and hold `Space`. Twin laser beams cut ore, fragments of iron, nickel, cobalt, silicates, water ice or platinum fly into a 5 t mining hatch, and the rock shrinks as you mine it. `R` cycles hardpoint groups, ready for weapons.
 - Weapons and combat: pulse lasers, a beam laser, homing rockets and a self-aiming turret laser, sharing a weapon capacitor. NPC ships have shields and hull: they flare, run when their shields fail, and explode with debris. `T` locks ships as well as the station.
+- Procedurally generated missions on every station's board (courier runs, cargo deliveries, mining contracts and pirate bounties), shaped by each system's economy, with deadlines, rewards on docking and destinations ringed on the galactic chart. And piracy: in poor systems, pirate gangs hunt you down. Your ship has shields and hull now, and losing it costs an insurance claim.
 - Simple-reflex NPC ships that roam, avoid planets and stars, occasionally head to the station and dock, and periodically "warp out" and back in — no memory, no planning, just current-state reflexes.
 - A living trade economy: every system has its own market, prices follow supply and demand, you buy and sell at stations, and 300 simple-reflex trader agents move goods between systems on their own. Tech systems now really export tech goods, a bug that had left the best goods almost unobtainable.
 - A camera that chases the ship from behind, plus an orbit "showcase" mode.
@@ -101,7 +102,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [x] Tradeable goods (silicon chips, food, liquor, wines, ores, electronics, furs, animals, books, chemical fuel)
 - [x] Buying and selling goods at stations, with cargo bay upgrades (Mk1 +5 t, Mk2 +10 t)
 - [x] World occupations (mining, engineering and tech, agricultural)
-- [ ] Mission variety (live cargo transport, mining, bounty hunting, cargo transport, station defence/offence)
+- [~] Mission variety (live cargo transport, mining, bounty hunting, cargo transport, station defence/offence): courier, delivery, mining and bounty missions exist; station defence and attack are still to come
 - [x] NPC interactions — NPC ships roam, dock, and warp on their own; nothing talks to the player yet
 - [x] HUD
   - [x] Thrust
@@ -205,7 +206,7 @@ While a map is open, flight controls are paused (the ship carries on under fligh
 
 While docked:
 
-- The station screen opens automatically. Services are listed on the left: REFUEL, MARKET, UPGRADES, MISSIONS, GARAGE (the last two marked SOON for now), SAVE GAME and LAUNCH.
+- The station screen opens automatically. Services are listed on the left: REFUEL, MARKET, UPGRADES, MISSIONS, GARAGE (marked SOON for now), SAVE GAME and LAUNCH.
 - `Up`/`Down` (or `W`/`S`, `Tab`) choose a service. `Enter`/`Space` does the page's main action: fill the tank on REFUEL, launch on LAUNCH, or open the list on MARKET and UPGRADES.
 - On REFUEL, `B` buys one tonne.
 - **In the market list:** `Up`/`Down` choose a good, `B` (or `Enter`) buys a tonne and `Shift+B` buys as much as your hold, the stock and your credits allow, `S` sells a tonne and `Shift+S` sells all of that good. `Left`, `Tab` or `Escape` return to the service list. The BUY 1 / BUY MAX / SELL 1 / SELL ALL buttons do the same by mouse.
@@ -249,6 +250,7 @@ include/
     cargo.h++
     mining_hatch.h++    (mined resources and the hatch)
     hardpoints.h++      (hardpoint kinds and muzzle positions)
+    mission.h++         (the Mission type)
     fuel_tank.h++
     star.h++
     collision_body.h++
@@ -277,6 +279,8 @@ include/
     docking_control.h++
     mining.h++
     combat.h++
+    missions.h++
+    piracy.h++
     station_collision.h++
     orbital_physics.h++
     npc_ai.h++
@@ -1125,6 +1129,8 @@ A save (`SaveGame` in `include/systems/save_game.h++`) holds:
 | `miningModule`, `hardpoint` | whether the mining module has been bought, and the selected hardpoint group |
 | `hatch` | one line per resource in the mining hatch: `hatch=Iron,1.250` |
 | `pulseLaser`, `beamLaser`, `rocketLauncher`, `turretLaser`, `rockets` | which weapons have been bought, and the rockets left in the launcher |
+| `mission` | one line per active mission, its fields separated by `|` (`missions::encodeMission()`) |
+| `taken`, `bounty`, `hull`, `lastDocked` | recently taken mission ids (left off the boards), unpaid bounty, the ship's hull, and the last system docked in |
 | `galaxyTime` | the trading economy's clock, in game seconds |
 | `stocks` | every market stock that has moved a few percent from its baseline |
 | `agents` | all 300 trader agents: where each is, where it's going, what it carries |
@@ -1177,7 +1183,7 @@ agent=412,415,2120.6,Wines,50,9
 savedAt=2026-10-05 20:44
 ```
 
-Version 2 added the hold, the bay and the trading economy; version 3 added the fuel tank and the docking computer; version 4 added the two scanners; version 5 added the mining module, the selected hardpoint and the mining hatch; version 6 added the four weapons and the rocket count. Older saves still load: a version 1 save comes back with an empty hold, no bay and a fresh economy, and a version 2 or 3 save comes back with whatever it had and no scanners (the chart shows `UNKNOWN` until you buy them). A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
+Version 2 added the hold, the bay and the trading economy; version 3 added the fuel tank and the docking computer; version 4 added the two scanners; version 5 added the mining module, the selected hardpoint and the mining hatch; version 6 added the four weapons and the rocket count; version 7 added missions, bounties, the hull and the last system docked in. Older saves still load: a version 1 save comes back with an empty hold, no bay and a fresh economy, and a version 2 or 3 save comes back with whatever it had and no scanners (the chart shows `UNKNOWN` until you buy them). A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
 
 Three choices keep it robust:
 
@@ -1273,7 +1279,7 @@ Hardpoints won't fire, and the readout says why, when there is nothing fitted, w
 
 ### Resources
 
-Mining yields raw resources, not market goods (`include/objects/mining_hatch.h++`). They are kept in the hatch, apart from the cargo hold, and are meant for missions, which are still to come.
+Mining yields raw resources, not market goods (`include/objects/mining_hatch.h++`). They are kept in the hatch, apart from the cargo hold, and are wanted by mining contracts (see [Missions](#missions)).
 
 | Resource | Weight | Share of rocks it is the main resource of (measured over 200,000 rocks) |
 | --- | --- | --- |
@@ -1311,7 +1317,7 @@ The status the readout shows is one of `READY`, `MINING`, `NO ROCK IN RANGE`, `R
 
 `Commander::hatch` holds tonnes per resource, up to 5 t. Its ore adds to the ship's mass, through `Ship::hatchMass` and `shipTotalMass()`, so a full hatch handles like 5 t of cargo. It is separate from the cargo hold and doesn't show on the HOLD gauge. The station header shows `HATCH 2.8 / 5 t` once the module is fitted.
 
-**The hatch can't be emptied yet.** Resources aren't market goods and there are no missions yet, so once it is full, mining stops (`HATCH FULL`) until there is something to spend the ore on.
+**Emptying the hatch.** Resources aren't market goods: they go to mining contracts on the mission boards (see [Missions](#missions)), which take the ore out of the hatch when one is completed. Otherwise, once the hatch is full, mining stops (`HATCH FULL`).
 
 ### The animation
 
@@ -1432,6 +1438,131 @@ Save format version 6 adds `pulseLaser`, `beamLaser`, `rocketLauncher`, `turretL
 | Rendered with the game's own renderers | bolts, beam, rockets and smoke, shield flashes, the explosion and the turret all visible |
 
 The combat logic tests also run cleanly under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+## Missions
+
+Every station has a **mission board**, on its MISSIONS page. There are four kinds of job:
+
+| Mission | The job | Paid |
+| --- | --- | --- |
+| **Courier** | carry a sealed package of data (a diplomatic dispatch, survey data, a bank transfer key...) to a station up to 22 LY away; it takes no hold space | 120 CR + 22 CR per LY (plus up to 40), on docking there |
+| **Delivery** | carry 2–8 t of mission cargo (medical supplies, reactor coolant, relief rations...) to a station; it takes hold space and adds mass | 150 CR + 14 CR a tonne + 24 CR per LY (plus up to 50), on docking there |
+| **Mining contract** | bring some tonnes of a resource from your mining hatch to a station (usually this one) | the resource's contract price × 1.3, on docking there with enough in the hatch; the ore is handed over |
+| **Bounty** | destroy a named pirate gang (1–3 ships) raiding a system (this one or one nearby) | 350 CR a ship + 20 CR per LY (plus up to 80), on docking **anywhere** once they're all destroyed; each kill also earns the usual pirate bounty |
+
+Mining contract prices per tonne are iron 60, silicates 50, water ice 70, nickel 90, cobalt 160 and platinum 420 CR. The contracts are what the mining hatch is for: they finally give mined ore somewhere to go.
+
+### The board
+
+A board isn't stored. It is generated from the galaxy seed, the system and the galaxy clock in half-hour steps (`missions::missionBoard()`), so the same station shows the same 4–7 missions until the half hour turns, and keeping a thousand boards costs nothing. A mission you have taken is left off the board (`Commander::takenMissions`).
+
+What a board offers follows the system. The base weights are courier 3, delivery 3, mining 2 and bounty 1.5. Mining systems double the mining contracts, farming systems post more deliveries, and tech systems more courier runs. Poor systems post many more bounties, and progressive ones far fewer. Measured over all 4,000 boards of four refreshes:
+
+| System | Courier | Delivery | Mining | Bounty |
+| --- | --- | --- | --- | --- |
+| poor, mining | 20% | 20% | 32% | 29% |
+| poor, agricultural | 21% | 31% | 19% | 29% |
+| developing, tech | 41% | 25% | 20% | 14% |
+| progressive, agricultural | 28% | 46% | 21% | 6% |
+
+No board is ever empty, and every destination is a station within 22 LY.
+
+**Clients and wording** are generated too: companies and people (`BENOVA LOGISTICS`, `DR SOLAKI`), the package or cargo, and the gang (`THE BLACK JACKALS`). The board shows a one-line title, the reward and the time left on each card, and the highlighted mission in full underneath.
+
+### Taking, doing and finishing
+
+- **Taking one:** highlight it and press Enter (or click ACCEPT). You can have up to **5** at once. A delivery needs room in the hold for its cargo: `NOT ENOUGH HOLD SPACE` otherwise.
+- **Abandoning one:** your active missions are at the top of the list, in green. Enter asks for confirmation (`PRESS AGAIN TO ABANDON`), and a second press gives the mission up. There is no penalty beyond the lost reward.
+- **Deadlines:** every mission has one, on the galaxy clock. It allows the jump's own galaxy time three times over (for refuelling stops and detours) plus 25 minutes to fly in-system and dock. Mining contracts and bounties get another 40 minutes. A mission still active when its deadline passes fails (`MISSION FAILED: THE DEADLINE HAS PASSED`).
+- **Finishing:** happens when you dock (`missions::completeMissionsAt()`). The rewards arrive with the docking fee in a two-line message, earnings first, costs second:
+
+```
+1 MISSION COMPLETE +767 CR     BOUNTIES +300 CR
+DOCKING FEE -15 CR
+```
+
+- **Losing your ship** fails courier and delivery missions, since the data and cargo go with it. Mining contracts and bounties survive.
+
+### Finding your way
+
+- **The galactic chart** rings each active mission's destination system in green.
+- **The mission tracker**, at the top right while flying, shows how many missions you have and the one due soonest: `MISSIONS 2   NEXT: CARRY THE DATA TO KAVURA PRIME   23:40`.
+
+## Piracy
+
+In poor systems, and sometimes developing ones, **pirates** come hunting (`include/systems/piracy.h++`). They are NPC ships in a `Hostile` state, flown by the piracy code rather than the ordinary NPC AI.
+
+### When they come
+
+Only in open space. Pirates don't appear while you're docked or docking, in cruise or in hyperspace, or within 10 km of a station. They also give you 40 seconds after arriving in a system. After that, as long as no pirates are about, the system rolls for them at random intervals:
+
+| System | Chance per roll | Seconds between rolls | Gang size | Measured: attacks per 30 minutes in open space |
+| --- | --- | --- | --- | --- |
+| poor | 60% | 110–280 | 1–3 | 5.2 |
+| developing | 25% | 220–520 | 1–2 | 1.0 |
+| progressive | never | – | – | 0 |
+
+A gang appears 6.5–9 km away and comes for you: `PIRATES! 2 SHIPS CLOSING IN`.
+
+### How they fight
+
+- **Making passes.** A pirate leads you with its nose (aiming where its bolt would meet you), chases at half throttle to about 1.1 km, and slows in close. Inside about 700 units it peels away to one side and comes round for another pass. My first version chased at three-quarters throttle and flew straight through the player's ship. The fix was a slower chase and an earlier peel; the closest approach measured went from 36 units to 169.
+- **Guns:** twin pulse lasers, firing whenever you are within 2.2 km and within about 4° of their nose: 3.5 damage a bolt, roughly three bolts a second each.
+- **Stations protect you.** Within 8 km of a station pirates break off, hold fire and wait outside.
+- **They run.** A pirate whose hull falls below 35% turns tail, goes to full throttle and is gone four seconds later (`THE PIRATE GOT AWAY`). Bounty targets don't run: they fight to the end.
+- **They give up** if you get 45 km away.
+
+Each pirate destroyed earns a **150 CR bounty**, collected the next time you dock (`PIRATE DESTROYED: BOUNTY +150 CR (PAID AT A STATION)`). A pirate that leaves play is *retired*, and its slot in `World::npcShips` is reused for the next pirate, so the system's traffic doesn't grow with every encounter.
+
+**Bounty targets:** when you are in the system named by a bounty mission, out in open space, its gang appears (`BOUNTY TARGETS SIGHTED`) whenever none of it is in play. If you leave before finishing them, the rest are waiting when you come back.
+
+### Your ship can be destroyed
+
+Your ship now has **60 shield points and 100 hull points** (`combat::PlayerHealth`).
+
+- **Shields** take hits first, flashing blue, and recharge at 5 a second after 4 seconds without being hit.
+- **Hull hits** flash the edge of the screen red.
+- **The gauges:** two vertical gauges either side of the scanner show them (SH on the left, HL on the right, turning red below 30%).
+- **The hull carries** between systems and is saved.
+- **Repairs:** docking repairs it at 3 CR a point, as far as spendable credits go (`HULL REPAIRED -60 CR`).
+
+Two pirates, against a player who neither fights nor flies away, landed their first hit 13.6 seconds after appearing and destroyed the ship 12 seconds after that. You have time to run (cruise outpaces them, and they give up at 45 km) or to fight.
+
+When the hull reaches zero the ship explodes, and three seconds later the **insurance** replaces it:
+
+- It costs **300 CR**, taken from credits above the docking reserve.
+- The new ship waits **docked at this system's station**, or at the station you last docked at, if this system has none.
+- **Upgrades are covered**; trade cargo, mining hatch contents, courier data and delivery cargo are not (those missions fail).
+- The hull is whole again. The message says what was lost: `INSURANCE: A NEW SHIP -300 CR / CARGO LOST, 1 MISSION FAILED`.
+- That arrival is not a docking, so it charges no docking fee. A first version did charge one, and its message hid the insurance message; a test caught both.
+
+In view, every pirate has **red brackets** sized to it, it shows **red on the scanner**, and targeting one labels it `PIRATE`.
+
+### Missions and piracy: tests
+
+| Test | Result |
+| --- | --- |
+| Boards: same inputs twice; the next half hour | identical; different |
+| All 4,000 boards | none empty; every destination a station in range; the shortest time left 1,108 s |
+| Taking a delivery of 7 t | hold room 10 → 3, and the ship's mass up 7 t |
+| A delivery bigger than the room left; a sixth mission | `NOT ENOUGH HOLD SPACE`; `MISSION LIMIT REACHED (5)` |
+| Abandoning | nothing on the first press; gone on the second, hold room back |
+| A courier run, through the scene | accepted on the board, ringed on the chart, paid 284 CR on docking at the destination |
+| A mining contract 0.5 t short, then with enough | not completed; completed, the ore handed over |
+| A deadline passing | the mission fails, with a message |
+| Missions saved and loaded | encode and decode exactly; nonsense doesn't decode |
+| Two pirates against a passive player | first hit at 13.6 s, destroyed at 25.6 s |
+| A pirate at 25% hull | runs, gone after 4 s, its slot reused by the next pirate |
+| A bounty target at 10 hull | keeps fighting |
+| The player 3 km from a station | the pirate fired 0 times in 20 s, holding 12 km off the station |
+| The player 65 km away | the pirate retires |
+| Spawn rates over 30 minutes, six runs each | 5.2 attacks (poor), 1.0 (developing), 0 (progressive) |
+| A poor system, through the scene, unarmed | pirates arrive, the ship is destroyed, and the insurance docks a new one: exactly 300 CR, cargo and the carried mission lost, hull 100 |
+| A bounty, through the scene | the gang appears once out in space; after killing both, docking paid the mission (767 CR) and the bounties (300 CR) |
+| Save version 7, then load | missions, hull 73, unpaid bounty and last docked system restored; a version 6 save loads with none |
+| Rendered with the game's own renderers | the missions page, the chart's ring, and a pirate attack (brackets, bolts, shield flashes, gauges, red flash) all visible |
+
+The mission, piracy, combat and mining logic tests also run cleanly under AddressSanitizer and UndefinedBehaviorSanitizer.
 
 ## Docking Fees
 
@@ -2161,8 +2292,9 @@ This is still intentionally small:
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
 - Missions don't exist yet, so trading is the only way to earn credits.
-- Combat: NPC ships don't fight back, so the player can't be damaged and has no shields or hull of their own. There is no law: destroying ships (even near-defenceless traders) has no consequences, no bounties and no reputation. Ships don't collide with each other, and wrecks leave nothing behind to salvage.
-- Mining: the mining hatch can't be emptied or sold yet (its resources are for missions, which don't exist yet), so mining stops once it is full. Mined rocks are whole again after a jump or a reload. The lasers have no heat or power cost, don't affect ships or the station, and NPCs don't mine.
+- Combat and piracy: ordinary NPC ships still don't fight back; only pirates do. There is no law beyond that: destroying traders has no consequences, no reputation and no fines. Pirates all fly the same hull with the same guns, ships don't collide with each other, and wrecks leave nothing to salvage.
+- Missions: there is no reputation or rank, so every board offers the same kinds of job to everyone; mission cargo can't be jettisoned; and a bounty target that runs isn't possible (they fight to the end), so a bounty can only fail by its deadline.
+- Mining: hatch resources can't be sold at the market; they go to mining contracts. Mined rocks are whole again after a jump or a reload. The lasers have no heat or power cost, don't affect ships or the station, and NPCs don't mine.
 - Hull contacts only fine you: there is no hull damage, no repair and no insurance. NPC ships pass through the station and through the player's ship.
 - Yaw and pitch are Euler angles about the world's vertical and the ship's right axis, so with the ship rolled they don't turn the ship about its own axes. Roll is a banking angle, not a full 3D attitude: fine for lining up with a slot, but not an aerobatic flight model.
 - The chart scanners are all-or-nothing and aren't remembered per system: visiting a system doesn't reveal its exports or development without the scanner.

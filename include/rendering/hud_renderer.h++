@@ -64,6 +64,8 @@ public:
         drawScanner(target, world, viewport);
         drawAttitudeBlock(target, world, viewport);
         drawFieldWarning(target, world, viewport);
+        drawHostileMarkers(target, world, camera, viewport);
+        drawHealth(target, world, viewport);
     }
 
 private:
@@ -199,6 +201,76 @@ private:
         {
             drawLine(target, {retrograde->x - 6.f, retrograde->y - 6.f}, {retrograde->x + 6.f, retrograde->y + 6.f}, style::retrogradeMarker);
             drawLine(target, {retrograde->x - 6.f, retrograde->y + 6.f}, {retrograde->x + 6.f, retrograde->y - 6.f}, style::retrogradeMarker);
+        }
+    }
+
+    /** Red brackets on every pirate in view, sized to the ship like the target brackets, so a fight can be followed without locking each one. */
+    void drawHostileMarkers(sf::RenderTarget& target, const World& world, const Camera& camera, const Viewport& viewport) const
+    {
+        const float focal = (viewport.height * 0.5f) / std::tan(camera.fov * 0.5f / degrees);
+
+        for (const NpcShip& npc : world.npcShips)
+        {
+            if (!npc.hostile || npc.retired || !npc.isVisible())
+                continue;
+
+            const auto projected = projector_.project(npc.ship.position, camera, viewport);
+
+            if (!projected)
+                continue;
+
+            const sf::Vector2f c = {projected->position.x, projected->position.y};
+            const float half = std::clamp(260.f * focal / projected->depth, 10.f, 120.f);
+            const float corner = std::max(4.f, half * 0.3f);
+
+            for (const float sx : {-1.f, 1.f})
+            {
+                for (const float sy : {-1.f, 1.f})
+                {
+                    const sf::Vector2f p = {c.x + sx * half, c.y + sy * half};
+                    drawLine(target, p, {p.x - sx * corner, p.y}, style::hostileMarker);
+                    drawLine(target, p, {p.x, p.y - sy * corner}, style::hostileMarker);
+                }
+            }
+        }
+    }
+
+    /**
+     * The player's shields and hull as two vertical gauges in the dashboard, either side of the
+     * scanner (shields on the left, hull on the right), filling from the bottom; and a red flash
+     * around the screen's edge for a moment after the hull is hit.
+     */
+    void drawHealth(sf::RenderTarget& target, const World& world, const Viewport& viewport) const
+    {
+        const combat::PlayerHealth& health = world.combat.player;
+        const float height = viewHeight(viewport);
+        const float top = viewport.height - dashboardHeight;
+        const float gaugeTop = top + 26.f;
+        const float gaugeHeight = 72.f;
+        const float gaugeWidth = 6.f;
+        const float centre = viewport.width * 0.5f;
+
+        const auto gauge = [&](float x, float fraction, sf::Color color, const char* label)
+        {
+            drawText(target, label, {x + gaugeWidth * 0.5f, top + 8.f}, 11, style::textDim, 0.5f);
+            drawRect(target, {x, gaugeTop}, {gaugeWidth, gaugeHeight}, style::lineFaint);
+            const float filled = gaugeHeight * std::clamp(fraction, 0.f, 1.f);
+            drawRect(target, {x, gaugeTop + gaugeHeight - filled}, {gaugeWidth, filled}, color);
+        };
+
+        gauge(centre - 150.f, health.shields / combat::playerMaxShields, style::playerShieldBar, "SH");
+        gauge(centre + 142.f, health.hull / combat::playerMaxHull, health.hull < combat::playerMaxHull * 0.3f ? style::warning : style::playerHullBar, "HL");
+
+        // A red edge for half a second after a hull hit.
+        if (health.sinceHullHit < 0.5f)
+        {
+            const int alpha = static_cast<int>(150.f * (1.f - health.sinceHullHit / 0.5f));
+            sf::RectangleShape edge({viewport.width - 8.f, height - 8.f});
+            edge.setPosition({4.f, 4.f});
+            edge.setFillColor(sf::Color::Transparent);
+            edge.setOutlineColor(style::withAlpha(style::hullHitFlash, alpha));
+            edge.setOutlineThickness(4.f);
+            target.draw(edge);
         }
     }
 
@@ -592,9 +664,9 @@ private:
         {
             const NpcShip& npc = world.npcShips[static_cast<std::size_t>(i)];
 
-            // The targeted ship is ringed, like the station when it's targeted.
+            // The targeted ship is ringed, like the station when it's targeted; pirates show red.
             if (npc.isVisible())
-                plot(npc.ship.position, style::scannerShip, false, world.target.type == TargetType::Ship && world.target.shipIndex == i);
+                plot(npc.ship.position, npc.hostile ? style::scannerHostile : style::scannerShip, false, world.target.type == TargetType::Ship && world.target.shipIndex == i);
         }
 
         if (world.stationActive)

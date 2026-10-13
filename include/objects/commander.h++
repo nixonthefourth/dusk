@@ -10,6 +10,8 @@
 #include "objects/fuel_tank.h++"
 #include "objects/hardpoints.h++"
 #include "objects/mining_hatch.h++"
+#include "objects/mission.h++"
+#include <cstdint>
 #include <optional>
 #include <vector>
 #include <algorithm>
@@ -51,6 +53,19 @@ struct Commander {
     bool hasRocketLauncher = false;
     bool hasTurretLaser = false;
     int rockets = 0;
+
+    /** Missions taken and not yet finished, and the ids of missions taken recently (left off the boards). */
+    std::vector<Mission> missions;
+    std::vector<std::uint64_t> takenMissions;
+
+    /** Bounty earned for destroying pirates, paid out at the next station. */
+    double bountyVouchers = 0.0;
+
+    /** The ship's hull points (out of 100), carried between systems and repaired at stations. */
+    float hull = 100.f;
+
+    /** The last system the commander docked in (where an insurance claim puts them if this system has no station), or -1. */
+    int lastDockedSystem = -1;
 
     /** Which fitted hardpoint group is selected, as an index into hardpoints(). */
     int selectedHardpoint = 0;
@@ -101,10 +116,24 @@ struct Commander {
         return cargoCapacityFor(cargoModule);
     }
 
-    /** Free hold space in tonnes. */
+    /** Tonnes of mission cargo (deliveries) in the hold. */
+    int missionCargoTonnes() const
+    {
+        int tonnes = 0;
+
+        for (const Mission& mission : missions)
+        {
+            if (mission.type == MissionType::Delivery)
+                tonnes += mission.cargoTonnes;
+        }
+
+        return tonnes;
+    }
+
+    /** Free hold space in tonnes: what the trade goods and the mission cargo leave. */
     int cargoRoom() const
     {
-        return std::max(0, cargoCapacity() - cargo.total());
+        return std::max(0, cargoCapacity() - cargo.total() - missionCargoTonnes());
     }
 };
 

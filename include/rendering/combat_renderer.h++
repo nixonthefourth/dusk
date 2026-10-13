@@ -242,8 +242,8 @@ private:
     {
         for (const combat::HitFlash& flash : frame.world.combat.flashes)
         {
-            const NpcShip& npc = frame.world.npcShips[static_cast<std::size_t>(flash.ship)];
-            const auto centre = toScreen(frame, npc.ship.position);
+            const Ship& hitShip = flash.ship == combat::playerShip ? frame.world.playerShip : frame.world.npcShips[static_cast<std::size_t>(flash.ship)].ship;
+            const auto centre = toScreen(frame, hitShip.position);
 
             if (!centre)
                 continue;
@@ -252,8 +252,8 @@ private:
             const float radius = pixels(frame, combat::npcHitRadius, centre->second, 6.f, 260.f);
             ring(target, centre->first, radius, 1.5f, style::withAlpha(style::shieldFlash, alphaOf(fade, 170)));
 
-            if (const auto spot = toScreen(frame, npc.ship.position + flash.offset))
-                disc(target, spot->first, std::max(2.f, radius * 0.18f) * (0.6f + 0.4f * fade), style::withAlpha(style::shieldFlash, alphaOf(fade, 200)));
+            if (const auto spot = toScreen(frame, hitShip.position + flash.offset))
+                disc(target, spot->first, std::clamp(radius * 0.07f, 2.f, 9.f) * (0.6f + 0.4f * fade), style::withAlpha(style::shieldFlash, alphaOf(fade, 200)));
         }
     }
 

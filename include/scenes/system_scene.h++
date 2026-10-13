@@ -19,6 +19,8 @@
 #include "ui/menu_button.h++"
 #include "systems/docking_control.h++"
 #include "systems/combat.h++"
+#include "systems/missions.h++"
+#include "systems/piracy.h++"
 #include "systems/mining.h++"
 #include "systems/docking_fees.h++"
 #include "systems/save_game.h++"
@@ -314,7 +316,7 @@ public:
     /** The player flies the ship only while the docking computer is idle and no map has the keyboard. */
     bool acceptsShipInput() const override
     {
-        return !docking::controlsShip(docking_) && mapView_ == MapView::None && !inHyperspaceSequence();
+        return !docking::controlsShip(docking_) && mapView_ == MapView::None && !inHyperspaceSequence() && !world_.combat.player.destroyed;
     }
 
     /**
@@ -325,6 +327,7 @@ public:
     {
         const bool autopilot = docking::controlsShip(docking_);
         const DockingPhase phaseBefore = docking_.phase;
+        insuranceClaimed_ = false;
 
         // The station's side first (the permit, and what it means for the ship this step), then the
         // world, then what the ship did: any hull contact, the computer, and a manual docking.
@@ -334,9 +337,10 @@ public:
         docking::update(docking_, world_, dt);
         checkManualDocking();
         updateHardpoints(dt);
+        updateThreats(dt);
 
-        // A docking has just completed, by hand or by computer.
-        if (phaseBefore != DockingPhase::Docked && docking_.phase == DockingPhase::Docked)
+        // A docking has just completed, by hand or by computer (an insurance replacement arriving docked doesn't count).
+        if (phaseBefore != DockingPhase::Docked && docking_.phase == DockingPhase::Docked && !insuranceClaimed_)
         {
             chargeDockingFee();
             openStationMenu();
@@ -368,7 +372,7 @@ public:
                 jumpBlockedReason(),
                 jumpRangeLightYears(world_.playerShip),
                 world_.playerShip.hyperspaceFuelPerLightYear,
-                ChartIntel{commander_.hasPoliticalScanner, commander_.hasEconomicsScanner}
+                ChartIntel{commander_.hasPoliticalScanner, commander_.hasEconomicsScanner, missionSystems()}
             );
             return;
         }
@@ -389,6 +393,7 @@ public:
         target.draw(hintText_); // a short column under the system name, clear of the heading tape
         drawDockingStatus(target);
         drawHardpointReadout(target);
+        drawMissionTracker(target);
 
         if (hyperspace_.phase == HyperspacePhase::Countdown)
             drawHyperspaceText(target);
@@ -412,6 +417,19 @@ private:
 
     /** Whether the fire key was held last step, so a refusal is announced once per press. */
     bool fireWasHeld_ = false;
+
+    /** Decides when pirates turn up in this system. */
+    piracy::PirateDirector pirates_;
+
+    /** Seconds left before the insurance claim, once the ship has been destroyed (negative while it's whole). */
+    float deathTimer_ = -1.f;
+
+    /** Set when an insurance claim has just put a new ship in the dock this step: that isn't a docking, so no fee. */
+    bool insuranceClaimed_ = false;
+
+    /** This station's mission board, as last generated, and the countdown to the next deadline check. */
+    std::vector<Mission> missionBoard_;
+    float missionCheckTimer_ = 0.f;
     sf::Text hintText_;
     sf::Text messageText_;
 
@@ -491,6 +509,11 @@ private:
         docking_ = DockingComputer();
         dockingControl_ = {};
         launchPending_ = false;
+
+        // The ship's hull carries across; shields arrive charged. Pirates may turn up after a grace period.
+        world_.combat.player.hull = std::clamp(commander_.hull, 1.f, combat::playerMaxHull);
+        piracy::resetDirector(pirates_, deriveSystemSeed(galaxy_.seed, systemIndex) ^ static_cast<std::uint32_t>(trade_.time()), info.economyTier);
+        deathTimer_ = -1.f;
         stationMenuOpen_ = false;
         wasCruising_ = false;
         cruiseEngageBurst_ = 0.f;
@@ -627,6 +650,7 @@ private:
     {
         stationMenuOpen_ = true;
         stationMenu_.open();
+        refreshMissionBoard();
     }
 
     /** Gathers what the station screen shows: credits, fuel, mass, range, and the price quotes. */
@@ -677,6 +701,25 @@ private:
         for (const ShipUpgrade& upgrade : upgradeCatalogue())
             view.upgrades.push_back({upgrade.name, upgrade.description, upgrade.price, offerFor(upgrade, commander_)});
 
+        // Missions: yours first, then the board.
+        const double now = trade_.time();
+        view.activeMissions = static_cast<int>(commander_.missions.size());
+        view.missionLimit = missions::maxActiveMissions;
+        char reward[32];
+
+        for (const Mission& mission : commander_.missions)
+        {
+            std::snprintf(reward, sizeof(reward), "%.0f CR", mission.reward);
+            view.missions.push_back({missions::missionTitle(mission, galaxy_), missions::missionProgress(mission, galaxy_, commander_), reward, missions::timeLeft(mission.deadline, now), true, ""});
+        }
+
+        for (const Mission& mission : missionBoard_)
+        {
+            std::snprintf(reward, sizeof(reward), "%.0f CR", mission.reward);
+            const char* blocked = missions::acceptBlockReason(commander_, mission);
+            view.missions.push_back({missions::missionTitle(mission, galaxy_), missions::missionDescription(mission, galaxy_), reward, missions::timeLeft(mission.deadline, now), false, blocked ? blocked : ""});
+        }
+
         view.saveSlot = saveSlot_;
         view.hasSave = slotSummary_.has_value();
 
@@ -697,6 +740,7 @@ private:
         const float price = fuelPricePerTonne(galaxy_.systems[static_cast<std::size_t>(currentSystemIndex_)]);
         Ship& ship = world_.playerShip;
 
+        stationMenu_.setMissionRows(static_cast<int>(commander_.missions.size() + missionBoard_.size()), static_cast<int>(commander_.missions.size()));
         const StationMenuAction action = stationMenu_.handleEvent(event, window);
 
         switch (action)
@@ -748,6 +792,14 @@ private:
                 installSelectedUpgrade();
                 break;
 
+            case StationMenuAction::AcceptMission:
+                acceptSelectedMission();
+                break;
+
+            case StationMenuAction::AbandonMission:
+                abandonSelectedMission();
+                break;
+
             case StationMenuAction::SaveGame:
                 saveToSlot(true);
                 break;
@@ -791,35 +843,309 @@ private:
      */
     void chargeDockingFee()
     {
+        std::vector<std::string> gains;
+        std::vector<std::string> costs;
+        char part[96];
+
         const DockingCharge charge = chargeForDocking(commander_);
-        char message[96];
+        std::snprintf(part, sizeof(part), charge.paid + 0.5 >= charge.due ? "DOCKING FEE -%.0f CR" : "DOCKING FEE -%.0f CR (ALL YOU HAD)", charge.paid);
+        costs.push_back(part);
 
-        if (charge.paid + 0.5 >= charge.due)
-            std::snprintf(message, sizeof(message), "SPACE UNION DOCKING FEE  -%.0f CR", charge.paid);
-        else
-            std::snprintf(message, sizeof(message), "SPACE UNION DOCKING FEE  -%.0f CR (ALL YOU HAD)", charge.paid);
+        // Missions finished here, and bounties for pirates destroyed.
+        const missions::Settlement settlement = missions::completeMissionsAt(commander_, currentSystemIndex_);
 
-        // The station's armoury tops the rocket launcher up, as far as spendable credits go.
+        if (settlement.completed > 0)
+        {
+            std::snprintf(part, sizeof(part), "%d MISSION%s COMPLETE +%.0f CR", settlement.completed, settlement.completed == 1 ? "" : "S", settlement.paid);
+            gains.push_back(part);
+        }
+
+        if (commander_.bountyVouchers > 0.0)
+        {
+            std::snprintf(part, sizeof(part), "BOUNTIES +%.0f CR", commander_.bountyVouchers);
+            gains.push_back(part);
+            commander_.credits += commander_.bountyVouchers;
+            commander_.bountyVouchers = 0.0;
+        }
+
+        // The armoury tops up the rocket launcher, as far as spendable credits go.
         const int missing = commander_.hasRocketLauncher ? rocketMagazine - commander_.rockets : 0;
 
         if (missing > 0)
         {
-            const int affordable = static_cast<int>(spendableCredits(commander_) / combat::rocketPrice);
-            const int bought = std::clamp(affordable, 0, missing);
+            const int bought = std::clamp(static_cast<int>(spendableCredits(commander_) / combat::rocketPrice), 0, missing);
             commander_.rockets += bought;
             commander_.credits -= bought * combat::rocketPrice;
-            char rearm[64];
-
             if (bought == missing)
-                std::snprintf(rearm, sizeof(rearm), "   REARMED %d ROCKETS  -%.0f CR", bought, bought * combat::rocketPrice);
+                std::snprintf(part, sizeof(part), "REARMED %d ROCKETS -%.0f CR", bought, bought * combat::rocketPrice);
             else
-                std::snprintf(rearm, sizeof(rearm), "   REARMED %d OF %d ROCKETS  -%.0f CR", bought, missing, bought * combat::rocketPrice);
+                std::snprintf(part, sizeof(part), "REARMED %d OF %d ROCKETS -%.0f CR", bought, missing, bought * combat::rocketPrice);
 
-            std::strncat(message, rearm, sizeof(message) - std::strlen(message) - 1);
+            costs.push_back(part);
         }
 
-        docking::showMessage(docking_, message, 4.f);
+        // The yard repairs the hull, as far as spendable credits go; shields come back on their own.
+        const float damage = combat::playerMaxHull - commander_.hull;
+
+        if (damage > 0.5f)
+        {
+            const float affordable = static_cast<float>(spendableCredits(commander_) / hullRepairPrice);
+            const float repaired = std::clamp(affordable, 0.f, damage);
+            commander_.hull += repaired;
+            commander_.credits -= repaired * hullRepairPrice;
+            std::snprintf(part, sizeof(part), repaired + 0.5f >= damage ? "HULL REPAIRED -%.0f CR" : "HULL PARTLY REPAIRED -%.0f CR", repaired * hullRepairPrice);
+            costs.push_back(part);
+        }
+
+        world_.combat.player.hull = commander_.hull;
+        world_.combat.player.shields = combat::playerMaxShields;
+        commander_.lastDockedSystem = currentSystemIndex_;
+        syncShipLoad();
+
+        // Two lines: what was earned, then what it cost.
+        const auto join = [](const std::vector<std::string>& parts)
+        {
+            std::string line;
+
+            for (const std::string& piece : parts)
+                line += (line.empty() ? "" : "     ") + piece;
+
+            return line;
+        };
+
+        const std::string text = gains.empty() ? join(costs) : join(gains) + "\n" + join(costs);
+        docking::showMessage(docking_, text, gains.empty() ? 4.f : 7.f);
     }
+
+    /** Hull repairs at a station: credits per hull point. */
+    static constexpr double hullRepairPrice = 3.0;
+
+    /** What an insurance claim costs when the ship is destroyed. */
+    static constexpr double insuranceFee = 300.0;
+
+    /** Regenerates this station's mission board (it changes with the galaxy clock and as missions are taken) and tells the menu its size. */
+    void refreshMissionBoard()
+    {
+        missions::pruneTaken(commander_, galaxy_, trade_.time());
+        missionBoard_ = missions::missionBoard(galaxy_, currentSystemIndex_, trade_.time(), commander_.takenMissions);
+        stationMenu_.setMissionRows(static_cast<int>(commander_.missions.size() + missionBoard_.size()), static_cast<int>(commander_.missions.size()));
+    }
+
+    /** Takes the highlighted offer on the board, if allowed. */
+    void acceptSelectedMission()
+    {
+        const int row = stationMenu_.selectedMission() - static_cast<int>(commander_.missions.size());
+
+        if (row < 0 || row >= static_cast<int>(missionBoard_.size()))
+            return;
+
+        const Mission mission = missionBoard_[static_cast<std::size_t>(row)];
+
+        if (const char* blocked = missions::acceptBlockReason(commander_, mission))
+        {
+            docking::showMessage(docking_, blocked, 2.5f);
+            return;
+        }
+
+        missions::acceptMission(commander_, mission);
+        syncShipLoad();
+        refreshMissionBoard();
+        docking::showMessage(docking_, "MISSION ACCEPTED: " + missions::missionTitle(mission, galaxy_), 3.f);
+    }
+
+    /** Gives up the highlighted active mission (the menu has already asked for a second press). */
+    void abandonSelectedMission()
+    {
+        const int row = stationMenu_.selectedMission();
+
+        if (row < 0 || row >= static_cast<int>(commander_.missions.size()))
+            return;
+
+        missions::abandonMission(commander_, static_cast<std::size_t>(row));
+        syncShipLoad();
+        refreshMissionBoard();
+        docking::showMessage(docking_, "MISSION ABANDONED", 2.5f);
+    }
+
+    /** The systems the active missions point at, for the galactic chart to mark. */
+    std::vector<int> missionSystems() const
+    {
+        std::vector<int> systems;
+
+        for (const Mission& mission : commander_.missions)
+        {
+            // A finished bounty is collected at any station, so it points nowhere in particular.
+            if (!(mission.type == MissionType::Bounty && mission.piratesLeft <= 0))
+                systems.push_back(mission.destination);
+        }
+
+        return systems;
+    }
+
+    /** Tells the pilot about something that happened in a fight. */
+    void announce(const combat::CombatEvent& event)
+    {
+        char text[96];
+
+        switch (event.kind)
+        {
+            case combat::CombatEventKind::TargetDestroyed: docking::showMessage(docking_, "TARGET DESTROYED", 2.5f); break;
+            case combat::CombatEventKind::ShipDestroyed: docking::showMessage(docking_, "SHIP DESTROYED", 2.f); break;
+            case combat::CombatEventKind::ShieldsDown: docking::showMessage(docking_, "SHIELDS DOWN: IT'S RUNNING", 2.f); break;
+            case combat::CombatEventKind::OutOfRockets: docking::showMessage(docking_, "OUT OF ROCKETS: REARM AT A STATION", 2.5f); break;
+
+            case combat::CombatEventKind::PirateDestroyed:
+                std::snprintf(text, sizeof(text), "PIRATE DESTROYED: BOUNTY +%.0f CR (PAID AT A STATION)", combat::pirateBounty);
+                docking::showMessage(docking_, text, 3.f);
+                break;
+
+            case combat::CombatEventKind::PiratesArrived:
+                std::snprintf(text, sizeof(text), event.ship == 1 ? "PIRATE! A SHIP IS CLOSING IN" : "PIRATES! %d SHIPS CLOSING IN", event.ship);
+                docking::showMessage(docking_, text, 3.5f);
+                break;
+
+            case combat::CombatEventKind::BountyTargetsSighted: docking::showMessage(docking_, "BOUNTY TARGETS SIGHTED", 3.5f); break;
+            case combat::CombatEventKind::PirateFled: docking::showMessage(docking_, "THE PIRATE GOT AWAY", 2.f); break;
+            case combat::CombatEventKind::PlayerDestroyed: docking::showMessage(docking_, "YOUR SHIP HAS BEEN DESTROYED", 3.f); break;
+            case combat::CombatEventKind::PlayerHit: break;
+        }
+    }
+
+    /**
+     * The dangers of the step: bounties and bounty kills from the fighting are recorded, missions
+     * past their deadline fail, the hull is carried into the commander, pirates are flown and may
+     * turn up, and a destroyed ship is replaced (after a moment) through the insurance.
+     */
+    void updateThreats(float dt)
+    {
+        Ship& ship = world_.playerShip;
+
+        if (world_.combat.bountyEarned > 0.0)
+        {
+            commander_.bountyVouchers += world_.combat.bountyEarned;
+            world_.combat.bountyEarned = 0.0;
+        }
+
+        for (const std::uint64_t id : world_.combat.missionKills)
+            missions::recordBountyKill(commander_, id);
+
+        world_.combat.missionKills.clear();
+        commander_.hull = world_.combat.player.hull;
+
+        // Deadlines, once a second (and the board, while it's on screen: it refreshes on the half hour).
+        missionCheckTimer_ -= dt;
+
+        if (missionCheckTimer_ <= 0.f)
+        {
+            missionCheckTimer_ = 1.f;
+
+            if (missions::failExpired(commander_, trade_.time()) > 0)
+            {
+                docking::showMessage(docking_, "MISSION FAILED: THE DEADLINE HAS PASSED", 3.f);
+                syncShipLoad();
+            }
+
+            if (stationMenuOpen_)
+                refreshMissionBoard();
+        }
+
+        // Pirates: they turn up only out in open space, and the station keeps them off.
+        const bool nearStation = world_.stationActive && length(ship.position - world_.station.position) < piracy::stationSafeRadius + 2000.f;
+        const bool canSpawn = docking_.phase == DockingPhase::Idle && !inHyperspaceSequence() && !ship.cruiseEngaged && ship.cruiseCharge < 0.f && !world_.combat.player.destroyed && !nearStation;
+
+        std::vector<const Mission*> bounties;
+
+        for (const Mission& mission : commander_.missions)
+        {
+            if (mission.type == MissionType::Bounty && mission.destination == currentSystemIndex_ && mission.piratesLeft > 0)
+                bounties.push_back(&mission);
+        }
+
+        std::vector<combat::CombatEvent> events;
+        piracy::directPirates(pirates_, world_, galaxy_.systems[static_cast<std::size_t>(currentSystemIndex_)].economyTier, bounties, canSpawn, dt, events);
+        piracy::updatePirates(world_, dt, events);
+
+        for (const combat::CombatEvent& event : events)
+            announce(event);
+
+        // Destroyed: a few seconds of wreckage, then the insurance replaces the ship.
+        if (world_.combat.player.destroyed)
+        {
+            if (deathTimer_ < 0.f)
+                deathTimer_ = 3.f;
+
+            deathTimer_ -= dt;
+
+            if (deathTimer_ <= 0.f)
+                claimInsurance();
+        }
+    }
+
+    /**
+     * Replaces a destroyed ship. The insurance charges its fee (from credits above the docking
+     * reserve), and the new ship waits docked at this system's station, or, if it has none, at
+     * the station last docked at. Upgrades are covered; cargo, mining hatch contents, courier data
+     * and delivery cargo are not (those missions fail). The hull is whole again.
+     */
+    void claimInsurance()
+    {
+        const double fee = std::min(insuranceFee, spendableCredits(commander_));
+        commander_.credits -= fee;
+        commander_.cargo = CargoHold{};
+        commander_.hatch = {};
+        const int failed = missions::failCarriedMissions(commander_);
+        commander_.hull = combat::playerMaxHull;
+        deathTimer_ = -1.f;
+
+        int system = currentSystemIndex_;
+
+        if (galaxy_.systems[static_cast<std::size_t>(system)].stationCount <= 0 && commander_.lastDockedSystem >= 0)
+            system = commander_.lastDockedSystem;
+
+        enterSystem(system);
+        syncShipLoad();
+        insuranceClaimed_ = true;
+        commander_.lastDockedSystem = system;
+
+        if (docking::dockImmediately(docking_, world_))
+            openStationMenu();
+
+        char text[128];
+
+        if (failed > 0)
+            std::snprintf(text, sizeof(text), "INSURANCE: A NEW SHIP -%.0f CR\nCARGO LOST, %d MISSION%s FAILED", fee, failed, failed == 1 ? "" : "S");
+        else
+            std::snprintf(text, sizeof(text), "INSURANCE: A NEW SHIP -%.0f CR\nCARGO LOST", fee);
+
+        docking::showMessage(docking_, text, 7.f);
+    }
+
+    /** The mission tracker, top right: how many missions are on, and the one due soonest. */
+    void drawMissionTracker(sf::RenderTarget& target)
+    {
+        if (commander_.missions.empty() || stationMenuOpen_)
+            return;
+
+        const Mission* soonest = &commander_.missions.front();
+
+        for (const Mission& mission : commander_.missions)
+        {
+            if (mission.deadline < soonest->deadline)
+                soonest = &mission;
+        }
+
+        char text[200];
+        std::snprintf(text, sizeof(text), "MISSIONS %d   NEXT: %s   %s", static_cast<int>(commander_.missions.size()),
+                      missions::missionProgress(*soonest, galaxy_, commander_).c_str(), missions::timeLeft(soonest->deadline, trade_.time()).c_str());
+
+        hardpointDetailText_.setString(text);
+        hardpointDetailText_.setFillColor(style::profit);
+        const sf::FloatRect bounds = hardpointDetailText_.getLocalBounds();
+        hardpointDetailText_.setOrigin({bounds.position.x + bounds.size.x, bounds.position.y});
+        hardpointDetailText_.setPosition({static_cast<float>(target.getSize().x) - 70.f, 40.f});
+        target.draw(hardpointDetailText_);
+    }
+
 
     /**
      * Launches, or, if another ship is in the slot (entering or leaving), queues the launch. A queued
@@ -921,15 +1247,7 @@ private:
         combat::updateCombat(world_, dt, events);
 
         for (const combat::CombatEvent& event : events)
-        {
-            switch (event.kind)
-            {
-                case combat::CombatEventKind::TargetDestroyed: docking::showMessage(docking_, "TARGET DESTROYED", 2.5f); break;
-                case combat::CombatEventKind::ShipDestroyed: docking::showMessage(docking_, "SHIP DESTROYED", 2.f); break;
-                case combat::CombatEventKind::ShieldsDown: docking::showMessage(docking_, "SHIELDS DOWN: IT'S RUNNING", 2.f); break;
-                case combat::CombatEventKind::OutOfRockets: docking::showMessage(docking_, "OUT OF ROCKETS: REARM AT A STATION", 2.5f); break;
-            }
-        }
+            announce(event);
 
         if (world_.target.type == TargetType::Ship && !hasValidTarget(world_))
             world_.target = {};
@@ -1264,7 +1582,7 @@ private:
     void syncShipLoad()
     {
         world_.playerShip.fuelCapacity = commander_.fuelCapacity();
-        world_.playerShip.cargoMass = static_cast<float>(commander_.cargo.total());
+        world_.playerShip.cargoMass = static_cast<float>(commander_.cargo.total() + commander_.missionCargoTonnes());
         world_.playerShip.hatchMass = commander_.hatch.total();
         world_.playerShip.cargoCapacity = static_cast<float>(commander_.cargoCapacity());
     }
@@ -1378,6 +1696,13 @@ private:
         save.rocketLauncher = commander_.hasRocketLauncher;
         save.turretLaser = commander_.hasTurretLaser;
         save.rockets = commander_.rockets;
+        save.hull = commander_.hull;
+        save.bountyVouchers = commander_.bountyVouchers;
+        save.lastDockedSystem = commander_.lastDockedSystem;
+        save.takenMissions = commander_.takenMissions;
+
+        for (const Mission& mission : commander_.missions)
+            save.missions.push_back(missions::encodeMission(mission));
 
         for (MiningResource resource : allMiningResources)
         {
@@ -1436,6 +1761,21 @@ private:
         commander_.hasTurretLaser = save.turretLaser;
         commander_.rockets = std::clamp(save.rockets, 0, save.rocketLauncher ? rocketMagazine : 0);
         commander_.selectedHardpoint = save.hardpoint;
+        commander_.hull = std::clamp(save.hull, 1.f, combat::playerMaxHull);
+        commander_.bountyVouchers = std::max(0.0, save.bountyVouchers);
+        commander_.lastDockedSystem = save.lastDockedSystem;
+        commander_.takenMissions = save.takenMissions;
+        commander_.missions.clear();
+
+        // Missions that don't read back (or point at systems that don't exist) are dropped rather than trusted.
+        for (const std::string& line : save.missions)
+        {
+            const auto mission = missions::decodeMission(line);
+            const int systems = static_cast<int>(galaxy_.systems.size());
+
+            if (mission && mission->origin >= 0 && mission->origin < systems && mission->destination >= 0 && mission->destination < systems)
+                commander_.missions.push_back(*mission);
+        }
         commander_.hatch = {};
 
         // Unknown resources (from a newer version) are skipped, and the hatch never loads over capacity.

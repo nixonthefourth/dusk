@@ -90,13 +90,21 @@ namespace combat {
     /** Seconds a ship whose shields have failed runs before it warps out. */
     constexpr float fleeSeconds = 3.5f;
 
+    /** The player's ship: how big a target it is, and its shield recharge (seconds of quiet first, then points a second). */
+    constexpr float playerHitRadius = 190.f;
+    constexpr float playerShieldDelay = 4.f;
+    constexpr float playerShieldRate = 5.f;
+
+    /** Bounty paid for each pirate destroyed (collected on docking). */
+    constexpr double pirateBounty = 150.0;
+
     /** Upper bound on live particles, so a long fight can't grow them without limit. */
     constexpr std::size_t particleLimit = 2400;
 
     /* ---- Events ------------------------------------------------------------------------------ */
 
     /** Something worth telling the pilot. */
-    enum class CombatEventKind { ShipDestroyed, TargetDestroyed, ShieldsDown, OutOfRockets };
+    enum class CombatEventKind { ShipDestroyed, TargetDestroyed, ShieldsDown, OutOfRockets, PirateDestroyed, PlayerHit, PlayerDestroyed, PiratesArrived, PirateFled, BountyTargetsSighted };
 
     /** An event, and the NPC ship it concerns (or -1). */
     struct CombatEvent {
@@ -251,12 +259,12 @@ namespace combat {
      * The first thing a ray from `origin` along unit `direction` hits within `range`: a visible NPC
      * ship, a rock (at its mined size), or the station's hull. The player's own ship is never hit.
      */
-    inline WeaponHit castWeaponRay(const World& world, const Vec3& origin, const Vec3& direction, float range)
+    inline WeaponHit castWeaponRay(const World& world, const Vec3& origin, const Vec3& direction, float range, bool includeShips = true)
     {
         WeaponHit best;
         float bestDistance = range;
 
-        for (int i = 0; i < static_cast<int>(world.npcShips.size()); ++i)
+        for (int i = 0; includeShips && i < static_cast<int>(world.npcShips.size()); ++i)
         {
             const NpcShip& npc = world.npcShips[static_cast<std::size_t>(i)];
 
@@ -325,7 +333,23 @@ namespace combat {
         npc.fleeing = false;
 
         const bool wasTarget = world.target.type == TargetType::Ship && world.target.shipIndex == index;
-        events.push_back({wasTarget ? CombatEventKind::TargetDestroyed : CombatEventKind::ShipDestroyed, index});
+
+        // A pirate leaves play for good, earns its bounty, and counts towards its bounty mission.
+        if (npc.hostile)
+        {
+            npc.retired = true;
+            npc.wakeDelay = 1e9f;
+            world.combat.bountyEarned += pirateBounty;
+
+            if (npc.missionId != 0)
+                world.combat.missionKills.push_back(npc.missionId);
+
+            events.push_back({CombatEventKind::PirateDestroyed, index});
+        }
+        else
+        {
+            events.push_back({wasTarget ? CombatEventKind::TargetDestroyed : CombatEventKind::ShipDestroyed, index});
+        }
 
         if (wasTarget)
             world.target = {};
@@ -372,8 +396,8 @@ namespace combat {
         {
             events.push_back({CombatEventKind::ShieldsDown, index});
 
-            // It runs for it, unless it is already committed to the station's slot.
-            if (!npc.fleeing && (npc.state == NpcState::Roaming || npc.state == NpcState::HeadingToStation || npc.state == NpcState::WarpingOut))
+            // It runs for it, unless it is already committed to the station's slot. (Pirates decide for themselves: see piracy.h++.)
+            if (!npc.hostile && !npc.fleeing && (npc.state == NpcState::Roaming || npc.state == NpcState::HeadingToStation || npc.state == NpcState::WarpingOut))
             {
                 npc.fleeing = true;
                 npc.state = NpcState::WarpingOut;
@@ -641,6 +665,44 @@ namespace combat {
         state.turretOnTarget = !hasTarget || dot(state.turretAim, desired) >= turretOnTargetCos;
     }
 
+    /**
+     * Deals `amount` damage to the player's ship at world point `point`: shields first (with a
+     * flash of the shield bubble), then hull. At zero hull the ship is destroyed: it explodes, and
+     * the scene takes over (insurance, see SystemScene).
+     */
+    inline void damagePlayer(World& world, float amount, const Vec3& point, std::vector<CombatEvent>& events)
+    {
+        PlayerHealth& player = world.combat.player;
+
+        if (player.destroyed || amount <= 0.f)
+            return;
+
+        const Ship& ship = world.playerShip;
+        player.sinceHit = 0.f;
+        const float absorbed = std::min(player.shields, amount);
+        player.shields -= absorbed;
+        player.hull -= amount - absorbed;
+
+        if (absorbed > 0.f)
+            world.combat.flashes.push_back({playerShip, point - ship.position, 0.f, true});
+
+        if (amount - absorbed > 0.f)
+        {
+            player.sinceHullHit = 0.f;
+            spawnSparks(world.combat, point, normalized(point - ship.position), ship.velocity, 5, 260.f);
+        }
+
+        events.push_back({CombatEventKind::PlayerHit, -1});
+
+        if (player.hull <= 0.f)
+        {
+            player.hull = 0.f;
+            player.destroyed = true;
+            spawnExplosion(world.combat, ship.position, ship.velocity, 460.f, 46);
+            events.push_back({CombatEventKind::PlayerDestroyed, -1});
+        }
+    }
+
     /** Moves the bolts one step; a bolt that crosses something on the way hits it. */
     inline void updateBolts(World& world, float dt, std::vector<CombatEvent>& events)
     {
@@ -658,7 +720,29 @@ namespace combat {
             if (travelled < 1e-3f)
                 continue;
 
-            const WeaponHit hit = castWeaponRay(world, start, travel / travelled, travelled);
+            const Vec3 direction = travel / travelled;
+
+            // A pirate's bolt hits the player (or a rock, or the station), never another ship.
+            if (bolt.hostile)
+            {
+                const WeaponHit scenery = castWeaponRay(world, start, direction, travelled, false);
+                const auto playerHit = world.combat.player.destroyed ? std::nullopt : mining::raySphere(start, direction, world.playerShip.position, playerHitRadius, travelled);
+
+                if (playerHit && (scenery.kind == WeaponHit::Kind::None || *playerHit <= scenery.distance))
+                {
+                    damagePlayer(world, bolt.damage, start + direction * *playerHit, events);
+                    bolt.life = -1.f;
+                }
+                else if (scenery.kind != WeaponHit::Kind::None)
+                {
+                    spawnSparks(state, scenery.point, scenery.normal, hitVelocity(world, scenery), 4, 240.f);
+                    bolt.life = -1.f;
+                }
+
+                continue;
+            }
+
+            const WeaponHit hit = castWeaponRay(world, start, direction, travelled);
 
             if (hit.kind == WeaponHit::Kind::None)
                 continue;
@@ -827,8 +911,22 @@ namespace combat {
 
         std::erase_if(state.flashes, [&world](const HitFlash& flash)
         {
-            return flash.age >= 0.35f || flash.ship < 0 || flash.ship >= static_cast<int>(world.npcShips.size()) || !world.npcShips[static_cast<std::size_t>(flash.ship)].isVisible();
+            if (flash.age >= 0.35f)
+                return true;
+
+            if (flash.ship == playerShip)
+                return world.combat.player.destroyed;
+
+            return flash.ship < 0 || flash.ship >= static_cast<int>(world.npcShips.size()) || !world.npcShips[static_cast<std::size_t>(flash.ship)].isVisible();
         });
+
+        // The player's shields come back after a pause without being hit.
+        PlayerHealth& player = state.player;
+        player.sinceHit += dt;
+        player.sinceHullHit += dt;
+
+        if (!player.destroyed && player.sinceHit >= playerShieldDelay && player.shields < playerMaxShields)
+            player.shields = std::min(playerMaxShields, player.shields + playerShieldRate * dt);
 
         // Shields come back after a pause without being hit.
         for (NpcShip& npc : world.npcShips)

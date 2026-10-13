@@ -289,11 +289,14 @@ inline void respawnNpc(
     npc.stateTimer = 0.f;
     npc.ship.roll = 0.f;
 
-    // A new arrival: undamaged.
+    // A new arrival: undamaged, and an ordinary ship (a pirate's slot is only reused by the piracy code).
     npc.shields = npcMaxShields;
     npc.hull = npcMaxHull;
     npc.sinceHit = 1e9f;
     npc.fleeing = false;
+    npc.hostile = false;
+    npc.fearless = false;
+    npc.missionId = 0;
 
     // Some arrivals come out of the station instead, so it's visibly busy.
     std::uniform_real_distribution<float> chance(0.f, 1.f);
@@ -324,6 +327,10 @@ inline void updateNpcShip(
     const Vec3& gravity
 )
 {
+    // Pirates are flown by the piracy code (systems/piracy.h++), which also moves them.
+    if (npc.state == NpcState::Hostile)
+        return;
+
     npc.stateTimer += dt;
 
     if (npc.state == NpcState::Inactive)

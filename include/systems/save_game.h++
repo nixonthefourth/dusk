@@ -26,7 +26,7 @@
 constexpr int saveSlotCount = 3;
 
 /** Bumped whenever the save format changes; older files are still read (unknown keys are ignored, missing ones default). */
-constexpr int saveFormatVersion = 6;
+constexpr int saveFormatVersion = 7;
 
 /** Longest commander name allowed, in characters. */
 constexpr std::size_t maxCommanderNameLength = 16;
@@ -93,6 +93,15 @@ struct SaveGame {
     bool rocketLauncher = false;
     bool turretLaser = false;
     int rockets = 0;
+
+    /** Missions: active ones (each encoded by missions::encodeMission), recently taken ids, and unpaid bounty. */
+    std::vector<std::string> missions;
+    std::vector<std::uint64_t> takenMissions;
+    double bountyVouchers = 0.0;
+
+    /** The hull (out of 100), and the last system docked in (-1 for none). */
+    float hull = 100.f;
+    int lastDockedSystem = -1;
     std::vector<std::pair<std::string, float>> hatch;
 
     /**
@@ -261,6 +270,15 @@ inline std::string serialiseSave(const SaveGame& save)
     out << "rocketLauncher=" << (save.rocketLauncher ? 1 : 0) << '\n';
     out << "turretLaser=" << (save.turretLaser ? 1 : 0) << '\n';
     out << "rockets=" << save.rockets << '\n';
+    out << "hull=" << save.hull << '\n';
+    out << "bounty=" << save.bountyVouchers << '\n';
+    out << "lastDocked=" << save.lastDockedSystem << '\n';
+
+    for (const std::uint64_t id : save.takenMissions)
+        out << "taken=" << id << '\n';
+
+    for (const std::string& mission : save.missions)
+        out << "mission=" << mission << '\n';
 
     for (const auto& [resource, tonnes] : save.hatch)
     {
@@ -381,6 +399,16 @@ inline std::optional<SaveGame> parseSave(const std::string& text)
             save.turretLaser = std::atoi(value.c_str()) != 0;
         else if (key == "rockets")
             save.rockets = std::max(0, std::atoi(value.c_str()));
+        else if (key == "hull")
+            save.hull = std::clamp(static_cast<float>(std::atof(value.c_str())), 1.f, 100.f);
+        else if (key == "bounty")
+            save.bountyVouchers = std::max(0.0, std::atof(value.c_str()));
+        else if (key == "lastDocked")
+            save.lastDockedSystem = std::atoi(value.c_str());
+        else if (key == "taken")
+            save.takenMissions.push_back(std::strtoull(value.c_str(), nullptr, 10));
+        else if (key == "mission")
+            save.missions.push_back(value);
         else if (key == "hatch")
         {
             const auto fields = splitFields(value);

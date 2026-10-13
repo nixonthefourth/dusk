@@ -23,6 +23,9 @@
 struct ChartIntel {
     bool development = false;   // political scanner: Poor / Developing / Progressive
     bool exports = false;       // economics scanner: the goods a system exports
+
+    /** Systems the commander's active missions point at: marked with a ring. */
+    std::vector<int> missionSystems;
 };
 
 /** What the scene should do after the chart has handled an event. */
@@ -494,6 +497,19 @@ private:
             const bool reachable = galacticDistance(galaxy.systems[static_cast<std::size_t>(currentIndex)], info) <= jumpRangeLY_;
             dot.setFillColor(reachable ? systemColor(info) : style::withAlpha(systemColor(info), 70));
             target.draw(dot);
+
+            // Mission destinations get a ring, so they can be found on the chart.
+            if (std::find(intel_.missionSystems.begin(), intel_.missionSystems.end(), static_cast<int>(index)) != intel_.missionSystems.end())
+            {
+                const float ringRadius = dotRadius + 5.f;
+                sf::CircleShape ring(ringRadius, 18);
+                ring.setOrigin({ringRadius, ringRadius});
+                ring.setPosition(screen);
+                ring.setFillColor(sf::Color::Transparent);
+                ring.setOutlineColor(style::missionMarker);
+                ring.setOutlineThickness(1.5f);
+                target.draw(ring);
+            }
 
             if (showNames && screen.x < mapRight - 60.f)
                 drawLabel(target, font, info.name, {screen.x + 6.f, screen.y - 8.f}, 14, style::textDim);

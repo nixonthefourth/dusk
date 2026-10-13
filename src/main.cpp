@@ -180,7 +180,9 @@ int main() {
         if (renderWorld.stationActive)
             stationRenderer.draw(window, renderWorld.station, camera);
 
-        shipRenderer.draw(window, renderWorld.playerShip, camera);
+        // A destroyed ship is gone (its explosion is drawn with the combat effects).
+        if (!renderWorld.combat.player.destroyed)
+            shipRenderer.draw(window, renderWorld.playerShip, camera);
 
         for (const NpcShip& npc : renderWorld.npcShips)
         {

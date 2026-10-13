@@ -40,7 +40,7 @@ inline const std::array<StationService, 7> stationServices =
     {StationPage::Refuel, "REFUEL", true, "Top up the tank. Fuel is priced by the local economy."},
     {StationPage::Market, "MARKET", true, "Buy and sell trade goods. Each system sells what it makes cheap and pays more for what it lacks."},
     {StationPage::Outfitting, "UPGRADES", true, "Cargo bays, fuel tanks and a docking computer."},
-    {StationPage::Missions, "MISSIONS", false, "Take on courier runs, deliveries and contracts for credits."},
+    {StationPage::Missions, "MISSIONS", true, "Courier runs, deliveries, mining contracts and bounties, posted by the people of this system."},
     {StationPage::Garage, "GARAGE", false, "Store, swap and buy ships."},
     {StationPage::SaveGame, "SAVE GAME", true, "Save your progress to this commander's slot, load the last save, or return to the main menu."},
     {StationPage::Launch, "LAUNCH", true, "Undock and fly out of the slot."},
@@ -53,7 +53,18 @@ enum class StationMenuAction
     RefuelFull, RefuelOneTonne,
     SaveGame, LoadGame, MainMenu,
     BuyGoodOne, BuyGoodMax, SellGoodOne, SellGoodAll,   // act on StationMenu::selectedGood()
-    InstallUpgrade                                      // acts on StationMenu::selectedUpgrade()
+    InstallUpgrade,                                     // acts on StationMenu::selectedUpgrade()
+    AcceptMission, AbandonMission                       // act on StationMenu::selectedMission()
+};
+
+/** One card on the missions page: an active mission of yours, or an offer on the board. */
+struct MissionRowView {
+    std::string title;        // "COURIER   KAVURA PRIME  12.4 LY"
+    std::string detail;       // the full description (offers) or what is left to do (active missions)
+    std::string reward;       // "1,240 CR"
+    std::string timeLeft;     // "27:14"
+    bool active = false;      // one of yours, rather than an offer
+    std::string blocked;      // why an offer can't be taken (empty if it can)
 };
 
 /** One line of the market table: a good, what it costs and pays here, and what you hold of it. */
@@ -112,6 +123,11 @@ struct StationMenuView {
     std::vector<MarketRowView> market;
     std::vector<UpgradeRowView> upgrades;
 
+    /** The missions page: your active missions first, then the board's offers; and how many you have of how many allowed. */
+    std::vector<MissionRowView> missions;
+    int activeMissions = 0;
+    int missionLimit = 0;
+
     /** What a trader agent last did here ("TRADER LOADED 9 t WINES  (40 s ago)"), or empty. */
     std::string traderNote;
 
@@ -142,6 +158,31 @@ public:
         selectedGood_ = 0;
         selectedUpgrade_ = 0;
         upgradeScroll_ = 0;
+        selectedMission_ = 0;
+        missionScroll_ = 0;
+        abandonArmed_ = -1;
+    }
+
+    /**
+     * Tells the menu how many rows the missions page has, and how many of them (the first ones)
+     * are the commander's active missions. The scene calls this before handing it events, since
+     * the board changes as missions are taken.
+     */
+    void setMissionRows(int rows, int activeRows)
+    {
+        missionRows_ = std::max(0, rows);
+        missionActiveRows_ = std::clamp(activeRows, 0, missionRows_);
+
+        if (selectedMission_ >= missionRows_)
+            selectedMission_ = std::max(0, missionRows_ - 1);
+
+        keepSelectedMissionVisible();
+    }
+
+    /** The highlighted mission row: an index into StationMenuView::missions. */
+    int selectedMission() const
+    {
+        return selectedMission_;
     }
 
     /** The highlighted good (an index into the goods list) and upgrade (an index into the catalogue). */
@@ -207,7 +248,7 @@ public:
                     // List pages open for browsing; everything else does its main action.
                     if (pageRowCount() > 0)
                         pageFocused_ = true;
-                    else
+                    else if (selectedPage() != StationPage::Missions)
                         return primaryAction();
                     break;
 
@@ -244,13 +285,17 @@ public:
             {
                 if (rowBounds(size, row).contains(mouse))
                 {
-                    (selectedPage() == StationPage::Market ? selectedGood_ : selectedUpgrade_) = row;
+                    selectedRow() = row;
+                    abandonArmed_ = -1;
                     pageFocused_ = true;
                     return StationMenuAction::None;
                 }
             }
 
             const int button = pageButtonAt(size, mouse);
+
+            if (button >= 0 && selectedPage() == StationPage::Missions)
+                return missionAction();
 
             if (button >= 0)
                 return buttonAction(button);
@@ -284,6 +329,8 @@ public:
 
         if (pageFocused_ && selectedPage() == StationPage::Market)
             hints = "UP/DOWN  good     B  buy 1 (SHIFT: max)     S  sell 1 (SHIFT: all)     LEFT  back     L  launch";
+        else if (pageFocused_ && selectedPage() == StationPage::Missions)
+            hints = "UP/DOWN  choose     ENTER  accept / abandon     LEFT  back     L  launch";
         else if (pageFocused_)
             hints = "UP/DOWN  choose     ENTER  install     LEFT  back     L  launch";
         else if (pageRowCount() > 0)
@@ -306,6 +353,54 @@ private:
     /** Index of the first upgrade card shown, for a catalogue longer than the page can hold. */
     int upgradeScroll_ = 0;
 
+    /** The missions page: highlighted row, first row shown, how many rows there are and how many are active missions, and the row armed for abandoning (-1 for none). */
+    int selectedMission_ = 0;
+    int missionScroll_ = 0;
+    int missionRows_ = 0;
+    int missionActiveRows_ = 0;
+    int abandonArmed_ = -1;
+
+    /** The highlighted row of whichever list page is selected. */
+    int& selectedRow()
+    {
+        switch (selectedPage())
+        {
+            case StationPage::Market: return selectedGood_;
+            case StationPage::Missions: return selectedMission_;
+            default: return selectedUpgrade_;
+        }
+    }
+
+    /** Scrolls the missions list just far enough that the highlighted card is on screen. */
+    void keepSelectedMissionVisible()
+    {
+        if (selectedMission_ < missionScroll_)
+            missionScroll_ = selectedMission_;
+        else if (selectedMission_ >= missionScroll_ + visibleMissionRows)
+            missionScroll_ = selectedMission_ - visibleMissionRows + 1;
+
+        missionScroll_ = std::clamp(missionScroll_, 0, std::max(0, missionRows_ - visibleMissionRows));
+    }
+
+    /** What the missions page's main action does to the highlighted row: accept an offer, or (on a second press) abandon an active mission. */
+    StationMenuAction missionAction()
+    {
+        if (selectedMission_ >= missionRows_)
+            return StationMenuAction::None;
+
+        if (selectedMission_ >= missionActiveRows_)
+            return StationMenuAction::AcceptMission;
+
+        if (abandonArmed_ == selectedMission_)
+        {
+            abandonArmed_ = -1;
+            return StationMenuAction::AbandonMission;
+        }
+
+        abandonArmed_ = selectedMission_;
+        return StationMenuAction::None;
+    }
+
     static constexpr float headerHeight = 64.f;
     static constexpr float listWidth = 190.f;
     static constexpr float serviceHeight = 40.f;
@@ -324,6 +419,7 @@ private:
         {
             case StationPage::Market: return goodCount;
             case StationPage::Outfitting: return static_cast<int>(upgradeCatalogue().size());
+            case StationPage::Missions: return missionRows_;
             default: return 0;
         }
     }
@@ -332,7 +428,13 @@ private:
     StationMenuAction handlePageKey(const sf::Event::KeyPressed& key)
     {
         const int rows = pageRowCount();
-        int& row = selectedPage() == StationPage::Market ? selectedGood_ : selectedUpgrade_;
+        int& row = selectedRow();
+
+        if (rows <= 0)
+        {
+            pageFocused_ = false;
+            return StationMenuAction::None;
+        }
 
         switch (key.code)
         {
@@ -345,11 +447,15 @@ private:
             case sf::Keyboard::Key::Up:
                 row = (row + rows - 1) % rows;
                 keepSelectedUpgradeVisible();
+                keepSelectedMissionVisible();
+                abandonArmed_ = -1;
                 break;
 
             case sf::Keyboard::Key::Down:
                 row = (row + 1) % rows;
                 keepSelectedUpgradeVisible();
+                keepSelectedMissionVisible();
+                abandonArmed_ = -1;
                 break;
 
             case sf::Keyboard::Key::B:
@@ -357,6 +463,9 @@ private:
             case sf::Keyboard::Key::Space:
                 if (selectedPage() == StationPage::Market)
                     return key.shift ? StationMenuAction::BuyGoodMax : StationMenuAction::BuyGoodOne;
+
+                if (selectedPage() == StationPage::Missions)
+                    return missionAction();
 
                 return StationMenuAction::InstallUpgrade;
 
@@ -446,6 +555,9 @@ private:
     /** How many upgrade cards fit on the page at once; a longer catalogue scrolls to follow the selection. */
     static constexpr int visibleUpgradeRows = 7;
 
+    /** The missions page shows fewer cards, leaving room under them for the highlighted mission's full description. */
+    static constexpr int visibleMissionRows = 5;
+
     /** Row `index` of the selected page's list: a market line or an upgrade card. */
     sf::FloatRect rowBounds(sf::Vector2u size, int index) const
     {
@@ -455,9 +567,10 @@ private:
             return {{page.position.x, page.position.y + tableTop + static_cast<float>(index) * marketRowHeight}, {page.size.x, marketRowHeight}};
 
         // Cards scrolled out of view have no bounds, so they can't be clicked.
-        const int slot = index - upgradeScroll_;
+        const bool missionsPage = selectedPage() == StationPage::Missions;
+        const int slot = index - (missionsPage ? missionScroll_ : upgradeScroll_);
 
-        if (slot < 0 || slot >= visibleUpgradeRows)
+        if (slot < 0 || slot >= (missionsPage ? visibleMissionRows : visibleUpgradeRows))
             return {{-1000.f, -1000.f}, {0.f, 0.f}};
 
         return {{page.position.x, page.position.y + 44.f + static_cast<float>(slot) * (upgradeRowHeight + upgradeRowGap)}, {page.size.x, upgradeRowHeight}};
@@ -480,6 +593,7 @@ private:
             case StationPage::Refuel: return 2;
             case StationPage::Market: return 4;
             case StationPage::Outfitting: return 1;
+            case StationPage::Missions: return missionRows_ > 0 ? 1 : 0;
             case StationPage::SaveGame: return 3;
             case StationPage::Launch: return 1;
             default: return 0;
@@ -672,6 +786,10 @@ private:
                 drawUpgradesPage(target, font, view, size, page);
                 return;
 
+            case StationPage::Missions:
+                drawMissionsPage(target, font, view, size, page);
+                return;
+
             case StationPage::SaveGame:
                 drawSavePage(target, font, view, size, page, y);
                 return;
@@ -762,6 +880,77 @@ private:
         drawPageButton(target, font, size, 1, "BUY MAX", canBuy);
         drawPageButton(target, font, size, 2, "SELL 1", canSell);
         drawPageButton(target, font, size, 3, "SELL ALL", canSell);
+    }
+
+    /**
+     * The missions page: a card for each of your active missions (marked ACTIVE, with the time
+     * left), then one for each offer on the board, with its reward and deadline, and why it can't
+     * be taken if it can't. Under the cards, the highlighted mission in full, and ACCEPT or ABANDON.
+     */
+    void drawMissionsPage(sf::RenderTarget& target, const sf::Font& font, const StationMenuView& view, sf::Vector2u size, const sf::FloatRect& page) const
+    {
+        const float x = page.position.x;
+        const float right = page.position.x + page.size.x;
+        char buffer[96];
+
+        drawText(target, font, "MISSIONS", {x, page.position.y}, 28, style::accent);
+        std::snprintf(buffer, sizeof(buffer), "ACTIVE %d / %d", view.activeMissions, view.missionLimit);
+        drawText(target, font, buffer, {right, page.position.y + 10.f}, 15, style::textDim, 1.f);
+
+        if (view.missions.empty())
+        {
+            drawParagraph(target, font, "No missions posted here right now. Boards change every half hour, and every station has its own.", {x, page.position.y + 50.f}, page.size.x, 17, style::textSecondary);
+            return;
+        }
+
+        const int total = static_cast<int>(view.missions.size());
+        const int firstRow = missionScroll_;
+        const int lastRow = std::min(total, missionScroll_ + visibleMissionRows);
+
+        for (int row = firstRow; row < lastRow; ++row)
+        {
+            const MissionRowView& mission = view.missions[static_cast<std::size_t>(row)];
+            const sf::FloatRect bounds = rowBounds(size, row);
+            const bool selected = row == selectedMission_;
+
+            sf::RectangleShape card(bounds.size);
+            card.setPosition(bounds.position);
+            card.setFillColor(selected ? (pageFocused_ ? style::panelRowHighlight : style::marketRowIdle) : style::stationHeader);
+            card.setOutlineColor(selected && pageFocused_ ? style::accent : (mission.active ? style::profit : style::panelOutline));
+            card.setOutlineThickness(1.f);
+            target.draw(card);
+
+            const sf::Color titleColor = mission.active ? style::profit : style::textPrimary;
+            drawText(target, font, mission.title, {bounds.position.x + 10.f, bounds.position.y + 3.f}, 15, titleColor);
+            drawText(target, font, mission.reward, {bounds.position.x + bounds.size.x - 10.f, bounds.position.y + 3.f}, 15, style::accent, 1.f);
+
+            std::string line = mission.active ? "ACTIVE   " + mission.timeLeft + " LEFT" : "DUE IN " + mission.timeLeft;
+            drawText(target, font, line, {bounds.position.x + 10.f, bounds.position.y + 21.f}, 12, mission.active ? style::profit : style::textDim);
+
+            if (abandonArmed_ == row)
+                drawText(target, font, "PRESS AGAIN TO ABANDON", {bounds.position.x + bounds.size.x - 10.f, bounds.position.y + 21.f}, 11, style::warning, 1.f);
+            else if (!mission.blocked.empty())
+                drawText(target, font, mission.blocked, {bounds.position.x + bounds.size.x - 10.f, bounds.position.y + 21.f}, 11, style::warning, 1.f);
+        }
+
+        const float noteY = page.position.y + 44.f + static_cast<float>(visibleMissionRows) * (upgradeRowHeight + upgradeRowGap) + 2.f;
+
+        if (total > visibleMissionRows)
+        {
+            std::snprintf(buffer, sizeof(buffer), "SHOWING %d-%d OF %d   UP/DOWN FOR MORE", firstRow + 1, lastRow, total);
+            drawText(target, font, buffer, {x, noteY}, 11, style::textDim);
+        }
+
+        // The highlighted mission in full, between the cards and the button.
+        if (selectedMission_ < total)
+        {
+            const MissionRowView& current = view.missions[static_cast<std::size_t>(selectedMission_)];
+            drawParagraph(target, font, current.detail, {x, noteY + 16.f}, page.size.x, 15, style::textSecondary);
+
+            const bool canAct = current.active || current.blocked.empty();
+            const char* label = current.active ? (abandonArmed_ == selectedMission_ ? "CONFIRM ABANDON" : "ABANDON") : "ACCEPT";
+            drawPageButton(target, font, size, 0, label, canAct);
+        }
     }
 
     /**

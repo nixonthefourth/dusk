@@ -595,7 +595,10 @@ inline const char* targetLabel(const World& world)
     if (!hasValidTarget(world))
         return "";
 
-    return world.target.type == TargetType::Ship ? "SHIP" : "STATION";
+    if (const NpcShip* npc = targetedShip(world))
+        return npc->hostile ? "PIRATE" : "SHIP";
+
+    return "STATION";
 }
 
 /**

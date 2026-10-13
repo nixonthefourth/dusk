@@ -25,7 +25,28 @@ namespace combat {
         float life = 0.f;        // seconds left before it fades out
         float damage = 0.f;
         bool fromTurret = false; // drawn in the turret's colour
+        bool hostile = false;    // fired by a pirate: it hits the player, never other ships
     };
+
+    /** The player's ship's shield and hull points, when undamaged. */
+    constexpr float playerMaxShields = 60.f;
+    constexpr float playerMaxHull = 100.f;
+
+    /** How the player's ship is holding up. */
+    struct PlayerHealth {
+        float shields = playerMaxShields;
+        float hull = playerMaxHull;
+
+        /** Seconds since it was last hit (shields recharge after a pause), and since its hull was last hit (for the HUD's red flash). */
+        float sinceHit = 1e9f;
+        float sinceHullHit = 1e9f;
+
+        /** True once the hull has reached zero: the ship has been destroyed. */
+        bool destroyed = false;
+    };
+
+    /** HitFlash::ship value meaning the player's own ship. */
+    constexpr int playerShip = -2;
 
     /** A rocket in flight. */
     struct Rocket {
@@ -107,6 +128,13 @@ namespace combat {
 
         /** Whether the player's ship has the turret (so the renderer draws it). Set by the scene. */
         bool turretFitted = false;
+
+        /** The player's ship's shields and hull. The scene copies the hull to and from the Commander. */
+        PlayerHealth player;
+
+        /** Bounty earned for pirates destroyed since the scene last collected it, and the bounty missions those pirates belonged to. */
+        double bountyEarned = 0.0;
+        std::vector<std::uint64_t> missionKills;
 
         /** What the selected weapon did this step, for the readout. */
         WeaponStatus status = WeaponStatus::Ready;

@@ -249,6 +249,14 @@ namespace style {
     inline constexpr sf::Color healthShield{110, 180, 255};
     inline constexpr sf::Color healthHull{248, 132, 63};
 
+    /** Missions and piracy: mission destinations on the chart, pirates on the scanner and in view, the player's shield and hull bars, and the flash of a hull hit. */
+    inline constexpr sf::Color missionMarker{120, 230, 140};
+    inline constexpr sf::Color scannerHostile{255, 70, 60};
+    inline constexpr sf::Color hostileMarker{255, 80, 70};
+    inline constexpr sf::Color playerShieldBar{110, 180, 255};
+    inline constexpr sf::Color playerHullBar{248, 132, 63};
+    inline constexpr sf::Color hullHitFlash{255, 40, 30};
+
     /** Docking guidance: readings that are fine, borderline and wrong; the slot aperture, the ship's footprint, and the 3D corridor. */
     inline constexpr sf::Color dockingGood = profit;
     inline constexpr sf::Color dockingCaution = caution;

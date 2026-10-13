@@ -8,6 +8,7 @@
 #ifndef DUSK_NPC_SHIP_H
 #define DUSK_NPC_SHIP_H
 
+#include <cstdint>
 #include "math/Vec3.h++"
 #include "objects/ship.h++"
 
@@ -19,7 +20,8 @@ enum class NpcState {
     EnteringStation,   // lined up on the slot, flying down its axis into the station
     Docked,            // inside the station, invisible
     Launching,         // flying out of the slot along its axis, before roaming again
-    WarpingOut         // brief wind-up before vanishing
+    WarpingOut,        // brief wind-up before vanishing
+    Hostile            // a pirate hunting the player: flown by systems/piracy.h++, not by the NPC AI
 };
 
 /** One simple-reflex NPC ship: a Ship body plus AI state layered on top. */
@@ -58,6 +60,26 @@ struct NpcShip {
 
     /** True once its shields have failed under fire and it is running for it. */
     bool fleeing = false;
+
+    /* ---- Pirates (see systems/piracy.h++) ---------------------------------------------------- */
+
+    /** A pirate: it hunts the player instead of going about its business, and pays a bounty when destroyed. */
+    bool hostile = false;
+
+    /** A pirate that has left play for good (destroyed, escaped or gone); its slot can be reused for the next pirate. */
+    bool retired = false;
+
+    /** Never runs, however damaged (bounty targets fight to the end). */
+    bool fearless = false;
+
+    /** The bounty mission this pirate is a target of, or 0. */
+    std::uint64_t missionId = 0;
+
+    /** Seconds until it can fire again, which of its two guns fires next, seconds spent running, and which way it circles. */
+    float fireCooldown = 0.f;
+    int nextGun = 0;
+    float fleeTimer = 0.f;
+    float circleSign = 1.f;
 
     /** Whether this NPC should currently be rendered: everywhere except warped out or inside the station. */
     bool isVisible() const
