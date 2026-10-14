@@ -66,7 +66,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [x] Scene management
 - [x] OBJ loader
 - [x] Object-level collision detection
-- [x] Integrator upgrade: velocity Verlet in place of explicit Euler
+- [x] Integrator upgrade: velocity Verlet in place of Explicit Euler
 - [ ] Music and sound
 - [ ] Rigid bodies
 
@@ -77,7 +77,7 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [x] Systems (1000 generated per galaxy today)
   - [x] In-system and inter-system economy — per-system markets, trading at stations, and trader agents moving goods between systems
   - [x] Simple-reflex agent (S-RA) NPC ships
-  - [ ] Missions
+  - [~] Missions
 - [ ] End goal: reach the centre of the galaxy
 - [x] Newtonian physics
   - [x] Ship thrust follows Newton's first law, integrated with velocity Verlet
@@ -88,7 +88,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [x] Phase-space warp between system nodes — a countdown, jump and hyperspace-tunnel sequence (see [Travel Animations](#travel-animations))
 - [x] Galactic map
 - [x] System map
-- [ ] Spaceships
+- [~] Spaceships
   - [ ] Chemical combustion ships
   - [ ] Electric ships
   - [ ] 20 ships total
@@ -108,7 +108,7 @@ Checked-off items are implemented today; everything else is a future direction, 
   - [x] Thrust
   - [x] Relative velocity/pitch/yaw
   - [x] Targeting, radar-esque (station only so far)
-- [~] Physics
+- [x] Physics
   - [x] Object-level collision hitboxes
   - [x] Fuel expenditure (mass matters)
 - [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear): cargo bays, fuel tanks, the docking computer, both chart scanners, the mining module and four weapons exist; jump drives are still to come
