@@ -91,12 +91,12 @@ Checked-off items are implemented today; everything else is a future direction, 
 
 ### Game
 
-- [~] Procedural world generation
+- [x] Procedural world generation
   - [x] Planets per system
   - [x] Systems (1000 generated per galaxy today)
   - [x] In-system and inter-system economy — per-system markets, trading at stations, and trader agents moving goods between systems
   - [x] Simple-reflex agent (S-RA) NPC ships
-  - [~] Missions
+  - [x] Missions
 - [ ] End goal: reach the centre of the galaxy
 - [x] Newtonian physics
   - [x] Ship thrust follows Newton's first law, integrated with velocity Verlet
@@ -130,7 +130,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [x] Physics
   - [x] Object-level collision hitboxes
   - [x] Fuel expenditure (mass matters)
-- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear): cargo bays, fuel tanks, jump drives, the docking computer, both chart scanners, the mining module and four weapons exist
+- [x] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear): cargo bays, fuel tanks, jump drives, the docking computer, both chart scanners, the mining module and four weapons exist
 - [x] Save/load: three commander slots, named commanders, saving at stations
 - [x] Docking: request a slot from the station, then dock by hand or with the docking computer; NPCs dock, launch and queue for the slot visibly; every docking pays a Space Union fee
 - [~] Space stations: small, medium, large — one procedurally placed small station (`station_s.obj`) per eligible system today
