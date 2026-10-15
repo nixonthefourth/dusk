@@ -73,7 +73,9 @@ inline float jumpRangeLightYears(const Ship& ship)
     if (!ship.usesFuel)
         return 1e9f;
 
-    return ship.hyperspaceFuelPerLightYear > 0.f ? ship.fuel / ship.hyperspaceFuelPerLightYear : 1e9f;
+    // As far as the fuel aboard allows, but never further than the drive can throw the ship in one jump.
+    const float onFuel = ship.hyperspaceFuelPerLightYear > 0.f ? ship.fuel / ship.hyperspaceFuelPerLightYear : 1e9f;
+    return std::min(onFuel, ship.maxJumpLightYears);
 }
 
 /** Fuel a jump of `lightYears` would burn. */
@@ -205,6 +207,19 @@ inline void integrateShipRotation(Ship& ship, float dt)
     const float rollInput = std::clamp(ship.rollInput, -1.f, 1.f);
     const float rollCommand = rollInput * ship.rollSpeed * scale + ship.rollFeedForward;
     ship.rollRate = approachTurnRate(ship, ship.rollRate, rollCommand, dt);
+
+    // Knocked into a tumble: the spin from the impact dies away slowly, whatever the pilot asks for.
+    if (ship.tumbleTimer > 0.f)
+    {
+        ship.tumbleTimer = std::max(0.f, ship.tumbleTimer - dt);
+        const float keep = std::exp(-1.2f * dt);
+        ship.yawRate = ship.tumbleYaw * keep;
+        ship.pitchRate = ship.tumblePitch * keep;
+        ship.rollRate = ship.tumbleRoll * keep;
+        ship.tumbleYaw = ship.yawRate;
+        ship.tumblePitch = ship.pitchRate;
+        ship.tumbleRoll = ship.rollRate;
+    }
 
     ship.yaw += ship.yawRate * dt;
     ship.pitch += ship.pitchRate * dt;

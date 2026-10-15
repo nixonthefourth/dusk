@@ -296,6 +296,7 @@ inline void respawnNpc(
     npc.fleeing = false;
     npc.hostile = false;
     npc.fearless = false;
+    npc.raider = false;
     npc.missionId = 0;
 
     // Some arrivals come out of the station instead, so it's visibly busy.

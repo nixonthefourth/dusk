@@ -19,6 +19,7 @@
 #include "ui/menu_button.h++"
 #include "systems/docking_control.h++"
 #include "systems/combat.h++"
+#include "systems/impacts.h++"
 #include "systems/missions.h++"
 #include "systems/piracy.h++"
 #include "systems/mining.h++"
@@ -917,6 +918,9 @@ private:
         docking::showMessage(docking_, text, gains.empty() ? 4.f : 7.f);
     }
 
+    /** How much pirate fire a defended station's defences can take before they fall (its "hull" for a defence mission). */
+    static constexpr float defendedStationStrength = 1200.f;
+
     /** Hull repairs at a station: credits per hull point. */
     static constexpr double hullRepairPrice = 3.0;
 
@@ -1008,6 +1012,13 @@ private:
             case combat::CombatEventKind::PirateFled: docking::showMessage(docking_, "THE PIRATE GOT AWAY", 2.f); break;
             case combat::CombatEventKind::PlayerDestroyed: docking::showMessage(docking_, "YOUR SHIP HAS BEEN DESTROYED", 3.f); break;
             case combat::CombatEventKind::PlayerHit: break;
+            case combat::CombatEventKind::OutpostDestroyed: docking::showMessage(docking_, "OUTPOST DESTROYED", 3.5f); break;
+            case combat::CombatEventKind::OutpostSighted: docking::showMessage(docking_, "OUTPOST FIGHTERS LAUNCHING", 3.f); break;
+
+            case combat::CombatEventKind::RaidStarted:
+                std::snprintf(text, sizeof(text), "RAID! %d SHIPS ATTACKING THE STATION: WEAPONS FREE", event.ship);
+                docking::showMessage(docking_, text, 4.f);
+                break;
         }
     }
 
@@ -1062,8 +1073,58 @@ private:
         }
 
         std::vector<combat::CombatEvent> events;
+
+        // Crashes, collisions and air, while the pilot is flying (not while the docking computer is).
+        if (docking_.phase == DockingPhase::Idle)
+            impacts::update(world_, dt, events);
+        else
+            world_.playerContacts.clear();
+
         piracy::directPirates(pirates_, world_, galaxy_.systems[static_cast<std::size_t>(currentSystemIndex_)].economyTier, bounties, canSpawn, dt, events);
+
+        // Raids on this station and outposts in this system, for defence and strike missions.
+        std::vector<const Mission*> defences;
+        std::vector<const Mission*> strikes;
+
+        for (const Mission& mission : commander_.missions)
+        {
+            if (mission.destination != currentSystemIndex_)
+                continue;
+
+            if (mission.type == MissionType::Defence)
+                defences.push_back(&mission);
+            else if (mission.type == MissionType::Strike)
+                strikes.push_back(&mission);
+        }
+
+        const bool playerOut = docking_.phase == DockingPhase::Idle && !inHyperspaceSequence() && !world_.combat.player.destroyed;
+        piracy::directAssaults(world_, defences, strikes, playerOut, events, pirates_.rng);
+        piracy::updateOutpost(world_, dt, events, pirates_.rng);
         piracy::updatePirates(world_, dt, events);
+
+        // Raiders' fire on the station wears down its defences; if they fall, the defence mission fails.
+        if (world_.combat.stationDamage > 0.f)
+        {
+            const float percent = world_.combat.stationDamage * 100.f / defendedStationStrength;
+            world_.combat.stationDamage = 0.f;
+
+            for (const Mission* mission : defences)
+            {
+                const std::uint64_t id = mission->id;
+
+                if (missions::damageDefendedStation(commander_, id, percent))
+                {
+                    for (int i = 0; i < static_cast<int>(world_.npcShips.size()); ++i)
+                    {
+                        if (world_.npcShips[static_cast<std::size_t>(i)].missionId == id && piracy::activePirate(world_.npcShips[static_cast<std::size_t>(i)]))
+                            piracy::retire(world_, i);
+                    }
+
+                    docking::showMessage(docking_, "THE STATION'S DEFENCES FELL: MISSION FAILED", 4.f);
+                    break;
+                }
+            }
+        }
 
         for (const combat::CombatEvent& event : events)
             announce(event);
@@ -1089,6 +1150,8 @@ private:
      */
     void claimInsurance()
     {
+        const std::string cause = world_.combat.player.cause && *world_.combat.player.cause ? world_.combat.player.cause : "SHIP DESTROYED";
+
         const double fee = std::min(insuranceFee, spendableCredits(commander_));
         commander_.credits -= fee;
         commander_.cargo = CargoHold{};
@@ -1110,12 +1173,12 @@ private:
         if (docking::dockImmediately(docking_, world_))
             openStationMenu();
 
-        char text[128];
+        char text[192];
 
         if (failed > 0)
-            std::snprintf(text, sizeof(text), "INSURANCE: A NEW SHIP -%.0f CR\nCARGO LOST, %d MISSION%s FAILED", fee, failed, failed == 1 ? "" : "S");
+            std::snprintf(text, sizeof(text), "%s\nINSURANCE: A NEW SHIP -%.0f CR. CARGO LOST, %d MISSION%s FAILED", cause.c_str(), fee, failed, failed == 1 ? "" : "S");
         else
-            std::snprintf(text, sizeof(text), "INSURANCE: A NEW SHIP -%.0f CR\nCARGO LOST", fee);
+            std::snprintf(text, sizeof(text), "%s\nINSURANCE: A NEW SHIP -%.0f CR. CARGO LOST", cause.c_str(), fee);
 
         docking::showMessage(docking_, text, 7.f);
     }
@@ -1203,7 +1266,8 @@ private:
         if (ship.cruiseEngaged || ship.cruiseCharge >= 0.f)
             return "HARDPOINTS OFFLINE IN CRUISE";
 
-        if (world_.stationActive && length(ship.position - world_.station.position) < mining::noFireZoneRadius)
+        // The no-fire zone is lifted while raiders attack the station.
+        if (world_.stationActive && length(ship.position - world_.station.position) < mining::noFireZoneRadius && !piracy::raidUnderway(world_))
             return "NO-FIRE ZONE: TOO CLOSE TO THE STATION";
 
         return nullptr;
@@ -1583,6 +1647,8 @@ private:
     {
         world_.playerShip.fuelCapacity = commander_.fuelCapacity();
         world_.playerShip.cargoMass = static_cast<float>(commander_.cargo.total() + commander_.missionCargoTonnes());
+        world_.playerShip.maxJumpLightYears = jumpDriveRange(commander_.jumpDrive);
+        world_.playerShip.hyperspaceFuelPerLightYear = jumpDriveFuelPerLightYear(commander_.jumpDrive);
         world_.playerShip.hatchMass = commander_.hatch.total();
         world_.playerShip.cargoCapacity = static_cast<float>(commander_.cargoCapacity());
     }
@@ -1697,6 +1763,7 @@ private:
         save.turretLaser = commander_.hasTurretLaser;
         save.rockets = commander_.rockets;
         save.hull = commander_.hull;
+        save.jumpDrive = commander_.jumpDrive;
         save.bountyVouchers = commander_.bountyVouchers;
         save.lastDockedSystem = commander_.lastDockedSystem;
         save.takenMissions = commander_.takenMissions;
@@ -1762,6 +1829,7 @@ private:
         commander_.rockets = std::clamp(save.rockets, 0, save.rocketLauncher ? rocketMagazine : 0);
         commander_.selectedHardpoint = save.hardpoint;
         commander_.hull = std::clamp(save.hull, 1.f, combat::playerMaxHull);
+        commander_.jumpDrive = std::clamp(save.jumpDrive, 0, 2);
         commander_.bountyVouchers = std::max(0.0, save.bountyVouchers);
         commander_.lastDockedSystem = save.lastDockedSystem;
         commander_.takenMissions = save.takenMissions;

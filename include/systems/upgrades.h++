@@ -18,7 +18,7 @@
 #include <string>
 
 /** What an upgrade is: each kind has its own slot on the ship, and tiers within it replace one another. */
-enum class UpgradeKind { CargoBay, FuelTank, DockingComputer, EconomicsScanner, PoliticalScanner, MiningModule, PulseLaser, BeamLaser, RocketLauncher, TurretLaser };
+enum class UpgradeKind { CargoBay, FuelTank, DockingComputer, EconomicsScanner, PoliticalScanner, MiningModule, PulseLaser, BeamLaser, RocketLauncher, TurretLaser, JumpDrive };
 
 /** One thing the outfitting page can sell. */
 struct ShipUpgrade {
@@ -35,14 +35,16 @@ struct ShipUpgrade {
 };
 
 /** The catalogue, in the order the outfitting page lists it. */
-inline const std::array<ShipUpgrade, 12>& upgradeCatalogue()
+inline const std::array<ShipUpgrade, 14>& upgradeCatalogue()
 {
-    static const std::array<ShipUpgrade, 12> catalogue =
+    static const std::array<ShipUpgrade, 14> catalogue =
     {{
         {"CARGO BAY MK1", "Extra hold space: +5 t, 15 t in all.", 1800.0, UpgradeKind::CargoBay, 1},
         {"CARGO BAY MK2", "A bigger bay: +10 t, 20 t in all. Replaces Mk1.", 4200.0, UpgradeKind::CargoBay, 2},
         {"FUEL TANK MK1", "A larger tank: +4 t, 10 t in all (66 LY of jumps).", 2000.0, UpgradeKind::FuelTank, 1},
         {"FUEL TANK MK2", "A bigger tank: +8 t, 14 t in all (93 LY). Replaces Mk1.", 3500.0, UpgradeKind::FuelTank, 2},
+        {"JUMP DRIVE MK1", "Jumps up to 28 LY (stock: 18), on 20% less fuel per LY.", 3800.0, UpgradeKind::JumpDrive, 1},
+        {"JUMP DRIVE MK2", "Jumps up to 40 LY, on 40% less fuel per LY. Replaces Mk1.", 7500.0, UpgradeKind::JumpDrive, 2},
         {"DOCKING COMPUTER", "Auto-docking on [V] once the station grants a slot.", 2500.0, UpgradeKind::DockingComputer, 1},
         {"ECONOMICS SCANNER", "Shows every system's exports on the galactic chart.", 1500.0, UpgradeKind::EconomicsScanner, 1},
         {"POLITICAL SCANNER", "Shows every system's development, Poor to Progressive.", 1000.0, UpgradeKind::PoliticalScanner, 1},
@@ -67,6 +69,7 @@ inline int installedTier(const Commander& commander, UpgradeKind kind)
         case UpgradeKind::EconomicsScanner: return commander.hasEconomicsScanner ? 1 : 0;
         case UpgradeKind::PoliticalScanner: return commander.hasPoliticalScanner ? 1 : 0;
         case UpgradeKind::MiningModule: return commander.hasMiningModule ? 1 : 0;
+        case UpgradeKind::JumpDrive: return commander.jumpDrive;
         case UpgradeKind::PulseLaser: return commander.hasPulseLaser ? 1 : 0;
         case UpgradeKind::BeamLaser: return commander.hasBeamLaser ? 1 : 0;
         case UpgradeKind::RocketLauncher: return commander.hasRocketLauncher ? 1 : 0;
@@ -151,6 +154,7 @@ inline void installUpgrade(Commander& commander, const ShipUpgrade& upgrade)
         case UpgradeKind::EconomicsScanner: commander.hasEconomicsScanner = true; break;
         case UpgradeKind::PoliticalScanner: commander.hasPoliticalScanner = true; break;
         case UpgradeKind::MiningModule: commander.hasMiningModule = true; break;
+        case UpgradeKind::JumpDrive: commander.jumpDrive = upgrade.tier; break;
         case UpgradeKind::PulseLaser: commander.hasPulseLaser = true; break;
         case UpgradeKind::BeamLaser: commander.hasBeamLaser = true; break;
         case UpgradeKind::RocketLauncher: commander.hasRocketLauncher = true; commander.rockets = rocketMagazine; break;

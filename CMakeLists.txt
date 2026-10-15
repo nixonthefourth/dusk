@@ -57,6 +57,8 @@ add_executable(dusk src/main.cpp
         include/systems/mining.h++
         include/systems/combat.h++
         include/systems/missions.h++
+        include/systems/impacts.h++
+        include/objects/jump_drive.h++
         include/systems/piracy.h++
         include/objects/mission.h++
         include/world/combat_state.h++

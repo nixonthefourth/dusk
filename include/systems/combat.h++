@@ -104,7 +104,7 @@ namespace combat {
     /* ---- Events ------------------------------------------------------------------------------ */
 
     /** Something worth telling the pilot. */
-    enum class CombatEventKind { ShipDestroyed, TargetDestroyed, ShieldsDown, OutOfRockets, PirateDestroyed, PlayerHit, PlayerDestroyed, PiratesArrived, PirateFled, BountyTargetsSighted };
+    enum class CombatEventKind { ShipDestroyed, TargetDestroyed, ShieldsDown, OutOfRockets, PirateDestroyed, PlayerHit, PlayerDestroyed, PiratesArrived, PirateFled, BountyTargetsSighted, OutpostDestroyed, RaidStarted, OutpostSighted };
 
     /** An event, and the NPC ship it concerns (or -1). */
     struct CombatEvent {
@@ -205,7 +205,7 @@ namespace combat {
 
     /** What a ray (a beam, or a bolt's path over one step) hit first. */
     struct WeaponHit {
-        enum class Kind { None, Ship, Rock, Station } kind = Kind::None;
+        enum class Kind { None, Ship, Rock, Station, Outpost } kind = Kind::None;
         int ship = -1;
         float distance = 0.f;
         Vec3 point;
@@ -302,8 +302,64 @@ namespace combat {
             }
         }
 
+        if (world.outpost.active)
+        {
+            if (const auto t = rayStation(world.outpost.station, origin, direction, bestDistance))
+            {
+                bestDistance = *t;
+                best.kind = WeaponHit::Kind::Outpost;
+                best.ship = -1;
+                best.point = origin + direction * *t;
+                best.normal = direction * -1.f;
+            }
+        }
+
         best.distance = bestDistance;
         return best;
+    }
+
+    /** The outpost's size: the furthest point of its hull from its centre. */
+    inline float outpostRadius(const Outpost& outpost)
+    {
+        float radius = 0.f;
+
+        for (const Vec3& vertex : outpost.station.model.vertices)
+            radius = std::max(radius, length(vertex));
+
+        return radius;
+    }
+
+    /**
+     * Damages the outpost. At zero hull it is destroyed: a string of explosions across it and a
+     * field of debris, and its strike mission is one step from done.
+     */
+    inline void damageOutpost(World& world, float amount, const Vec3& point, std::vector<CombatEvent>& events)
+    {
+        Outpost& outpost = world.outpost;
+
+        if (!outpost.active || amount <= 0.f)
+            return;
+
+        outpost.hull -= amount;
+        spawnSparks(world.combat, point, normalized(point - outpost.station.position), Vec3{}, 3, 260.f);
+
+        if (outpost.hull > 0.f)
+            return;
+
+        const float radius = outpostRadius(outpost);
+
+        for (int i = 0; i < 5; ++i)
+            spawnExplosion(world.combat, outpost.station.position + randomDirection(world.combat) * (radius * 0.6f * nextRandom(world.combat)), Vec3{}, radius * (0.7f + 0.6f * nextRandom(world.combat)), 24);
+
+        outpost.active = false;
+
+        if (outpost.missionId != 0)
+            world.combat.missionKills.push_back(outpost.missionId);
+
+        if (world.target.type == TargetType::Outpost)
+            world.target = {};
+
+        events.push_back({CombatEventKind::OutpostDestroyed, -1});
     }
 
     /** Velocity of whatever was hit, so sparks fly with it. */
@@ -518,6 +574,8 @@ namespace combat {
 
                 if (hit.kind == WeaponHit::Kind::Ship)
                     damageShip(world, hit.ship, beamDamagePerSecond * state.beamPower * dt, hit.point, events);
+                else if (hit.kind == WeaponHit::Kind::Outpost)
+                    damageOutpost(world, beamDamagePerSecond * state.beamPower * dt, hit.point, events);
 
                 if (state.beamHitting && nextRandom(state) < dt * 40.f)
                     spawnSparks(state, hit.point, hit.normal, hitVelocity(world, hit), 2, 300.f);
@@ -670,7 +728,7 @@ namespace combat {
      * flash of the shield bubble), then hull. At zero hull the ship is destroyed: it explodes, and
      * the scene takes over (insurance, see SystemScene).
      */
-    inline void damagePlayer(World& world, float amount, const Vec3& point, std::vector<CombatEvent>& events)
+    inline void damagePlayer(World& world, float amount, const Vec3& point, std::vector<CombatEvent>& events, const char* cause = "SHOT DOWN")
     {
         PlayerHealth& player = world.combat.player;
 
@@ -698,9 +756,26 @@ namespace combat {
         {
             player.hull = 0.f;
             player.destroyed = true;
+            player.cause = cause;
             spawnExplosion(world.combat, ship.position, ship.velocity, 460.f, 46);
             events.push_back({CombatEventKind::PlayerDestroyed, -1});
         }
+    }
+
+    /** Destroys the player's ship outright, shields or not (flying into a planet or the star): an explosion, and `cause` for the insurance message. */
+    inline void destroyPlayer(World& world, const char* cause, std::vector<CombatEvent>& events)
+    {
+        PlayerHealth& player = world.combat.player;
+
+        if (player.destroyed)
+            return;
+
+        player.shields = 0.f;
+        player.hull = 0.f;
+        player.destroyed = true;
+        player.cause = cause;
+        spawnExplosion(world.combat, world.playerShip.position, world.playerShip.velocity * 0.3f, 520.f, 50);
+        events.push_back({CombatEventKind::PlayerDestroyed, -1});
     }
 
     /** Moves the bolts one step; a bolt that crosses something on the way hits it. */
@@ -725,7 +800,11 @@ namespace combat {
             // A pirate's bolt hits the player (or a rock, or the station), never another ship.
             if (bolt.hostile)
             {
-                const WeaponHit scenery = castWeaponRay(world, start, direction, travelled, false);
+                WeaponHit scenery = castWeaponRay(world, start, direction, travelled, false);
+
+                // Pirate fire passes through the pirates' own outpost (its turrets sit on it).
+                if (scenery.kind == WeaponHit::Kind::Outpost)
+                    scenery.kind = WeaponHit::Kind::None;
                 const auto playerHit = world.combat.player.destroyed ? std::nullopt : mining::raySphere(start, direction, world.playerShip.position, playerHitRadius, travelled);
 
                 if (playerHit && (scenery.kind == WeaponHit::Kind::None || *playerHit <= scenery.distance))
@@ -735,6 +814,10 @@ namespace combat {
                 }
                 else if (scenery.kind != WeaponHit::Kind::None)
                 {
+                    // Pirate fire landing on the station (a raid) counts against its defences.
+                    if (scenery.kind == WeaponHit::Kind::Station)
+                        state.stationDamage += bolt.damage;
+
                     spawnSparks(state, scenery.point, scenery.normal, hitVelocity(world, scenery), 4, 240.f);
                     bolt.life = -1.f;
                 }
@@ -749,6 +832,8 @@ namespace combat {
 
             if (hit.kind == WeaponHit::Kind::Ship)
                 damageShip(world, hit.ship, bolt.damage, hit.point, events);
+            else if (hit.kind == WeaponHit::Kind::Outpost)
+                damageOutpost(world, bolt.damage, hit.point, events);
             else
                 spawnSparks(state, hit.point, hit.normal, hitVelocity(world, hit), 4, 240.f);
 
@@ -763,6 +848,9 @@ namespace combat {
     {
         spawnExplosion(world.combat, rocket.position, rocket.velocity * 0.15f, rocketSplashRadius, 8);
         splashDamage(world, rocket.position, rocketSplashRadius, rocketDamage, events);
+
+        if (world.outpost.active && length(rocket.position - world.outpost.station.position) <= outpostRadius(world.outpost) + rocketSplashRadius)
+            damageOutpost(world, rocketDamage, rocket.position, events);
         rocket.life = -1.f;
     }
 

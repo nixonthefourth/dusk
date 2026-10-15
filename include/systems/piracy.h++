@@ -21,6 +21,7 @@
 #include "systems/ship_physics.h++"
 #include "world/world.h++"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <random>
 #include <string>
@@ -61,6 +62,30 @@ namespace piracy {
     /** Seconds after entering a system (or after a respawn) before pirates may appear. */
     constexpr float arrivalGrace = 40.f;
 
+    /** Raiders hold this far from the station's centre while firing on it, and turn on the player within this distance. */
+    constexpr float raidStandoff = 2400.f;
+    constexpr float raiderEngagesPlayer = 1800.f;
+
+    /** Raiders bombard the station at this fraction of their dogfighting rate (it gives a defender time to arrive). */
+    constexpr float stationFireSlowdown = 2.f;
+
+    /** A raider that has been hit turns on the player for this long. */
+    constexpr float raiderGrudgeSeconds = 6.f;
+
+    /** A raid starts when the player is within this distance of the station it is aimed at. */
+    constexpr float raidTriggerDistance = 30000.f;
+
+    /** An outpost: its hull points, how far from the station it is built, and its turrets' reach, rate and damage. */
+    constexpr float outpostMaxHull = 450.f;
+    constexpr float outpostDistance = 45000.f;
+    constexpr float turretRange = 2600.f;
+    constexpr float turretInterval = 0.45f;
+    constexpr float turretDamage = 4.f;
+    constexpr float turretBoltSpeed = 2800.f;
+
+    /** The outpost's fighters launch when the player comes within this distance. */
+    constexpr float defenderTrigger = 12000.f;
+
     /* ---- Spawning and retiring --------------------------------------------------------------- */
 
     /** Takes pirate `npc` out of play for good: its slot is free for the next pirate. */
@@ -95,7 +120,7 @@ namespace piracy {
      * Brings a pirate into play at `position`, facing the player: a retired pirate's slot if there
      * is one, otherwise a new slot. Returns its index.
      */
-    inline int spawnPirate(World& world, const Vec3& position, bool fearless, std::uint64_t missionId, std::mt19937& rng)
+    inline int spawnPirate(World& world, const Vec3& position, bool fearless, std::uint64_t missionId, std::mt19937& rng, bool raider = false)
     {
         int index = -1;
 
@@ -129,6 +154,7 @@ namespace piracy {
         npc.retired = false;
         npc.fearless = fearless;
         npc.missionId = missionId;
+        npc.raider = raider;
         npc.shields = npcMaxShields;
         npc.hull = npcMaxHull;
         npc.sinceHit = 1e9f;
@@ -226,7 +252,43 @@ namespace piracy {
                 continue;
             }
 
-            if (playerDown || playerNearStation)
+            // A raider goes for the station, unless the player is close enough to deal with first, or
+            // has been shooting at it in the last few seconds.
+            if (npc.raider && world.stationActive && (playerDown || (distance > raiderEngagesPlayer && npc.sinceHit > raiderGrudgeSeconds)))
+            {
+                const Vec3 toStation = world.station.position - ship.position;
+                const float stationDistance = length(toStation);
+                const Vec3 aimAtStation = stationDistance > 1.f ? toStation / stationDistance : shipForward(ship);
+
+                if (stationDistance < raidStandoff * 0.6f)
+                {
+                    Vec3 side = cross(aimAtStation, Vec3{0.f, 1.f, 0.f});
+                    side = length(side) > 1e-3f ? normalized(side) : Vec3{1.f, 0.f, 0.f};
+                    steerToward(ship, normalized(side * npc.circleSign + aimAtStation * -0.4f));
+                    ship.throttle = 0.5f;
+                }
+                else
+                {
+                    steerToward(ship, aimAtStation);
+                    ship.throttle = stationDistance > raidStandoff * 1.6f ? chaseThrottle : 0.2f;
+                }
+
+                integrateShipPhysics(ship, dt);
+
+                if (npc.fireCooldown <= 0.f && stationDistance <= raidStandoff + 900.f && dot(shipForward(ship), aimAtStation) >= aimCone)
+                {
+                    const auto muzzles = hardpointMuzzles(HardpointKind::PulseLaser);
+                    const Vec3 muzzle = shipLocalToWorld(ship, muzzles[static_cast<std::size_t>(npc.nextGun & 1)]);
+                    world.combat.bolts.push_back({muzzle, ship.velocity + shipForward(ship) * boltSpeed, (raidStandoff + 1500.f) / boltSpeed, gunDamage, false, true});
+                    combat::spawnFlash(world.combat, muzzle, ship.velocity, 9.f);
+                    npc.nextGun ^= 1;
+                    npc.fireCooldown = gunInterval * stationFireSlowdown * (0.85f + 0.3f * combat::nextRandom(world.combat));
+                }
+
+                continue;
+            }
+
+            if (playerDown || (playerNearStation && !npc.raider))
             {
                 // The station would protect the player (or there is nothing left to shoot): back off and wait.
                 const Vec3 away = world.stationActive ? ship.position - world.station.position : ship.position - player.position;
@@ -379,6 +441,173 @@ namespace piracy {
         }
 
         events.push_back({combat::CombatEventKind::PiratesArrived, count});
+    }
+
+    /* ---- Raids and outposts ------------------------------------------------------------------- */
+
+    /** Launches a raid of `count` raiders on the station, from about 9 km out. */
+    inline void spawnRaid(World& world, std::uint64_t missionId, int count, std::mt19937& rng)
+    {
+        std::uniform_real_distribution<float> unit(0.f, 1.f);
+        const float angle = unit(rng) * 6.2832f;
+        const Vec3 direction = normalized(Vec3{std::cos(angle), (unit(rng) - 0.5f) * 0.3f, std::sin(angle)});
+        const Vec3 centre = world.station.position + direction * 9000.f;
+
+        for (int i = 0; i < count; ++i)
+        {
+            const Vec3 offset{static_cast<float>(i % 3) * 450.f - 450.f, static_cast<float>(i / 3) * 400.f, static_cast<float>(i) * 120.f};
+            spawnPirate(world, centre + offset, true, missionId, rng, true);
+        }
+    }
+
+    /**
+     * Builds the outpost for strike mission `missionId`: the station's hull at half size, out in
+     * open space outpostDistance from the station (further, if that would be inside a planet), in a
+     * direction that depends only on the mission, so it is in the same place every visit.
+     */
+    inline void placeOutpost(World& world, std::uint64_t missionId)
+    {
+        Outpost& outpost = world.outpost;
+        outpost.station = world.station;
+        outpost.station.dockingPort.valid = false;
+        outpost.station.rotationSpeed = 0.f;
+
+        for (Vec3& vertex : outpost.station.model.vertices)
+            vertex = vertex * 0.5f;
+
+        const float angle = static_cast<float>(missionId % 3600u) * 0.1f * 0.0174533f;
+        const float tilt = (static_cast<float>((missionId / 3600u) % 100u) / 100.f - 0.5f) * 0.4f;
+        const Vec3 direction = normalized(Vec3{std::cos(angle), tilt, std::sin(angle)});
+        float distance = outpostDistance;
+
+        const auto insideAPlanet = [&](const Vec3& position)
+        {
+            for (const Planet& planet : world.planets)
+            {
+                if (length(position - planet.position) < planet.radius * 1.6f)
+                    return true;
+            }
+
+            return world.star.isStar && length(position - world.star.position) < world.star.radius * 2.f;
+        };
+
+        while (insideAPlanet(world.station.position + direction * distance) && distance < outpostDistance * 6.f)
+            distance += 10000.f;
+
+        outpost.station.position = world.station.position + direction * distance;
+        outpost.hull = outpostMaxHull;
+        outpost.missionId = missionId;
+        outpost.turretCooldown = 2.f;
+        outpost.nextTurret = 0;
+        outpost.defendersLaunched = false;
+        outpost.active = true;
+    }
+
+    /** Where the outpost's four turrets sit, in world space: on top, below and to either side, just clear of the hull. */
+    inline std::array<Vec3, 4> outpostTurrets(const Outpost& outpost)
+    {
+        const float reach = combat::outpostRadius(outpost) * 0.62f;
+        const Vec3 centre = outpost.station.position;
+        return {centre + outpost.station.axisY * reach, centre - outpost.station.axisY * reach,
+                centre + outpost.station.axisX * reach, centre - outpost.station.axisX * reach};
+    }
+
+    /**
+     * One step of the outpost: its turrets fire at the player (leading them) whenever they are in
+     * reach, taking turns, and when the player first comes near, two fighters launch to defend it.
+     */
+    inline void updateOutpost(World& world, float dt, std::vector<combat::CombatEvent>& events, std::mt19937& rng)
+    {
+        Outpost& outpost = world.outpost;
+
+        if (!outpost.active || world.combat.player.destroyed)
+            return;
+
+        const Ship& player = world.playerShip;
+        const float distance = length(player.position - outpost.station.position);
+
+        if (!outpost.defendersLaunched && distance < defenderTrigger)
+        {
+            outpost.defendersLaunched = true;
+
+            for (int i = 0; i < 2; ++i)
+            {
+                const Vec3 offset{static_cast<float>(i) * 600.f - 300.f, 500.f, 0.f};
+                spawnPirate(world, outpost.station.position + offset + normalized(player.position - outpost.station.position) * (combat::outpostRadius(outpost) + 600.f), true, 0, rng);
+            }
+
+            events.push_back({combat::CombatEventKind::OutpostSighted, -1});
+        }
+
+        outpost.turretCooldown = std::max(0.f, outpost.turretCooldown - dt);
+
+        if (outpost.turretCooldown > 0.f)
+            return;
+
+        const auto turrets = outpostTurrets(outpost);
+        const Vec3 turret = turrets[static_cast<std::size_t>(outpost.nextTurret % 4)];
+        outpost.nextTurret = (outpost.nextTurret + 1) % 4;
+        const float reach = length(player.position - turret);
+
+        if (reach > turretRange)
+            return;
+
+        // Lead the player, as a pirate does.
+        Vec3 aimPoint = player.position;
+
+        for (int iteration = 0; iteration < 2; ++iteration)
+            aimPoint = player.position + player.velocity * (length(aimPoint - turret) / turretBoltSpeed);
+
+        const Vec3 aim = normalized(aimPoint - turret);
+        world.combat.bolts.push_back({turret, aim * turretBoltSpeed, turretRange / turretBoltSpeed, turretDamage, false, true});
+        combat::spawnFlash(world.combat, turret, Vec3{}, 11.f);
+        outpost.turretCooldown = turretInterval;
+    }
+
+    /**
+     * Starts what defence and strike missions in this system need. A defence mission's raid comes
+     * (its raiders still flying) whenever the player is out near the station and none of its
+     * raiders are in play. A strike mission's outpost is built if it isn't there, and taken away
+     * when no strike mission here wants it any more.
+     */
+    inline void directAssaults(World& world, const std::vector<const Mission*>& defences, const std::vector<const Mission*>& strikes, bool playerOut, std::vector<combat::CombatEvent>& events, std::mt19937& rng)
+    {
+        const bool nearStation = world.stationActive && length(world.playerShip.position - world.station.position) < raidTriggerDistance;
+
+        for (const Mission* mission : defences)
+        {
+            if (mission->piratesLeft <= 0 || !playerOut || !nearStation || activePirates(world, mission->id) > 0)
+                continue;
+
+            spawnRaid(world, mission->id, mission->piratesLeft, rng);
+            events.push_back({combat::CombatEventKind::RaidStarted, mission->piratesLeft});
+        }
+
+        const Mission* wanted = nullptr;
+
+        for (const Mission* mission : strikes)
+        {
+            if (mission->piratesLeft > 0)
+            {
+                wanted = mission;
+                break;
+            }
+        }
+
+        if (!wanted)
+        {
+            world.outpost.active = false;
+            return;
+        }
+
+        if (!world.outpost.active || world.outpost.missionId != wanted->id)
+            placeOutpost(world, wanted->id);
+    }
+
+    /** True while any raider is in play: the station's no-fire zone is lifted so the player can fight them. */
+    inline bool raidUnderway(const World& world)
+    {
+        return std::any_of(world.npcShips.begin(), world.npcShips.end(), [](const NpcShip& npc) { return activePirate(npc) && npc.raider; });
     }
 
     /** Retires every pirate in play (after the player's ship is lost, for instance). */

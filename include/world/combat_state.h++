@@ -43,6 +43,9 @@ namespace combat {
 
         /** True once the hull has reached zero: the ship has been destroyed. */
         bool destroyed = false;
+
+        /** What destroyed it, for the insurance message ("SHOT DOWN", "BURNED UP IN THE ATMOSPHERE"...). */
+        const char* cause = "";
     };
 
     /** HitFlash::ship value meaning the player's own ship. */
@@ -135,6 +138,9 @@ namespace combat {
         /** Bounty earned for pirates destroyed since the scene last collected it, and the bounty missions those pirates belonged to. */
         double bountyEarned = 0.0;
         std::vector<std::uint64_t> missionKills;
+
+        /** Damage pirate fire did to the station since the scene last collected it (a raid, for a defence mission). */
+        float stationDamage = 0.f;
 
         /** What the selected weapon did this step, for the readout. */
         WeaponStatus status = WeaponStatus::Ready;

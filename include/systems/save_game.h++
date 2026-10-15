@@ -26,7 +26,7 @@
 constexpr int saveSlotCount = 3;
 
 /** Bumped whenever the save format changes; older files are still read (unknown keys are ignored, missing ones default). */
-constexpr int saveFormatVersion = 7;
+constexpr int saveFormatVersion = 8;
 
 /** Longest commander name allowed, in characters. */
 constexpr std::size_t maxCommanderNameLength = 16;
@@ -102,6 +102,9 @@ struct SaveGame {
     /** The hull (out of 100), and the last system docked in (-1 for none). */
     float hull = 100.f;
     int lastDockedSystem = -1;
+
+    /** The jump drive fitted (0 stock, 1 Mk1, 2 Mk2). */
+    int jumpDrive = 0;
     std::vector<std::pair<std::string, float>> hatch;
 
     /**
@@ -273,6 +276,7 @@ inline std::string serialiseSave(const SaveGame& save)
     out << "hull=" << save.hull << '\n';
     out << "bounty=" << save.bountyVouchers << '\n';
     out << "lastDocked=" << save.lastDockedSystem << '\n';
+    out << "jumpDrive=" << save.jumpDrive << '\n';
 
     for (const std::uint64_t id : save.takenMissions)
         out << "taken=" << id << '\n';
@@ -405,6 +409,8 @@ inline std::optional<SaveGame> parseSave(const std::string& text)
             save.bountyVouchers = std::max(0.0, std::atof(value.c_str()));
         else if (key == "lastDocked")
             save.lastDockedSystem = std::atoi(value.c_str());
+        else if (key == "jumpDrive")
+            save.jumpDrive = std::clamp(std::atoi(value.c_str()), 0, 2);
         else if (key == "taken")
             save.takenMissions.push_back(std::strtoull(value.c_str(), nullptr, 10));
         else if (key == "mission")

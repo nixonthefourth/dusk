@@ -9,6 +9,7 @@
 #include "objects/cargo.h++"
 #include "objects/fuel_tank.h++"
 #include "objects/hardpoints.h++"
+#include "objects/jump_drive.h++"
 #include "objects/mining_hatch.h++"
 #include "objects/mission.h++"
 #include <cstdint>
@@ -53,6 +54,9 @@ struct Commander {
     bool hasRocketLauncher = false;
     bool hasTurretLaser = false;
     int rockets = 0;
+
+    /** The jump drive fitted: 0 the stock drive, 1 the Mk1, 2 the Mk2 (see jump_drive.h++). */
+    int jumpDrive = 0;
 
     /** Missions taken and not yet finished, and the ids of missions taken recently (left off the boards). */
     std::vector<Mission> missions;

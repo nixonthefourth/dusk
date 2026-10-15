@@ -34,6 +34,9 @@
  *
  * Everything reads world/ship/camera state and draws; nothing here changes the simulation.
  */
+/** Hull temperature at which it starts to burn (the same as impacts::burnThreshold). */
+constexpr float impacts_burnThreshold = 100.f;
+
 class HudRenderer {
 public:
     /** Height of the bottom dashboard; scenes keep their own overlay text clear of it. */
@@ -259,6 +262,10 @@ private:
         };
 
         gauge(centre - 150.f, health.shields / combat::playerMaxShields, style::playerShieldBar, "SH");
+
+        // Hull temperature, only while the hull is warm: amber, red once it's burning.
+        if (world.playerShip.heat > 0.5f)
+            gauge(centre - 164.f, world.playerShip.heat / impacts_burnThreshold, world.playerShip.heat > impacts_burnThreshold ? style::warning : style::caution, "TM");
         gauge(centre + 142.f, health.hull / combat::playerMaxHull, health.hull < combat::playerMaxHull * 0.3f ? style::warning : style::playerHullBar, "HL");
 
         // A red edge for half a second after a hull hit.
@@ -301,7 +308,9 @@ private:
         {
             const float focal = (viewport.height * 0.5f) / std::tan(camera.fov * 0.5f / degrees);
             // Brackets sized to the target: a ship, or the whole station.
-            const float targetRadius = world.target.type == TargetType::Ship ? 260.f : stationBoundingRadius(world.station);
+            const float targetRadius = world.target.type == TargetType::Ship ? 260.f
+                                     : world.target.type == TargetType::Outpost ? stationBoundingRadius(world.outpost.station)
+                                     : stationBoundingRadius(world.station);
             const float halfSize = std::clamp(targetRadius * focal / projected->depth, 12.f, 220.f);
             const sf::Vector2f c = {projected->position.x, projected->position.y};
             const float corner = std::max(5.f, halfSize * 0.35f);
@@ -659,6 +668,10 @@ private:
 
         for (const Asteroid& rock : world.driftingAsteroids)
             plotRock(rock);
+
+        // A pirate outpost shows like the station, in red.
+        if (world.outpost.active)
+            plot(world.outpost.station.position, style::scannerHostile, true, world.target.type == TargetType::Outpost);
 
         for (int i = 0; i < static_cast<int>(world.npcShips.size()); ++i)
         {

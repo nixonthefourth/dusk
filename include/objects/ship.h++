@@ -233,6 +233,20 @@ struct Ship {
     /** Pilot intent: true while the fire key (Space) is held. What fires is the selected hardpoint group. */
     bool fireInput = false;
 
+    /** The jump drive's longest single jump, in light years (fuel permitting). Set from the fitted drive. */
+    float maxJumpLightYears = 1e9f;
+
+    /** Hull temperature from atmospheric friction or a star's corona: 0 is cold, burnThreshold starts burning the hull (see impacts.h++). */
+    float heat = 0.f;
+
+    /** Seconds left of a tumble from a hard knock, during which the spin dies away only slowly and the controls barely bite. */
+    float tumbleTimer = 0.f;
+
+    /** The spin rates (yaw, pitch, roll, radians per second) a tumble is carrying, decaying until it ends. */
+    float tumbleYaw = 0.f;
+    float tumblePitch = 0.f;
+    float tumbleRoll = 0.f;
+
     /* ---- In-system cruise ------------------------------------------------------------------ */
 
     /** True while the in-system cruise drive is engaged. */

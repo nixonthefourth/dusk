@@ -31,7 +31,7 @@
 #include <random>
 
 /** What kind of object the player has locked as a target. Only the station can be targeted for now. */
-enum class TargetType { None, Station, Ship };
+enum class TargetType { None, Station, Ship, Outpost };
 
 /** The player's current target lock. Room for an index once ships or planets become targetable. */
 struct TargetLock {
@@ -39,6 +39,36 @@ struct TargetLock {
 
     /** For a ship target, its index in World::npcShips. */
     int shipIndex = -1;
+};
+
+/**
+ * One contact between the player's ship and something solid in a physics step: what it hit, how
+ * fast they closed (units per second, before the push-out), and where. Recorded by the contact
+ * resolvers so impact damage can be worked out afterwards (see systems/impacts.h++).
+ */
+/**
+ * A pirate outpost: the target of a strike mission. The station's hull at half size, out in open
+ * space, with turrets (see piracy.h++). Weapons damage it; at zero hull it is destroyed.
+ */
+struct Outpost {
+    bool active = false;
+    Station station;
+    float hull = 0.f;
+
+    /** The strike mission it belongs to, and its turrets' state. */
+    std::uint64_t missionId = 0;
+    float turretCooldown = 0.f;
+    int nextTurret = 0;
+
+    /** Whether its defending fighters have launched yet (they do when the player comes near). */
+    bool defendersLaunched = false;
+};
+
+struct ContactRecord {
+    enum class Kind { Star, Planet, Rock } kind = Kind::Rock;
+    float speed = 0.f;
+    Vec3 point;
+    Vec3 normal;
 };
 
 /** Owns all objects that exist in world coordinates. */
@@ -103,6 +133,13 @@ struct World {
 
     /** Weapons: bolts, rockets, explosions and the rest of what combat puts in the world (see combat.h++). */
     combat::CombatState combat;
+
+    /** What the player's ship hit in the latest physics step (planets, the star, rocks), for impact damage. */
+    std::vector<ContactRecord> playerContacts;
+
+    /** A strike mission's pirate outpost, if one is in this system, and the player's latest knock against it. */
+    Outpost outpost;
+    StationImpact outpostImpact;
 
     /**
      * Seconds of simulated time in this system; drives belt orbits and tumbling rocks. A double,
@@ -174,7 +211,7 @@ inline float cruiseMarginAt(const World& world, const Vec3& position)
  * Collision hits are still only recorded by updateWorldCollisions(); this is the minimal response
  * that stops the ship flying through a world it should be skimming.
  */
-inline void resolveShipBodyContact(Ship& ship, const World& world)
+inline void resolveShipBodyContact(Ship& ship, const World& world, std::vector<ContactRecord>* contacts = nullptr)
 {
     const auto resolve = [&](const Planet& body)
     {
@@ -193,6 +230,9 @@ inline void resolveShipBodyContact(Ship& ship, const World& world)
 
         const Vec3 relativeVelocity = ship.velocity - body.velocity;
         const float inwardSpeed = dot(relativeVelocity, normal);
+
+        if (contacts)
+            contacts->push_back({body.isStar ? ContactRecord::Kind::Star : ContactRecord::Kind::Planet, std::max(0.f, -inwardSpeed), body.position + normal * body.radius, normal});
 
         if (inwardSpeed < 0.f)
             ship.velocity -= normal * inwardSpeed;
@@ -224,7 +264,7 @@ inline bool insideAsteroidBelt(const World& world, const Vec3& position)
  * points into it, so a moving rock shoves the ship along rather than passing through it. Rocks are
  * treated as far heavier than the ship. Contact drops the ship out of cruise.
  */
-inline void resolveShipRockContact(Ship& ship, const Asteroid& rock)
+inline void resolveShipRockContact(Ship& ship, const Asteroid& rock, std::vector<ContactRecord>* contacts = nullptr)
 {
     const Vec3 offset = ship.position - rock.position;
     const float distance = length(offset);
@@ -238,6 +278,9 @@ inline void resolveShipRockContact(Ship& ship, const Asteroid& rock)
 
     const float inwardSpeed = dot(ship.velocity - rock.velocity, normal);
 
+    if (contacts)
+        contacts->push_back({ContactRecord::Kind::Rock, std::max(0.f, -inwardSpeed), rock.position + normal * rock.collisionRadius(), normal});
+
     if (inwardSpeed < 0.f)
         ship.velocity -= normal * inwardSpeed;
 
@@ -249,7 +292,7 @@ inline void resolveShipRockContact(Ship& ship, const Asteroid& rock)
  * Keeps a ship outside every asteroid near it, belt rocks and drifting rocks alike. Belt rocks are
  * only generated within reach, and only when the ship is near a belt at all, so this is cheap.
  */
-inline void resolveShipAsteroidContact(Ship& ship, const World& world)
+inline void resolveShipAsteroidContact(Ship& ship, const World& world, std::vector<ContactRecord>* contacts = nullptr)
 {
     constexpr float reach = 3200.f; // largest rock radius plus the ship, with room to spare
 
@@ -258,14 +301,14 @@ inline void resolveShipAsteroidContact(Ship& ship, const World& world)
         // Mined rocks are smaller: the ship bumps into what's left of them.
         procgen::forEachAsteroidNear(belt, ship.position, reach, [&](const Asteroid& rock)
         {
-            resolveShipRockContact(ship, world.miningLedger.shrunk(rock));
+            resolveShipRockContact(ship, world.miningLedger.shrunk(rock), contacts);
         });
     }
 
     for (const Asteroid& rock : world.driftingAsteroids)
     {
         if (length(rock.position - ship.position) < reach)
-            resolveShipRockContact(ship, world.miningLedger.shrunk(rock));
+            resolveShipRockContact(ship, world.miningLedger.shrunk(rock), contacts);
     }
 }
 
@@ -553,6 +596,7 @@ inline bool hasValidTarget(const World& world)
     {
         case TargetType::Station: return world.stationActive;
         case TargetType::Ship: return shipIsTargetable(world, world.target.shipIndex);
+        case TargetType::Outpost: return world.outpost.active;
         case TargetType::None: break;
     }
 
@@ -577,6 +621,9 @@ inline std::optional<Vec3> targetPosition(const World& world)
     if (const NpcShip* npc = targetedShip(world))
         return npc->ship.position;
 
+    if (world.target.type == TargetType::Outpost)
+        return world.outpost.station.position;
+
     return world.station.position;
 }
 
@@ -585,6 +632,9 @@ inline Vec3 targetVelocity(const World& world)
 {
     if (const NpcShip* npc = targetedShip(world))
         return npc->ship.velocity;
+
+    if (world.target.type == TargetType::Outpost)
+        return {};
 
     return hasValidTarget(world) ? stationVelocity(world) : Vec3{};
 }
@@ -597,6 +647,9 @@ inline const char* targetLabel(const World& world)
 
     if (const NpcShip* npc = targetedShip(world))
         return npc->hostile ? "PIRATE" : "SHIP";
+
+    if (world.target.type == TargetType::Outpost)
+        return "OUTPOST";
 
     return "STATION";
 }
@@ -617,6 +670,9 @@ inline void cycleTarget(World& world)
 
     if (world.stationActive)
         candidates.push_back({TargetType::Station, -1, 0.f});
+
+    if (world.outpost.active)
+        candidates.push_back({TargetType::Outpost, -1, 0.f});
 
     // The ships follow the station, nearest first.
     const auto firstShip = static_cast<std::ptrdiff_t>(candidates.size());
@@ -847,8 +903,9 @@ inline void updateWorldPhysics(World& world, float dt, bool integratePlayerShip 
     if (integratePlayerShip)
     {
         const Vec3 shipGravity = gravityOnShip(world);
+        world.playerContacts.clear();
         integrateShipPhysics(world.playerShip, dt, shipGravity);
-        resolveShipBodyContact(world.playerShip, world);
+        resolveShipBodyContact(world.playerShip, world, &world.playerContacts);
     }
 
     orbital::integrateOrbitalPhysics(world.planets, world.star.position, world.star.mass, dt);
@@ -859,7 +916,7 @@ inline void updateWorldPhysics(World& world, float dt, bool integratePlayerShip 
     updateDriftingAsteroids(world, dt);
 
     if (integratePlayerShip)
-        resolveShipAsteroidContact(world.playerShip, world);
+        resolveShipAsteroidContact(world.playerShip, world, &world.playerContacts);
     updateStationOrbit(world, dt);
     updateNpcShips(world, dt);
 
@@ -872,6 +929,12 @@ inline void updateWorldPhysics(World& world, float dt, bool integratePlayerShip 
 
     if (integratePlayerShip && world.stationActive)
         world.stationImpact = station_collision::resolveShipStationCollision(world.playerShip, world.station, stationVelocity(world));
+
+    // An outpost's hull is solid too (it sits still).
+    world.outpostImpact = {};
+
+    if (integratePlayerShip && world.outpost.active)
+        world.outpostImpact = station_collision::resolveShipStationCollision(world.playerShip, world.outpost.station, Vec3{});
 
     updateWorldCollisions(world);
 }

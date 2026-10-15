@@ -200,6 +200,15 @@ private:
         if (planet.hasRing)
             drawRing(target, planet, center, radius);
 
+        // The atmosphere: a faint halo out to its top (15% of the radius), where the air starts to drag and heat.
+        sf::CircleShape halo(radius * 1.15f, 64);
+        halo.setOrigin({radius * 1.15f, radius * 1.15f});
+        halo.setPosition(center);
+        halo.setFillColor(sf::Color::Transparent);
+        halo.setOutlineColor(style::atmosphereHalo);
+        halo.setOutlineThickness(std::max(1.f, radius * 0.012f));
+        target.draw(halo);
+
         drawSphereGrid(target, planet, camera, viewport, viewMatrix, radius);
         drawSilhouette(target, center, radius);
     }

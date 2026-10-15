@@ -180,6 +180,10 @@ int main() {
         if (renderWorld.stationActive)
             stationRenderer.draw(window, renderWorld.station, camera);
 
+        // A strike mission's pirate outpost, if there is one.
+        if (renderWorld.outpost.active)
+            stationRenderer.draw(window, renderWorld.outpost.station, camera);
+
         // A destroyed ship is gone (its explosion is drawn with the combat effects).
         if (!renderWorld.combat.player.destroyed)
             shipRenderer.draw(window, renderWorld.playerShip, camera);

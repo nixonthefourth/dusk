@@ -40,6 +40,8 @@ public:
         if (world.combat.turretFitted)
             drawTurret(target, frame);
 
+        drawHeatGlow(target, frame);
+
         drawParticles(target, frame);
         drawShieldFlashes(target, frame);
         drawBeam(target, frame);
@@ -139,6 +141,29 @@ private:
     static int alphaOf(float fraction, int peak = 255)
     {
         return static_cast<int>(std::clamp(fraction, 0.f, 1.f) * static_cast<float>(peak));
+    }
+
+    /** A hot hull: an orange glow on the ship's leading face, brighter as it heats, turning white-hot past burning. */
+    void drawHeatGlow(sf::RenderTarget& target, const Frame& frame) const
+    {
+        const Ship& ship = frame.world.playerShip;
+
+        if (ship.heat <= 5.f || frame.world.combat.player.destroyed)
+            return;
+
+        const float speed = length(ship.velocity);
+        const Vec3 heading = speed > 1.f ? ship.velocity / speed : shipForward(ship);
+        const auto p = toScreen(frame, ship.position + heading * 150.f);
+
+        if (!p)
+            return;
+
+        // A bow shock: a translucent glow ahead of the nose with a bright rim, and a hot core where the air meets the hull.
+        const float warmth = std::clamp(ship.heat / 200.f, 0.f, 1.f);
+        const float radius = pixels(frame, 110.f + 90.f * warmth, p->second, 3.f, 90.f);
+        disc(target, p->first, radius, style::withAlpha(style::explosionOuter, alphaOf(warmth, 70)));
+        ring(target, p->first, radius * 1.12f, std::max(1.f, radius * 0.06f), style::withAlpha(style::rocketFlame, alphaOf(warmth, 150)));
+        disc(target, p->first, radius * 0.38f, style::withAlpha(warmth > 0.5f ? style::explosionCore : style::rocketFlame, alphaOf(warmth, 150)));
     }
 
     /** The turret on top of the hull: a squat base and a twin barrel along its aim. */

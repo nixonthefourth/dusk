@@ -249,6 +249,9 @@ namespace style {
     inline constexpr sf::Color healthShield{110, 180, 255};
     inline constexpr sf::Color healthHull{248, 132, 63};
 
+    /** A planet's atmosphere, drawn as a faint halo around it. */
+    inline constexpr sf::Color atmosphereHalo{120, 170, 255, 60};
+
     /** Missions and piracy: mission destinations on the chart, pirates on the scanner and in view, the player's shield and hull bars, and the flash of a hull hit. */
     inline constexpr sf::Color missionMarker{120, 230, 140};
     inline constexpr sf::Color scannerHostile{255, 70, 60};

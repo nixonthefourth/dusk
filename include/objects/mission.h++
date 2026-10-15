@@ -11,7 +11,7 @@
 #include <string>
 
 /** The kinds of mission a board can offer. */
-enum class MissionType { Courier, Delivery, Mining, Bounty };
+enum class MissionType { Courier, Delivery, Mining, Bounty, Defence, Strike };
 
 /** A mission type's name, as shown on the board. */
 inline const char* missionTypeName(MissionType type)
@@ -22,6 +22,8 @@ inline const char* missionTypeName(MissionType type)
         case MissionType::Delivery: return "DELIVERY";
         case MissionType::Mining: return "MINING CONTRACT";
         case MissionType::Bounty: return "BOUNTY";
+        case MissionType::Defence: return "STATION DEFENCE";
+        case MissionType::Strike: return "OUTPOST STRIKE";
     }
 
     return "?";
@@ -35,6 +37,10 @@ inline const char* missionTypeName(MissionType type)
  *   Mining     bring `resourceTonnes` of `resource`, from the mining hatch, to `destination`
  *   Bounty     destroy `pirateCount` ships of the `gangName` gang in system `destination`, then
  *              dock anywhere to be paid
+ *   Defence    a raid of `pirateCount` ships of `gangName` is coming for the station in system
+ *              `destination`: destroy them before the station's `integrity` runs out, then dock there
+ *   Strike     destroy the `gangName` gang's outpost in system `destination` (`piratesLeft` is 1
+ *              while it stands), then dock anywhere to be paid
  *
  * Every mission must be finished before `deadline` (on the galaxy clock) or it fails.
  */
@@ -64,6 +70,9 @@ struct Mission {
     std::string gangName;
     int pirateCount = 0;
     int piratesLeft = 0;
+
+    /** Defence: how much of the station's defences are left, in percent; at zero the station falls and the mission fails. */
+    float integrity = 100.f;
 
     /** Who posted it (a name for the board). */
     std::string client;

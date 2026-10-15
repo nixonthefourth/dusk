@@ -72,8 +72,11 @@ struct NpcShip {
     /** Never runs, however damaged (bounty targets fight to the end). */
     bool fearless = false;
 
-    /** The bounty mission this pirate is a target of, or 0. */
+    /** The bounty or defence mission this pirate is a target of, or 0. */
     std::uint64_t missionId = 0;
+
+    /** A raider: it attacks the station (and the player, if the player comes close), ignoring the station's protection. */
+    bool raider = false;
 
     /** Seconds until it can fire again, which of its two guns fires next, seconds spent running, and which way it circles. */
     float fireCooldown = 0.f;

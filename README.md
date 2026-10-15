@@ -2,6 +2,22 @@
 
 ![Flight Demo](demo/demo.png)
 
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![Manual docking](docs/screenshots/docking.png) | ![Dogfight with pirates](docs/screenshots/combat.png) |
+| Manual docking: the permit, the Apollo-style alignment panel and the approach corridor | A dogfight in a poor system: a pirate exploding, shield flashes and red pirate brackets |
+| ![Mining](docs/screenshots/mining.png) | ![Atmospheric entry](docs/screenshots/atmosphere.png) |
+| Mining: twin laser beams cutting ore from a rock | Skimming a planet too fast: the hull glows with a bow shock and starts to burn |
+| ![Outpost strike](docs/screenshots/outpost.png) | ![Galactic chart](docs/screenshots/chart.png) |
+| An outpost strike: rockets streaming in at a pirate outpost | The galactic chart: political colours, the jump-range circle, a mission destination ringed |
+| ![Mission board](docs/screenshots/missions.png) | |
+| A station's mission board | |
+
+The screenshots are rendered with the game's own renderers, HUD and overlays at 1280×720, off-screen, from staged scenes.
+
 `dusk` is a small SFML/C++ experiment that fakes 3D in a 2D window. There is no OpenGL, no depth buffer, no borrowed rendering pipeline underneath it — just a `Vec3` world, a hand-rolled camera and view matrix, a perspective projector, and SFML lines and shapes doing the actual drawing. Everything from vector math to frustum clipping to Newtonian ship physics is written from scratch, on purpose.
 
 Pick PLAY, choose one of three save slots, name your commander (or load one you've already made), and you start docked at a station in a procedurally generated star system: a filled white sun, a handful of orbiting gridded planets, a spinning wireframe space station you can auto-dock with, and a scatter of NPC ships going about their own simple-reflex business — all seeded from one number. Open the galactic chart with `G` to pick any of the galaxy's 1000 systems and jump there, or the system map with `M` to see what's orbiting where.
@@ -24,6 +40,9 @@ The constraint that makes it interesting is that SFML is only allowed to draw pr
 - Asteroid mining: buy the Mining Module (2,400 CR), point the nose at a rock and hold `Space`. Twin laser beams cut ore, fragments of iron, nickel, cobalt, silicates, water ice or platinum fly into a 5 t mining hatch, and the rock shrinks as you mine it. `R` cycles hardpoint groups, ready for weapons.
 - Weapons and combat: pulse lasers, a beam laser, homing rockets and a self-aiming turret laser, sharing a weapon capacitor. NPC ships have shields and hull: they flare, run when their shields fail, and explode with debris. `T` locks ships as well as the station.
 - Procedurally generated missions on every station's board (courier runs, cargo deliveries, mining contracts and pirate bounties), shaped by each system's economy, with deadlines, rewards on docking and destinations ringed on the galactic chart. And piracy: in poor systems, pirate gangs hunt you down. Your ship has shields and hull now, and losing it costs an insurance claim.
+- Collisions with consequences: impacts damage the ship and set it tumbling, ships collide as rigid bodies, planets have atmospheres that drag and heat a fast ship until it burns, and flying into a planet's surface or the star is fatal.
+- Jump drives: the stock drive reaches 18 LY in a jump; the Mk1 and Mk2 upgrades reach 28 and 40 LY on less fuel.
+- Station defence and outpost strike missions: drive off a pirate raid on a station before its defences fall, or destroy a pirate outpost guarded by turrets and fighters.
 - Simple-reflex NPC ships that roam, avoid planets and stars, occasionally head to the station and dock, and periodically "warp out" and back in — no memory, no planning, just current-state reflexes.
 - A living trade economy: every system has its own market, prices follow supply and demand, you buy and sell at stations, and 300 simple-reflex trader agents move goods between systems on their own. Tech systems now really export tech goods, a bug that had left the best goods almost unobtainable.
 - A camera that chases the ship from behind, plus an orbit "showcase" mode.
@@ -68,7 +87,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [x] Object-level collision detection
 - [x] Integrator upgrade: velocity Verlet in place of Explicit Euler
 - [ ] Music and sound
-- [ ] Rigid bodies
+- [x] Rigid bodies: the player's ship and NPC ships collide as rigid spheres sharing momentum; impacts damage and tumble the ship; planets are solid, with atmospheres that heat and burn a fast ship
 
 ### Game
 
@@ -102,7 +121,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [x] Tradeable goods (silicon chips, food, liquor, wines, ores, electronics, furs, animals, books, chemical fuel)
 - [x] Buying and selling goods at stations, with cargo bay upgrades (Mk1 +5 t, Mk2 +10 t)
 - [x] World occupations (mining, engineering and tech, agricultural)
-- [~] Mission variety (live cargo transport, mining, bounty hunting, cargo transport, station defence/offence): courier, delivery, mining and bounty missions exist; station defence and attack are still to come
+- [x] Mission variety (live cargo transport, mining, bounty hunting, cargo transport, station defence/offence): courier, delivery, mining, bounty, station defence and outpost strike missions
 - [x] NPC interactions — NPC ships roam, dock, and warp on their own; nothing talks to the player yet
 - [x] HUD
   - [x] Thrust
@@ -111,7 +130,7 @@ Checked-off items are implemented today; everything else is a future direction, 
 - [x] Physics
   - [x] Object-level collision hitboxes
   - [x] Fuel expenditure (mass matters)
-- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear): cargo bays, fuel tanks, the docking computer, both chart scanners, the mining module and four weapons exist; jump drives are still to come
+- [~] Upgrades (docking computers, guns, scanners, fuel tanks, jump drives, mining gear): cargo bays, fuel tanks, jump drives, the docking computer, both chart scanners, the mining module and four weapons exist
 - [x] Save/load: three commander slots, named commanders, saving at stations
 - [x] Docking: request a slot from the station, then dock by hand or with the docking computer; NPCs dock, launch and queue for the slot visibly; every docking pays a Space Union fee
 - [~] Space stations: small, medium, large — one procedurally placed small station (`station_s.obj`) per eligible system today
@@ -185,7 +204,7 @@ Once you're in a system:
 
 - `G`: open the galactic chart.
 - `M`: open the system map.
-- `T`: step the target lock through the station, then the visible ships within 25 km (nearest first), then nothing. See [Weapons And Combat](#weapons-and-combat).
+- `T`: step the target lock through the station, a strike mission's pirate outpost (if there is one), then the visible ships within 25 km (nearest first), then nothing. See [Weapons And Combat](#weapons-and-combat).
 - `C`: ask the station for a docking slot (within 20 km), or give up the request or permit. The prompt shows the 15 CR docking fee. See [Manual Docking](#manual-docking).
 - `V`: the docking computer (a paid upgrade). With a permit it flies the approach; without one it asks for a permit and engages once it's granted. `C` or `V` hands control back while that is still possible.
 - With a permit, close to the station (docking mode): speeds become relative to the station and capped by a limit that tightens near the slot, and `Shift` + `A`/`D`/`Q`/`E` slides the ship instead of turning it. A key card appears on screen.
@@ -251,6 +270,7 @@ include/
     mining_hatch.h++    (mined resources and the hatch)
     hardpoints.h++      (hardpoint kinds and muzzle positions)
     mission.h++         (the Mission type)
+    jump_drive.h++      (jump drive range and fuel use)
     fuel_tank.h++
     star.h++
     collision_body.h++
@@ -280,6 +300,7 @@ include/
     mining.h++
     combat.h++
     missions.h++
+    impacts.h++
     piracy.h++
     station_collision.h++
     orbital_physics.h++
@@ -695,7 +716,7 @@ Dusk separates **detection**, which records that two things touch, from **respon
 
 These run inside `updateWorldPhysics()` and move the ship:
 
-- **`resolveShipBodyContact()`.** If the ship (player or visible NPC) has sunk into a planet or the star, it is moved back to the surface along the line from the body's centre. It then loses the part of its velocity, relative to that body, that points inward, and drops out of cruise. That lets you skim a planet but never fly through it. The menu scene's placeholder star isn't a real star (`isStar` is false), so it is never solid.
+- **`resolveShipBodyContact()`.** If the ship (player or visible NPC) has sunk into a planet or the star, it is moved back to the surface along the line from the body's centre. It then loses the part of its velocity, relative to that body, that points inward, and drops out of cruise. That lets you skim a planet but never fly through it. The menu scene's placeholder star isn't a real star (`isStar` is false), so it is never solid. For the player's ship, each contact's closing speed is also recorded, and touching a planet too fast, or the star at all, is fatal (see [Collisions And Atmospheres](#collisions-and-atmospheres)).
 - **`resolveShipRockContact()`,** called for every belt rock and drifting rock within reach by `resolveShipAsteroidContact()`. It does the same against a rock, treated as a sphere at 85% of its jagged radius so grazing a spike doesn't snag. Velocity is taken relative to the rock, so a passing belt rock shoves you along with it. Rocks are treated as far heavier than the ship, so they never move.
 
 The station *does* have a contact response now, for the player's ship: its own model is the collider, so the hull and the walls of the docking slot are solid (see [Manual Docking](#the-station-is-solid)). NPC ships don't collide with it; they follow the slot exactly. The planets and asteroids keep their own responses, described above.
@@ -1075,6 +1096,8 @@ A fully loaded freighter is a sluggish one. That only affects flying by hand, si
 | Docking Computer | 2,500 CR | the `V` key: auto-docking once the station grants a slot (see [Docking Computer](#docking-computer)) |
 | Economics Scanner | 1,500 CR | the galactic chart shows every system's exports (see [Scanners](#scanners-and-what-the-chart-knows)) |
 | Political Scanner | 1,000 CR | the chart shows every system's development, and colours its dots |
+| Jump Drive Mk1 | 3,800 CR | jumps up to 28 LY (stock: 18) on 0.12 t of fuel per LY (see [Jump Drives](#jump-drives)) |
+| Jump Drive Mk2 | 7,500 CR | jumps up to 40 LY on 0.09 t per LY; replaces the Mk1 (traded in at half price) |
 | Mining Module | 2,400 CR | two mining lasers and a 5 t mining hatch (see [Mining](#mining)); a one-off, like the scanners |
 | Pulse Laser | 1,800 CR | twin fixed lasers firing fast bolts (see [Weapons And Combat](#weapons-and-combat)) |
 | Beam Laser | 3,200 CR | a fixed continuous beam: the most damage, the most energy |
@@ -1131,6 +1154,7 @@ A save (`SaveGame` in `include/systems/save_game.h++`) holds:
 | `pulseLaser`, `beamLaser`, `rocketLauncher`, `turretLaser`, `rockets` | which weapons have been bought, and the rockets left in the launcher |
 | `mission` | one line per active mission, its fields separated by `|` (`missions::encodeMission()`) |
 | `taken`, `bounty`, `hull`, `lastDocked` | recently taken mission ids (left off the boards), unpaid bounty, the ship's hull, and the last system docked in |
+| `jumpDrive` | the jump drive fitted (0 stock, 1 Mk1, 2 Mk2) |
 | `galaxyTime` | the trading economy's clock, in game seconds |
 | `stocks` | every market stock that has moved a few percent from its baseline |
 | `agents` | all 300 trader agents: where each is, where it's going, what it carries |
@@ -1183,7 +1207,7 @@ agent=412,415,2120.6,Wines,50,9
 savedAt=2026-10-05 20:44
 ```
 
-Version 2 added the hold, the bay and the trading economy; version 3 added the fuel tank and the docking computer; version 4 added the two scanners; version 5 added the mining module, the selected hardpoint and the mining hatch; version 6 added the four weapons and the rocket count; version 7 added missions, bounties, the hull and the last system docked in. Older saves still load: a version 1 save comes back with an empty hold, no bay and a fresh economy, and a version 2 or 3 save comes back with whatever it had and no scanners (the chart shows `UNKNOWN` until you buy them). A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
+Version 2 added the hold, the bay and the trading economy; version 3 added the fuel tank and the docking computer; version 4 added the two scanners; version 5 added the mining module, the selected hardpoint and the mining hatch; version 6 added the four weapons and the rocket count; version 7 added missions, bounties, the hull and the last system docked in; version 8 added the jump drive and, on each mission line, a defence mission's station integrity (version 7 mission lines, without it, still load). Older saves still load: a version 1 save comes back with an empty hold, no bay and a fresh economy, and a version 2 or 3 save comes back with whatever it had and no scanners (the chart shows `UNKNOWN` until you buy them). A save is around 60–90 KB, almost all of it `stock=` lines, because many markets sit a little off their baseline. Only stocks more than about 4% from baseline are written, and numbers are rounded to tenths; on loading, the restored economy tracks the live one closely (a test found a mean price difference of 0.13% ten minutes later).
 
 Three choices keep it robust:
 
@@ -1259,6 +1283,56 @@ The scanner turns "probably" into the exact two to four goods. And a station's o
 **Not remembered.** A system's exports and development stay hidden until you own the scanner even after you've visited it. That keeps the rule simple, but it's a choice: a "discovered systems" memory would be an easy addition if you'd rather visiting revealed things.
 
 **How it's built.** The scene hands the chart a small `ChartIntel` struct (`development`, `exports`), set from the commander's two scanner flags, every time it draws. The chart never draws the hidden information and then covers it up: for an unknown system it draws `UNKNOWN`, and `systemColor()` returns one neutral colour for every dot (`style::chartUnscanned`). The scanners are saved as `economicsScanner` and `politicalScanner`.
+
+## Collisions And Atmospheres
+
+Hitting things now has consequences (`include/systems/impacts.h++`).
+
+### Impacts
+
+Every knock the player's ship takes is measured by its **closing speed**: rocks, the station's hull, an outpost's hull and other ships. The contact resolvers record each one (`ContactRecord`) before pushing the ship out. A knock above 25 u/s does `(speed − 25) × 0.35` damage, shields first, as for weapons fire:
+
+| Closing speed | 20 u/s | 50 u/s | 100 u/s | 200 u/s | 400 u/s |
+| --- | --- | --- | --- | --- | --- |
+| Damage | 0 | 8.8 | 26.2 | 61.2 | 131.2 |
+
+An off-centre knock also sets the ship **tumbling**: a spin about the axis the blow would turn it on, up to 2.5 rad/s, lasting 0.5–2.5 seconds depending on how hard it was. During it the spin dies away only slowly and the controls barely bite. A ship that hit a rock off-centre at 171 u/s lost 51 shield points and spun through 60° before it was steady again.
+
+### Ships are rigid bodies
+
+The player's ship and NPC ships collide with each other as spheres. They are pushed apart in proportion to their masses, the impulse along the line between them is shared with some bounce (restitution 0.35), and both take damage from the closing speed. In a head-on collision at 200 u/s closing speed, momentum was conserved exactly (2,100 before, 2,100 after), the player's shields absorbed 60 of the 61 points, and the NPC lost its shields and 21 hull points. Ships threading the station's slot, docked or warped out don't collide.
+
+### Planets, the star, and air
+
+- **Planets are solid and fatal.** Touching a planet's surface faster than 40 u/s destroys the ship (`CRASHED INTO A PLANET`). Slower than that, it settles on the surface: drifting down at 30 u/s, the ship came to rest undamaged.
+- **The star destroys a ship on contact** (`FLEW INTO THE STAR`).
+- **Atmospheres.** Every planet has one, reaching 15% of its radius above the surface, drawn as a faint blue halo around the planet. Its density rises as the square of the depth into it. Inside, the air **drags** the ship's velocity toward the planet's own (losing up to 70% a second at the surface), cruise can't be held, and friction **heats the hull** in proportion to the speed above 150 u/s and the density. The hull also cools at 30° a second, so heat only builds when friction outpaces that.
+- **The corona.** A star has one reaching 60% of its radius, and it heats a ship however slowly it moves.
+- **Burning.** Past 100° the hull burns, at 0.6 hull points a second per degree over (`BURNED UP IN THE ATMOSPHERE`, `BURNED UP IN THE STAR'S CORONA`).
+- **What you see.** A hot hull glows with a bow shock on its leading face (a translucent glow, a bright rim and a white-hot core), throws off streams of plasma, and a temperature gauge (TM) appears beside the shield gauge.
+
+Measured, diving nose-down from 3.5 km above a planet with flight assist holding the speed:
+
+| Dive speed | Peak hull temperature | Outcome |
+| --- | --- | --- |
+| 200 u/s | 0° | crashed after 19.5 s |
+| 400 u/s | 23° | crashed after 10.7 s |
+| 700 u/s | 179° (burning) | crashed after 6.0 s |
+| 1,100 u/s | 200° (burning) | crashed after 3.6 s |
+
+Parking 15 km above a star, inside its corona, burned the ship up after 13.8 seconds. The insurance message now says what happened: `CRASHED INTO A PLANET`, `SHOT DOWN`, `WRECKED ON A ROCK` and so on.
+
+## Jump Drives
+
+Every ship has a jump drive, which limits how far a **single** jump can reach, as well as how much fuel it burns (`include/objects/jump_drive.h++`). The jump range is now the lesser of what the fuel allows and what the drive allows (`jumpRangeLightYears()`). The galactic chart's range circle and reachable systems follow it.
+
+| Drive | Price | Longest jump | Fuel per LY | Range on a full stock tank (6 t) |
+| --- | --- | --- | --- | --- |
+| Stock | fitted | 18 LY | 0.15 t | 40 LY |
+| Mk1 | 3,800 CR | 28 LY | 0.12 t | 50 LY |
+| Mk2 | 7,500 CR (the Mk1 traded in at half price) | 40 LY | 0.09 t | 67 LY |
+
+A stock drive means some mission destinations (up to 22 LY away) need two jumps; their deadlines allow for that. Tested through the scene: 18 LY with a full tank on the stock drive (the fuel alone would have allowed 40), 28 LY at 0.12 t a light year after buying the Mk1, and 40 LY after the Mk2.
 
 ## Mining
 
@@ -1448,6 +1522,8 @@ Every station has a **mission board**, on its MISSIONS page. There are four kind
 | **Courier** | carry a sealed package of data (a diplomatic dispatch, survey data, a bank transfer key...) to a station up to 22 LY away; it takes no hold space | 120 CR + 22 CR per LY (plus up to 40), on docking there |
 | **Delivery** | carry 2–8 t of mission cargo (medical supplies, reactor coolant, relief rations...) to a station; it takes hold space and adds mass | 150 CR + 14 CR a tonne + 24 CR per LY (plus up to 50), on docking there |
 | **Mining contract** | bring some tonnes of a resource from your mining hatch to a station (usually this one) | the resource's contract price × 1.3, on docking there with enough in the hatch; the ore is handed over |
+| **Station defence** | a raid of 3–5 pirate ships is coming for a station (this one or one nearby): destroy them all before the station's defences fall | 700 CR + 160 CR a raider + 20 CR per LY (plus up to 100), on docking at that station; each raider also earns the usual pirate bounty |
+| **Outpost strike** | destroy a pirate gang's outpost (this system or one nearby), defended by turrets and fighters | 1,500 CR + 25 CR per LY (plus up to 200), on docking **anywhere** once it's destroyed |
 | **Bounty** | destroy a named pirate gang (1–3 ships) raiding a system (this one or one nearby) | 350 CR a ship + 20 CR per LY (plus up to 80), on docking **anywhere** once they're all destroyed; each kill also earns the usual pirate bounty |
 
 Mining contract prices per tonne are iron 60, silicates 50, water ice 70, nickel 90, cobalt 160 and platinum 420 CR. The contracts are what the mining hatch is for: they finally give mined ore somewhere to go.
@@ -1456,14 +1532,14 @@ Mining contract prices per tonne are iron 60, silicates 50, water ice 70, nickel
 
 A board isn't stored. It is generated from the galaxy seed, the system and the galaxy clock in half-hour steps (`missions::missionBoard()`), so the same station shows the same 4–7 missions until the half hour turns, and keeping a thousand boards costs nothing. A mission you have taken is left off the board (`Commander::takenMissions`).
 
-What a board offers follows the system. The base weights are courier 3, delivery 3, mining 2 and bounty 1.5. Mining systems double the mining contracts, farming systems post more deliveries, and tech systems more courier runs. Poor systems post many more bounties, and progressive ones far fewer. Measured over all 4,000 boards of four refreshes:
+What a board offers follows the system. The base weights are courier 3, delivery 3, mining 2, bounty 1.5, station defence 0.9 and outpost strike 0.7. Mining systems double the mining contracts, farming systems post more deliveries, and tech systems more courier runs. Poor systems post many more bounties, defences and strikes, and progressive ones far fewer. Measured over all 4,000 boards of four refreshes:
 
-| System | Courier | Delivery | Mining | Bounty |
-| --- | --- | --- | --- | --- |
-| poor, mining | 20% | 20% | 32% | 29% |
-| poor, agricultural | 21% | 31% | 19% | 29% |
-| developing, tech | 41% | 25% | 20% | 14% |
-| progressive, agricultural | 28% | 46% | 21% | 6% |
+| System | Courier | Delivery | Mining | Bounty | Defence | Strike |
+| --- | --- | --- | --- | --- | --- | --- |
+| poor, mining | 17% | 15% | 25% | 23% | 11% | 9% |
+| poor, agricultural | 18% | 26% | 15% | 22% | 10% | 9% |
+| developing, tech | 36% | 22% | 17% | 12% | 7% | 5% |
+| progressive, agricultural | 27% | 41% | 21% | 5% | 5% | 2% |
 
 No board is ever empty, and every destination is a station within 22 LY.
 
@@ -1515,6 +1591,20 @@ A gang appears 6.5–9 km away and comes for you: `PIRATES! 2 SHIPS CLOSING IN`.
 Each pirate destroyed earns a **150 CR bounty**, collected the next time you dock (`PIRATE DESTROYED: BOUNTY +150 CR (PAID AT A STATION)`). A pirate that leaves play is *retired*, and its slot in `World::npcShips` is reused for the next pirate, so the system's traffic doesn't grow with every encounter.
 
 **Bounty targets:** when you are in the system named by a bounty mission, out in open space, its gang appears (`BOUNTY TARGETS SIGHTED`) whenever none of it is in play. If you leave before finishing them, the rest are waiting when you come back.
+
+### Raids and outposts
+
+**Station defence.** When you are within 30 km of the station a defence mission names, out of the dock, its raid begins (`RAID! 4 SHIPS ATTACKING THE STATION: WEAPONS FREE`). Raiders come in from 9 km out and bombard the station from about 2.4 km, firing at half their dogfighting rate. Unlike other pirates they ignore the station's protection, and **the station's no-fire zone is lifted** while any raider is in play, so you can fight them where they are. A raider turns on you if you come within 1.8 km of it, or for six seconds after you hit it.
+
+Every raider hit on the station wears down its defences, shown on the tracker (`DEFEND JorEl Minor STATION: 4 RAIDERS, STATION 88%`). They can take 1,200 points of damage; at zero the station's defences fall and the mission fails (`THE STATION'S DEFENCES FELL: MISSION FAILED`). Left undefended, a five-raider raid brought them down in 65 seconds. An earlier tuning, at 600 points and full-rate fire, fell in 32 seconds, too quick to arrive and fight. Destroy every raider, then dock at that station to be paid.
+
+**Outpost strike.** A strike mission's outpost is built when you are in its system (`placeOutpost()`): the station's hull at half size, 45 km from the station in a direction that depends only on the mission, so it is in the same place on every visit (and pushed further out if that would put it inside a planet).
+
+- **Its defences.** It has 450 hull points and four turrets, on top, below and to either side, that take turns firing at you within 2.6 km, leading your ship: 4 damage a bolt, a bolt every 0.45 seconds. When you first come within 12 km, two fighters launch to defend it (`OUTPOST FIGHTERS LAUNCHING`).
+- **Destroying it.** Every weapon damages it, and rockets that burst near it count. It goes up in a string of explosions (`OUTPOST DESTROYED`), and then you dock anywhere to be paid.
+- **Finding it.** It shows red on the scanner, `T` can lock it (`OUTPOST`), its hull is solid, and the galactic chart rings its system.
+
+Measured: a pulse laser destroys it in 14.4 seconds, a full rack of 12 rockets in 6.5. Its turrets hit a ship sitting 1.5 km off its hull 21 times in 10 seconds.
 
 ### Your ship can be destroyed
 
@@ -2292,7 +2382,8 @@ This is still intentionally small:
 - OBJ loading only extracts vertices, wire edges, and triangulated faces for culling; materials, UVs, and normals are ignored entirely.
 - Collision detection is object-level and spherical, and NPC ships don't participate in it at all yet — there's no per-triangle or mesh-accurate collision either.
 - Missions don't exist yet, so trading is the only way to earn credits.
-- Combat and piracy: ordinary NPC ships still don't fight back; only pirates do. There is no law beyond that: destroying traders has no consequences, no reputation and no fines. Pirates all fly the same hull with the same guns, ships don't collide with each other, and wrecks leave nothing to salvage.
+- Combat and piracy: ordinary NPC ships still don't fight back; only pirates, raiders and outposts do. There is no law beyond that: destroying traders has no consequences, no reputation and no fines. Pirates all fly the same hull with the same guns, and wrecks leave nothing to salvage.
+- Collisions: ships are spheres and the station and outposts are meshes; there is no torque-accurate rigid-body solver (a tumble is a spin about the knock's axis that decays), and NPC ships don't take impact or atmospheric damage of their own except in collisions with the player.
 - Missions: there is no reputation or rank, so every board offers the same kinds of job to everyone; mission cargo can't be jettisoned; and a bounty target that runs isn't possible (they fight to the end), so a bounty can only fail by its deadline.
 - Mining: hatch resources can't be sold at the market; they go to mining contracts. Mined rocks are whole again after a jump or a reload. The lasers have no heat or power cost, don't affect ships or the station, and NPCs don't mine.
 - Hull contacts only fine you: there is no hull damage, no repair and no insurance. NPC ships pass through the station and through the player's ship.

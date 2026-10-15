@@ -177,10 +177,10 @@ namespace missions {
         return static_cast<std::int64_t>(std::floor(time / boardRefreshSeconds));
     }
 
-    /** How likely each type is on a board in a system like `info`: relative weights for courier, delivery, mining, bounty. */
-    inline std::array<float, 4> typeWeights(const SystemInfo& info)
+    /** How likely each type is on a board in a system like `info`: relative weights for courier, delivery, mining, bounty, defence and strike. */
+    inline std::array<float, 6> typeWeights(const SystemInfo& info)
     {
-        std::array<float, 4> weights = {3.f, 3.f, 2.f, 1.5f};
+        std::array<float, 6> weights = {3.f, 3.f, 2.f, 1.5f, 0.9f, 0.7f};
 
         if (info.occupation == "Mining")
             weights[2] *= 2.2f;
@@ -190,9 +190,17 @@ namespace missions {
             weights[0] *= 1.6f;
 
         if (info.economyTier == EconomyTier::Poor)
+        {
             weights[3] *= 2.6f;
+            weights[4] *= 2.f;
+            weights[5] *= 2.2f;
+        }
         else if (info.economyTier == EconomyTier::Progressive)
+        {
             weights[3] *= 0.4f;
+            weights[4] *= 0.5f;
+            weights[5] *= 0.3f;
+        }
 
         return weights;
     }
@@ -240,7 +248,7 @@ namespace missions {
         std::uniform_real_distribution<float> unit(0.f, 1.f);
 
         const std::vector<int> destinations = destinationsNear(galaxy, system);
-        const std::array<float, 4> weights = typeWeights(here);
+        const std::array<float, 6> weights = typeWeights(here);
         const int count = std::uniform_int_distribution<int>(boardMinimum, boardMaximum)(rng);
 
         // Missions on this board expire with it at the latest, so they're all posted at the start of the epoch.
@@ -254,11 +262,13 @@ namespace missions {
             mission.client = clientName(rng);
 
             // Pick a type by weight; courier and delivery need somewhere to go.
-            const float roll = unit(rng) * (weights[0] + weights[1] + weights[2] + weights[3]);
-            MissionType type = roll < weights[0] ? MissionType::Courier
-                             : roll < weights[0] + weights[1] ? MissionType::Delivery
-                             : roll < weights[0] + weights[1] + weights[2] ? MissionType::Mining
-                             : MissionType::Bounty;
+            float roll = unit(rng) * (weights[0] + weights[1] + weights[2] + weights[3] + weights[4] + weights[5]);
+            int picked = 0;
+
+            while (picked < 5 && roll >= weights[static_cast<std::size_t>(picked)])
+                roll -= weights[static_cast<std::size_t>(picked++)];
+
+            MissionType type = static_cast<MissionType>(picked);
 
             if (destinations.empty() && (type == MissionType::Courier || type == MissionType::Delivery))
                 type = MissionType::Mining;
@@ -306,6 +316,33 @@ namespace missions {
                     const float distance = distanceBetween(galaxy, system, mission.destination);
                     mission.reward = std::round(60.0 + mission.resourceTonnes * resourceContractPrice(mission.resource) * 1.3 + 18.0 * distance);
                     mission.deadline = posted + timeAllowance(distance) + 2400.0;
+                    break;
+                }
+
+                case MissionType::Defence:
+                {
+                    // A raid on this station, or one nearby.
+                    mission.destination = destinations.empty() || unit(rng) < 0.6f ? system : farDestination();
+                    mission.gangName = gangName(rng);
+                    mission.pirateCount = std::uniform_int_distribution<int>(3, 5)(rng);
+                    mission.piratesLeft = mission.pirateCount;
+                    mission.integrity = 100.f;
+                    const float distance = distanceBetween(galaxy, system, mission.destination);
+                    mission.reward = std::round(700.0 + 160.0 * mission.pirateCount + 20.0 * distance + 100.0 * unit(rng));
+                    mission.deadline = posted + timeAllowance(distance) + 2400.0;
+                    break;
+                }
+
+                case MissionType::Strike:
+                {
+                    // The outpost is out in this system, or a nearby one.
+                    mission.destination = destinations.empty() || unit(rng) < 0.5f ? system : farDestination();
+                    mission.gangName = gangName(rng);
+                    mission.pirateCount = 1;
+                    mission.piratesLeft = 1;
+                    const float distance = distanceBetween(galaxy, system, mission.destination);
+                    mission.reward = std::round(1500.0 + 25.0 * distance + 200.0 * unit(rng));
+                    mission.deadline = posted + timeAllowance(distance) + 3000.0;
                     break;
                 }
 
@@ -381,6 +418,14 @@ namespace missions {
             case MissionType::Bounty:
                 std::snprintf(buffer, sizeof(buffer), "%s posts a bounty on %s: %d ship%s raiding %s. Destroy them, then dock anywhere to collect.", mission.client.c_str(), mission.gangName.c_str(), mission.pirateCount, mission.pirateCount == 1 ? "" : "s", where.c_str());
                 break;
+
+            case MissionType::Defence:
+                std::snprintf(buffer, sizeof(buffer), "The station at %s expects a raid by %s: %d ships. Be there to drive them off before its defences fall, then dock there to be paid.", where.c_str(), mission.gangName.c_str(), mission.pirateCount);
+                break;
+
+            case MissionType::Strike:
+                std::snprintf(buffer, sizeof(buffer), "%s wants the outpost of %s in %s destroyed. Expect turrets and fighters. Dock anywhere to collect.", mission.client.c_str(), mission.gangName.c_str(), where.c_str());
+                break;
         }
 
         return buffer;
@@ -411,6 +456,20 @@ namespace missions {
                     std::snprintf(buffer, sizeof(buffer), "DESTROY %d OF %s AT %s", mission.piratesLeft, mission.gangName.c_str(), where.c_str());
                 else
                     std::snprintf(buffer, sizeof(buffer), "TARGETS DESTROYED: DOCK ANYWHERE TO COLLECT");
+                break;
+
+            case MissionType::Defence:
+                if (mission.piratesLeft > 0)
+                    std::snprintf(buffer, sizeof(buffer), "DEFEND %s STATION: %d RAIDERS, STATION %.0f%%", where.c_str(), mission.piratesLeft, static_cast<double>(mission.integrity));
+                else
+                    std::snprintf(buffer, sizeof(buffer), "RAID BEATEN OFF: DOCK AT %s", where.c_str());
+                break;
+
+            case MissionType::Strike:
+                if (mission.piratesLeft > 0)
+                    std::snprintf(buffer, sizeof(buffer), "DESTROY THE OUTPOST OF %s AT %s", mission.gangName.c_str(), where.c_str());
+                else
+                    std::snprintf(buffer, sizeof(buffer), "OUTPOST DESTROYED: DOCK ANYWHERE TO COLLECT");
                 break;
         }
 
@@ -484,7 +543,12 @@ namespace missions {
                     break;
 
                 case MissionType::Bounty:
+                case MissionType::Strike:
                     done = mission.piratesLeft <= 0;
+                    break;
+
+                case MissionType::Defence:
+                    done = mission.piratesLeft <= 0 && mission.destination == system;
                     break;
             }
 
@@ -517,14 +581,36 @@ namespace missions {
         return static_cast<int>(before - commander.missions.size());
     }
 
-    /** Records a destroyed bounty target: the mission it belongs to has one fewer ship left. */
+    /** Records a destroyed mission target (a bounty ship, a raider, an outpost): its mission has one fewer left. */
     inline void recordBountyKill(Commander& commander, std::uint64_t missionId)
     {
         for (Mission& mission : commander.missions)
         {
-            if (mission.id == missionId && mission.type == MissionType::Bounty)
+            if (mission.id == missionId && (mission.type == MissionType::Bounty || mission.type == MissionType::Defence || mission.type == MissionType::Strike))
                 mission.piratesLeft = std::max(0, mission.piratesLeft - 1);
         }
+    }
+
+    /**
+     * A raid on the station of defence mission `missionId` did `percent` of damage to its
+     * defences. Returns true if that brought them to nothing: the station has fallen, and the
+     * mission fails (it is removed).
+     */
+    inline bool damageDefendedStation(Commander& commander, std::uint64_t missionId, float percent)
+    {
+        bool fallen = false;
+
+        std::erase_if(commander.missions, [&](Mission& mission)
+        {
+            if (mission.id != missionId || mission.type != MissionType::Defence)
+                return false;
+
+            mission.integrity = std::max(0.f, mission.integrity - percent);
+            fallen = mission.integrity <= 0.f;
+            return fallen;
+        });
+
+        return fallen;
     }
 
     /** Forgets taken-mission ids from boards that have refreshed since (they can't come back anyway), keeping the list short. */
@@ -562,6 +648,8 @@ namespace missions {
         out << number << mission.cargoName << '|' << mission.cargoTonnes << '|' << miningResourceKey(mission.resource) << '|';
         std::snprintf(number, sizeof(number), "%.2f|", static_cast<double>(mission.resourceTonnes));
         out << number << mission.gangName << '|' << mission.pirateCount << '|' << mission.piratesLeft << '|' << mission.client;
+        std::snprintf(number, sizeof(number), "|%.1f", static_cast<double>(mission.integrity));
+        out << number;
         return out.str();
     }
 
@@ -575,7 +663,8 @@ namespace missions {
         while (std::getline(in, field, '|'))
             fields.push_back(field);
 
-        if (fields.size() != 14)
+        // 14 fields from save version 7; 15 (with a defence mission's station integrity) from version 8.
+        if (fields.size() != 14 && fields.size() != 15)
             return std::nullopt;
 
         Mission mission;
@@ -585,7 +674,7 @@ namespace missions {
             mission.id = std::stoull(fields[0]);
             const int type = std::stoi(fields[1]);
 
-            if (type < 0 || type > 3)
+            if (type < 0 || type > 5)
                 return std::nullopt;
 
             mission.type = static_cast<MissionType>(type);
@@ -606,6 +695,9 @@ namespace missions {
             mission.pirateCount = std::max(0, std::stoi(fields[11]));
             mission.piratesLeft = std::max(0, std::stoi(fields[12]));
             mission.client = fields[13];
+
+            if (fields.size() == 15)
+                mission.integrity = std::clamp(std::stof(fields[14]), 0.f, 100.f);
         }
         catch (...)
         {
